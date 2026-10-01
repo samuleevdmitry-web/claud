@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Тендеры{% endblock %} · Velmorium</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Velmorium · тендеры</a>
+    <nav>
+      <a href="/keywords" class="{% if request.url.path.startswith('/keywords') %}active{% endif %}">Ключевые слова</a>
+      <span class="muted" title="Появится на этапе 4">Тендеры</span>
+      <span class="muted" title="Появится на этапе 4">Источники</span>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

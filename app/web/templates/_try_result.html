@@ -1,0 +1,30 @@
+{% if result.relevance %}
+  <p class="status status-{{ result.relevance }}">{{ relevance_labels[result.relevance] }} · score {{ result.score }}</p>
+{% else %}
+  <p class="status status-none">Не сохраняется: товарных ключей нет · score {{ result.score }}</p>
+{% endif %}
+<ul class="reasons">{% for r in result.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+{% if result.categories %}<p>Категории: {{ result.categories|join(', ') }}</p>{% endif %}
+
+<table>
+  {% for field, pos, text in fields %}
+  <tr><th>{% if pos is not none %}Позиция №{{ pos + 1 }}{% else %}{{ field_labels[field] }}{% endif %}</th>
+      <td>{{ highlight(text, matches, field.value, pos) }}</td></tr>
+  {% endfor %}
+</table>
+
+{% if matches %}
+<table class="small">
+  <tr><th>Тип</th><th>Ключ</th><th>Маска</th><th>Поле</th><th>Фрагмент</th></tr>
+  {% for m in matches %}
+  <tr class="{{ 'muted' if m.suppressed }}">
+    <td>{{ {'product': 'товарный ключ', 'marker': 'маркер', 'minus': 'минус-слово', 'code': 'код', 'code_excluded': 'код-исключение'}[m.kind] }}
+        {% if m.strength %}({{ 'сильное' if m.strength == 'strong' else 'среднее' }}){% endif %}
+        {% if m.suppressed %}— не учитывается (внутри товарного ключа или маркера){% endif %}</td>
+    <td>{{ m.label }}</td><td><code>{{ m.mask }}</code></td>
+    <td>{{ field_labels[m.field] }}</td>
+    <td>{{ m.context }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}

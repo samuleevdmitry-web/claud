@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Ключевые слова{% endblock %}
+{% block content %}
+<h1>Ключевые слова</h1>
+
+{% if request.query_params.get('activated') %}
+  <div class="flash">Новая версия применена, все сохранённые тендеры пересчитаны.</div>
+{% endif %}
+{% if upload_error %}<div class="flash flash-error">{{ upload_error }}</div>{% endif %}
+
+<section class="card">
+  <h2>Текущая версия</h2>
+  {% if version %}
+    <p><b>{{ version.filename }}</b> — загружен {{ version.uploaded_at|dt }}{% if version.uploaded_by %}, {{ version.uploaded_by }}{% endif %}</p>
+    <p class="muted">Товарных ключей: {{ version.summary.products }}, маркеров: {{ version.summary.markers }},
+      минус-слов: {{ version.summary.minus_words }}, кодов: {{ version.summary.codes }}
+      (исключений: {{ version.summary.excluded_codes }}), готовых запросов: {{ version.summary.queries }}.
+      Ошибок: {{ version.summary.errors }}, предупреждений: {{ version.summary.warnings }}.</p>
+    <form hx-post="/keywords/reclassify" hx-target="#reclassify-result" hx-swap="innerHTML">
+      <button type="submit">Пересчитать релевантность</button>
+      <span id="reclassify-result"></span>
+    </form>
+  {% else %}
+    <p class="flash flash-error">Активной версии нет — классификация не работает. Загрузите файл.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Загрузить новую версию</h2>
+  <form action="/keywords/preview" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" accept=".xlsx" required>
+    <button type="submit">Проверить файл</button>
+  </form>
+  <p class="muted">Сначала покажем, как разобрались маски. Применение пересчитает все сохранённые тендеры.</p>
+</section>
+
+{% if preview %}
+<section class="card card-accent">
+  <h2>Предпросмотр: {{ preview_filename }}</h2>
+  {% set s = preview.summary() %}
+  <p>Товарных ключей: {{ s.products }}, маркеров: {{ s.markers }}, минус-слов: {{ s.minus_words }},
+     кодов: {{ s.codes }} (исключений: {{ s.excluded_codes }}), запросов: {{ s.queries }}.</p>
+  {% if preview.errors %}
+    <div class="flash flash-error">Ошибок разбора: {{ preview.errors|length }}. Ключи с ошибками работать не будут.</div>
+  {% endif %}
+  {% if preview.is_usable %}
+  <form action="/keywords/activate" method="post">
+    <input type="hidden" name="token" value="{{ preview_token }}">
+    <input type="hidden" name="filename" value="{{ preview_filename }}">
+    {% if preview.errors %}
+      <label><input type="checkbox" name="allow_errors" value="true" required> Применить, несмотря на ошибки</label>
+    {% endif %}
+    <button type="submit">Применить эту версию</button>
+  </form>
+  {% else %}
+    <div class="flash flash-error">Файл нельзя применить: нет обязательных листов или товарных ключей.</div>
+  {% endif %}
+</section>
+{% endif %}
+
+{% set shown = preview or ks %}
+{% if shown and shown.issues %}
+<section class="card">
+  <h2>Ошибки и предупреждения разбора</h2>
+  <table>
+    <tr><th>Уровень</th><th>Лист</th><th>Строка</th><th>Маска</th><th>Сообщение</th></tr>
+    {% for i in shown.issues %}
+    <tr class="{{ 'row-error' if i.level == 'error' else 'row-warning' }}">
+      <td>{{ 'Ошибка' if i.level == 'error' else 'Предупреждение' }}</td>
+      <td>{{ i.sheet }}</td><td>{{ i.row or '' }}</td><td><code>{{ i.mask }}</code></td><td>{{ i.message }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
+{% if version or preview %}
+<section class="card">
+  <h2>Проверить на тексте</h2>
+  <form hx-post="/keywords/try" hx-target="#try-result" class="try-form">
+    <label>Название закупки <input name="title" placeholder="Поставка мягкого инвентаря для нужд ФГБУ «Санаторий …»"></label>
+    <label>Заказчик <input name="customer"></label>
+    <label>Место поставки <input name="delivery_place"></label>
+    <label>Позиции (по одной в строке) <textarea name="positions" rows="3"></textarea></label>
+    <label>Коды ОКПД2/КТРУ (через пробел) <input name="codes"></label>
+    <label>Текст извещения / ТЗ <textarea name="notice" rows="3"></textarea></label>
+    <button type="submit">Классифицировать</button>
+  </form>
+  <p class="muted">Проверка идёт по активной версии файла.</p>
+  <div id="try-result"></div>
+</section>
+{% endif %}
+
+{% if rows %}
+<section class="card">
+  <h2>Разобранные маски{% if preview %} (предпросмотр){% endif %}</h2>
+  <details open><summary>Товарные ключи ({{ rows.products|length }})</summary>
+    <table>
+      <tr><th>Стр.</th><th>Категория</th><th>Ключ</th><th>Маска</th><th>Тип</th><th>Пр.</th><th>Пояснения</th></tr>
+      {% for r in rows.products %}
+      <tr class="{{ 'row-warning' if r.issues }}">
+        <td>{{ r.row }}</td><td>{{ r.category }}</td><td>{{ r.phrase }}</td><td><code>{{ r.mask }}</code></td>
+        <td>{{ r.type }}</td><td>{{ r.priority or '' }}</td>
+        <td class="small">{% for n in r.notes %}<div>{{ n }}</div>{% endfor %}{% for n in r.issues %}<div class="warn">{{ n }}</div>{% endfor %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </details>
+  <details><summary>Маркеры заказчика ({{ rows.markers|length }})</summary>
+    <table>
+      <tr><th>Стр.</th><th>Группа</th><th>Маркер</th><th>Маска</th><th>Пр.</th><th>Пояснения</th></tr>
+      {% for r in rows.markers %}
+      <tr><td>{{ r.row }}</td><td>{{ r.group }}</td><td>{{ r.phrase }}</td><td><code>{{ r.mask }}</code></td>
+        <td>{{ r.priority or '' }}</td>
+        <td class="small">{% for n in r.notes %}<div>{{ n }}</div>{% endfor %}{% for n in r.issues %}<div class="warn">{{ n }}</div>{% endfor %}</td></tr>
+      {% endfor %}
+    </table>
+  </details>
+  <details><summary>Минус-слова ({{ rows.minus|length }})</summary>
+    <table>
+      <tr><th>Стр.</th><th>Группа</th><th>Минус-слово</th><th>Маска</th><th>Сила</th><th>Пояснения</th></tr>
+      {% for r in rows.minus %}
+      <tr><td>{{ r.row }}</td><td>{{ r.group }}</td><td>{{ r.phrase }}</td><td><code>{{ r.mask }}</code></td>
+        <td>{{ r.strength }}</td>
+        <td class="small">{% for n in r.notes %}<div>{{ n }}</div>{% endfor %}{% for n in r.issues %}<div class="warn">{{ n }}</div>{% endfor %}</td></tr>
+      {% endfor %}
+    </table>
+  </details>
+  <details><summary>Коды ОКПД2/КТРУ ({{ rows.codes|length }})</summary>
+    <table>
+      <tr><th>Стр.</th><th>Код</th><th>Классификатор</th><th>Наименование</th><th>Товары</th><th>Пр.</th><th></th></tr>
+      {% for r in rows.codes %}
+      <tr class="{{ 'row-error' if r.excluded }}"><td>{{ r.row }}</td><td><code>{{ r.code }}</code></td><td>{{ r.classifier }}</td>
+        <td>{{ r.name }}</td><td>{{ r.goods }}</td><td>{{ r.priority or '' }}</td><td>{{ 'исключение' if r.excluded }}</td></tr>
+      {% endfor %}
+    </table>
+  </details>
+</section>
+{% endif %}
+{% endblock %}
