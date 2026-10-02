@@ -44,6 +44,12 @@ def _roseltorg() -> SourceAdapter:
     return RoseltorgAdapter()
 
 
+def _eis() -> SourceAdapter:
+    from app.sources.eis import EisAdapter
+
+    return EisAdapter()
+
+
 def _fabrikant() -> SourceAdapter:
     from app.sources.fabrikant import FabrikantAdapter
 
@@ -63,8 +69,9 @@ SOURCES: list[SourceInfo] = [
         "eis",
         "ЕИС напрямую (zakupki.gov.ru)",
         "https://zakupki.gov.ru",
-        "planned",
-        "Нужен сертификат Минцифры (скачивается автоматически); адаптер — после повторной разведки",
+        "api",
+        "Расширенный поиск zakupki.gov.ru, этап «Подача заявок»; сертификат Минцифры скачивается сам",
+        _eis,
     ),
     SourceInfo(
         "onlinecontract",
@@ -109,7 +116,7 @@ SOURCES: list[SourceInfo] = [
         "ТЭК-Торг",
         "https://www.tektorg.ru",
         "manual",
-        "С вашего IP страница открылась; адаптер — после уточнения параметра поиска",
+        "Выдача подгружается скриптом; адаптер — после разведки №3",
     ),
     SourceInfo(
         "bidzaar",
@@ -139,7 +146,13 @@ SOURCES: list[SourceInfo] = [
         "planned",
         "Страница поиска открылась, но без учёта запроса — нужна повторная разведка",
     ),
-    SourceInfo("otc", "OTC.ru", "https://etp.otc.ru", "planned", "Одностраничное приложение — ищем API"),
+    SourceInfo(
+        "otc",
+        "OTC.ru",
+        "https://etp.otc.ru",
+        "manual",
+        "Страница-заглушка антибота вместо выдачи — проверка через Claude in Chrome",
+    ),
     SourceInfo(
         "ugmk",
         "ЭТП УГМК",

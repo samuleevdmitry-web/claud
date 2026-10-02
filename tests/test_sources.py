@@ -406,3 +406,72 @@ def test_fabrikant_search_filters_window_and_status():
     assert "679665242" not in ids  # «Заключение контракта»
     assert "679662098" not in ids  # опубликована 30.09, раньше окна
     assert "679704884" in ids
+
+
+# --------------------------------------------------------------------------- ЕИС напрямую
+
+
+def test_eis_parse_search_fixture():
+    from app.sources.eis import has_next_page, parse_search
+
+    html = (FIX / "eis/search_polotenca.html").read_text(encoding="utf-8")
+    items = parse_search(html)
+    assert len(items) == 50
+    first = items[0]
+    assert first.eis_number == first.external_id == "0372200119926000112"
+    assert first.law == "44-ФЗ" and first.procedure_type == "Запрос котировок в электронной форме"
+    assert first.title.startswith("Поставка полотенец бумажных")
+    assert first.nmck == Decimal("183390.00")
+    assert first.status == "Подача заявок"
+    # Дата без времени — конец дня по Москве
+    assert first.application_deadline.isoformat() == "2026-10-09T20:59:00+00:00"
+    assert first.url.endswith("/zk20/view/common-info.html?regNumber=0372200119926000112")
+    fz223 = next(d for d in items if d.law == "223-ФЗ")
+    assert fz223.customer_inn == "7448064962"
+    assert fz223.url.endswith("/notice223/common-info.html?regNumber=32616427240")
+    assert has_next_page(html)
+
+
+def test_eis_parse_card223_takes_exact_deadline():
+    from app.sources.eis import parse_card, parse_search
+
+    base = parse_search((FIX / "eis/search_polotenca.html").read_text(encoding="utf-8"))[0]
+    d = parse_card((FIX / "eis/card223.html").read_text(encoding="utf-8"), base)
+    assert d.title == "Поставка полотенцесушителей"
+    assert d.application_deadline.isoformat() == "2026-10-08T07:00:00+00:00"  # 10:00 МСК
+    assert d.etp == "АКЦИОНЕРНОЕ ОБЩЕСТВО «ЕДИНАЯ ЭЛЕКТРОННАЯ ТОРГОВАЯ ПЛОЩАДКА»"
+    assert d.customer_name.startswith("ГОСУДАРСТВЕННОЕ АВТОНОМНОЕ УЧРЕЖДЕНИЕ")
+    assert d.revision == base.revision
+
+
+def test_eis_deadline_with_customer_timezone():
+    from app.sources.eis import _deadline
+
+    assert _deadline("09.10.2026 10:00 (МСК+4)").isoformat() == "2026-10-09T03:00:00+00:00"
+
+
+def test_eis_search_params_and_card_fallback():
+    from app.sources.eis import EisAdapter
+
+    html = (FIX / "eis/search_polotenca.html").read_text(encoding="utf-8")
+    seen = []
+
+    def handler(request):
+        if "extendedsearch" in request.url.path:
+            seen.append(dict(request.url.params))
+            return httpx.Response(
+                200, text=html if request.url.params["pageNumber"] == "1" else "<html></html>"
+            )
+        return httpx.Response(404, text="нет")
+
+    adapter = EisAdapter(client=client_for(handler, "https://zakupki.gov.ru"))
+    stubs = asyncio.run(collect(adapter.search("полотенца", date(2026, 9, 30), date(2026, 10, 2))))
+    assert len(stubs) == 50
+    assert seen[0]["publishDateFrom"] == "30.09.2026" and seen[0]["af"] == "on"
+    assert [p["pageNumber"] for p in seen] == ["1", "2"]
+    # Карточка не открылась — остаются данные из выдачи
+    d = asyncio.run(adapter.fetch_details(stubs[0]))
+    assert d.title.startswith("Поставка полотенец бумажных")
+    # Обновление старого тендера без выдачи: ошибка карточки — это ошибка
+    with pytest.raises(SourceError):
+        asyncio.run(EisAdapter(client=client_for(handler)).fetch_details(stubs[0]))

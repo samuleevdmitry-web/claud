@@ -136,7 +136,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("probe", help="снять ответы площадок для разработки адаптеров (с вашего компьютера)")
     p.add_argument("--source", action="append", help="код площадки (можно несколько)")
-    p.add_argument("--round", type=int, default=1, choices=(1, 2), help="заход разведки (2 — уточняющий)")
+    p.add_argument(
+        "--round", type=int, default=1, choices=(1, 2, 3), help="заход разведки (2, 3 — уточняющие)"
+    )
     p.set_defaults(func=probe_cmd)
 
     args = parser.parse_args(argv)

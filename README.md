@@ -88,7 +88,8 @@ python -m app.cli probe        # или: docker compose exec app python -m app.c
 в архив `data/probe/<дата>.zip`. Пришлите архив — по нему пишутся адаптеры и тесты.
 
 Второй круг разведки (варианты параметров поиска и JS-файлы для SPA-площадок):
-`python -m app.cli probe --round 2` → архив `data/probe/<дата>_r2.zip`.
+`python -m app.cli probe --round 2` → архив `data/probe/<дата>_r2.zip`; третий круг —
+`--round 3` (модули поиска ЭТП ГПБ, B2B-Center, ТЭК-Торг, Сбербанк-АСТ) → `<дата>_r3.zip`.
 
 **Сертификат Минцифры.** zakupki.gov.ru подписан «Russian Trusted Root CA». Приложение само
 скачивает его с gu-st.ru в `data/certs/` и использует только для своих запросов (настройки

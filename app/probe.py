@@ -170,6 +170,42 @@ ROUND2: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+# Третий заход: модули поиска одностраничных приложений (имена файлов взяты из второго захода)
+# и карточки ЕИС 44-ФЗ. Суффиксы: «+js» — все собственные скрипты страницы, «+js:<часть>» —
+# только скрипты, в адресе которых есть <часть>; «+deep» — JS-файл и модули, которые он импортирует.
+ROUND3: dict[str, list[tuple[str, str]]] = {
+    "eis": [
+        (
+            "card44_zk",
+            "https://zakupki.gov.ru/epz/order/notice/zk20/view/common-info.html?regNumber=0372200119926000112",
+        ),
+        (
+            "card44_ea",
+            "https://zakupki.gov.ru/epz/order/notice/ea20/view/common-info.html?regNumber=0860200000826008057",
+        ),
+        (
+            "search_dates",
+            f"https://zakupki.gov.ru/epz/order/extendedsearch/results.html?searchString={QE}&morphology=on"
+            "&fz44=on&fz223=on&af=on&publishDateFrom=01.10.2026&publishDateTo=02.10.2026"
+            "&sortBy=PUBLISH_DATE&sortDirection=false&recordsPerPage=_50&pageNumber=1",
+        ),
+    ],
+    "etpgpb": [
+        ("api_doc", "https://etpgpb.ru/procedures/api"),
+        ("procedures_chunk+deep", "https://etpgpb.ru/_nuxt3/RIeu313c.js"),
+        ("api_chunk", "https://etpgpb.ru/_nuxt3/BPkavLWn.js"),
+    ],
+    "b2b_center": [
+        ("search_chunk+deep", "https://www.b2b-center.ru/app/next/static/assets/chunk-BpFr_WaK.js"),
+    ],
+    "tektorg": [
+        ("page+js:/pages/", f"https://www.tektorg.ru/223-fz/procedures?q={QE}"),
+    ],
+    "sberbank_ast": [
+        ("united+js", "https://www.sberbank-ast.ru/UnitedPurchaseList.html"),
+    ],
+}
+
 _SCRIPT_RE = re.compile(rb"<script[^>]+src=[\"']([^\"']+)[\"']", re.I)
 MAX_SCRIPTS = 8
 MAX_SCRIPT_BYTES = 6_000_000
@@ -186,13 +222,19 @@ def _ext(content_type: str, body: bytes) -> str:
     return "txt"
 
 
-async def _save_scripts(client: httpx.AsyncClient, page: httpx.Response, folder: Path, name: str) -> int:
+_IMPORT_RE = re.compile(rb"""(?:import\(|from\s*)["'](\./[\w.-]+\.js)["']""")
+MAX_DEEP = 25
+
+
+async def _save_scripts(
+    client: httpx.AsyncClient, page: httpx.Response, folder: Path, name: str, only: str = ""
+) -> int:
     """Сохраняет собственные JS-файлы страницы (не счётчики и не CDN), чтобы найти адрес API."""
     host = page.url.host.split(".")[-2] if page.url.host else ""
     saved = 0
     for src in _SCRIPT_RE.findall(page.content):
         url = page.url.join(src.decode("utf-8", "replace"))
-        if host not in (url.host or "") or saved >= MAX_SCRIPTS:
+        if host not in (url.host or "") or saved >= MAX_SCRIPTS or (only and only not in str(url)):
             continue
         try:
             r = await client.get(url)
@@ -201,6 +243,24 @@ async def _save_scripts(client: httpx.AsyncClient, page: httpx.Response, folder:
         if r.status_code == 200 and len(r.content) <= MAX_SCRIPT_BYTES:
             saved += 1
             (folder / f"{name}.script{saved}.js").write_bytes(r.content)
+        await asyncio.sleep(random.uniform(1, 2))
+    return saved
+
+
+async def _save_imports(client: httpx.AsyncClient, first: httpx.Response, folder: Path, name: str) -> int:
+    """Модули, которые импортирует JS-файл (на один уровень вглубь), — там обычно адрес API поиска."""
+    saved = 0
+    for rel in dict.fromkeys(_IMPORT_RE.findall(first.content)):
+        if saved >= MAX_DEEP:
+            break
+        url = first.url.join(rel.decode())
+        try:
+            r = await client.get(url)
+        except httpx.HTTPError:
+            continue
+        if r.status_code == 200 and len(r.content) <= MAX_SCRIPT_BYTES:
+            saved += 1
+            (folder / f"{name}.{url.path.rsplit('/', 1)[-1]}").write_bytes(r.content)
         await asyncio.sleep(random.uniform(1, 2))
     return saved
 
@@ -222,21 +282,23 @@ async def probe(sources: list[str] | None = None, out_root: Path | None = None, 
     async with httpx.AsyncClient(
         headers=headers, timeout=40, follow_redirects=True, verify=ssl_context()
     ) as client:
-        for code, urls in (ROUND2 if round_ == 2 else PROBES).items():
+        for code, urls in {1: PROBES, 2: ROUND2, 3: ROUND3}[round_].items():
             if sources and code not in sources:
                 continue
             (out / code).mkdir(exist_ok=True)
             report[code] = []
             for name, url in urls:
                 entry: dict = {"name": name, "url": url}
-                with_js = name.endswith("+js")
-                name = name.removesuffix("+js")
+                name, _, mode = name.partition("+")
+                js_only = mode.partition(":")[2]
                 try:
                     r = await client.get(url)
                     ext = _ext(r.headers.get("content-type", ""), r.content)
                     (out / code / f"{name}.{ext}").write_bytes(r.content)
-                    if with_js and r.status_code == 200:
-                        entry["scripts"] = await _save_scripts(client, r, out / code, name)
+                    if mode.startswith("js") and r.status_code == 200:
+                        entry["scripts"] = await _save_scripts(client, r, out / code, name, js_only)
+                    if mode == "deep" and r.status_code == 200:
+                        entry["imports"] = await _save_imports(client, r, out / code, name)
                     title = re.search(rb"<title[^>]*>(.*?)</title>", r.content[:20000], re.S | re.I)
                     entry |= {
                         "status": r.status_code,
