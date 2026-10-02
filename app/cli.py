@@ -69,6 +69,9 @@ def run_cmd(args: argparse.Namespace) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     run_migrations()
+    from app.sources.tls import ensure_russian_ca
+
+    ensure_russian_ca()
     with session_scope() as session:
         bootstrap_keywords(session)
     factory = get_session_factory()
@@ -102,7 +105,7 @@ def probe_cmd(args: argparse.Namespace) -> int:
 
     from app.probe import probe
 
-    asyncio.run(probe(args.source or None))
+    asyncio.run(probe(args.source or None, round_=args.round))
     return 0
 
 
@@ -133,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("probe", help="снять ответы площадок для разработки адаптеров (с вашего компьютера)")
     p.add_argument("--source", action="append", help="код площадки (можно несколько)")
+    p.add_argument("--round", type=int, default=1, choices=(1, 2), help="заход разведки (2 — уточняющий)")
     p.set_defaults(func=probe_cmd)
 
     args = parser.parse_args(argv)

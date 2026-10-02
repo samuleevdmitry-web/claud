@@ -15,6 +15,7 @@ from typing import Any, Protocol, runtime_checkable
 import httpx
 
 from app.config import get_settings
+from app.sources.tls import ssl_context
 
 log = logging.getLogger(__name__)
 
@@ -165,6 +166,7 @@ class PoliteClient:
             timeout=timeout,
             follow_redirects=True,
             transport=transport,
+            verify=ssl_context(),
         )
 
     async def __aenter__(self) -> PoliteClient:

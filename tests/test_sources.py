@@ -321,3 +321,88 @@ def test_gosplan_fz223_deadline_from_documentation_delivery():
     d = parse_fz223(load("gosplan/fz223_purchase_no_close.json"))
     # 05.10.2026 23:59 по времени заказчика (МСК+4 = UTC+7)
     assert d.application_deadline.isoformat() == "2026-10-05T16:59:00+00:00"
+
+
+# --------------------------------------------------------------------------- Росэлторг и Фабрикант
+
+
+def test_roseltorg_parse_search_fixture():
+    from app.sources.roseltorg import has_next_page, parse_search
+
+    html = (FIX / "roseltorg/search_polotenca.html").read_text(encoding="utf-8")
+    items = parse_search(html)
+    assert len(items) == 10
+    first = items[0]
+    assert first.external_id == "32616427976/1" and first.eis_number == "32616427976"
+    assert first.title == "Поставка полотенцесушителей"
+    assert first.law == "223-ФЗ"
+    assert first.customer_inn == "7709436992"
+    assert "ЦЕНТР МАТЕРИАЛЬНО-ТЕХНИЧЕСКОГО" in first.customer_name
+    assert first.region == "г. Москва"
+    assert first.status == "Прием заявок"
+    assert first.nmck == Decimal("195000.00")
+    assert first.application_deadline.isoformat() == "2026-10-08T07:00:00+00:00"
+    assert first.url == "https://www.roseltorg.ru/procedure/32616427976/1"
+    commercial = next(d for d in items if d.external_id.startswith("SP10045625"))
+    assert commercial.eis_number is None and commercial.law == "коммерческая"
+    assert has_next_page(html)
+
+
+def test_roseltorg_search_skips_closed_and_pages():
+    from app.sources.roseltorg import RoseltorgAdapter
+
+    html = (FIX / "roseltorg/search_polotenca.html").read_text(encoding="utf-8")
+    pages = []
+
+    def handler(request):
+        pages.append(request.url.params["page"])
+        return httpx.Response(200, text=html if request.url.params["page"] == "0" else "<html></html>")
+
+    adapter = RoseltorgAdapter(client=client_for(handler, "https://www.roseltorg.ru"))
+    stubs = asyncio.run(collect(adapter.search("полотенца", date(2026, 9, 1), date(2026, 10, 2))))
+    assert pages == ["0", "1"]
+    assert "SP10045625/1" not in {s.external_id for s in stubs}  # срок подачи 2025 года — закрыта
+    details = asyncio.run(adapter.fetch_details(stubs[0]))
+    assert details.title == stubs[0].title
+
+
+def test_fabrikant_parse_search_fixture():
+    from app.sources.fabrikant import parse_search
+
+    items = parse_search((FIX / "fabrikant/search_polotenca.html").read_text(encoding="utf-8"))
+    assert len(items) == 10
+    first = items[0]
+    assert first.external_id == "679704884"
+    assert first.eis_number == "0372200119926000112" and first.law == "44-ФЗ"
+    assert first.title.startswith("Поставка полотенец бумажных")
+    assert first.customer_name == 'СПБ ГБУЗ "ГОРОДСКАЯ ПОЛИКЛИНИКА № 96"'
+    assert first.published_at.isoformat() == "2026-10-02T14:17:00+00:00"
+    assert first.application_deadline.isoformat() == "2026-10-09T07:00:00+00:00"
+    assert first.nmck == Decimal("183390.00")
+    assert first.url.startswith("https://44.fabrikant.ru/")
+    assert first.is_open is True
+    rosatom = items[1]
+    assert rosatom.law == "коммерческая" and rosatom.status == "Идёт приём заявок"
+    assert "СМОЛЕНСКАЯ АЭС-СЕРВИС" in rosatom.customer_name
+    closed = next(d for d in items if d.external_id == "679665242")
+    assert closed.is_open is False and closed.nmck == Decimal("6132.00")
+
+
+def test_fabrikant_search_filters_window_and_status():
+    from app.sources.fabrikant import FabrikantAdapter
+
+    html = (FIX / "fabrikant/search_polotenca.html").read_text(encoding="utf-8")
+    seen = []
+
+    def handler(request):
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, text=html)
+
+    adapter = FabrikantAdapter(client=client_for(handler, "https://www.fabrikant.ru"))
+    stubs = asyncio.run(collect(adapter.search("полотенца", date(2026, 10, 1), date(2026, 10, 2))))
+    ids = {s.external_id for s in stubs}
+    assert seen[0]["query"] == "полотенца" and seen[0]["page_limit"] == "40"
+    assert len(seen) == 1  # меньше 40 на странице — дальше не листаем
+    assert "679665242" not in ids  # «Заключение контракта»
+    assert "679662098" not in ids  # опубликована 30.09, раньше окна
+    assert "679704884" in ids

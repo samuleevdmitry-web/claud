@@ -126,7 +126,8 @@ async def run_source(
         if queries and failed_queries == len(queries):
             raise SourceError("все поисковые запросы завершились ошибкой")
 
-        await _refresh_open(factory, adapter, info.code, set(stubs), ks, keyword_set_id, result, stat_id)
+        if getattr(adapter, "supports_refresh", True):
+            await _refresh_open(factory, adapter, info.code, set(stubs), ks, keyword_set_id, result, stat_id)
         if result.details_attempted and result.details_failed == result.details_attempted:
             raise SourceError("ни одну карточку не удалось получить или разобрать")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,6 +14,7 @@ from app.config import PROJECT_ROOT, get_settings
 from app.db import get_engine, session_scope
 from app.services.keywords import bootstrap_keywords
 from app.services.scheduler import get_schedule, shutdown_scheduler, start_scheduler
+from app.sources.tls import ensure_russian_ca
 from app.web.routes_import import router as import_router
 from app.web.routes_keywords import router as keywords_router
 from app.web.routes_tenders import router as tenders_router
@@ -38,6 +40,7 @@ async def lifespan(_app: FastAPI):
     with session_scope() as session:
         bootstrap_keywords(session)
     if get_settings().scheduler_enabled:
+        await asyncio.to_thread(ensure_russian_ca)
         with session_scope() as session:
             schedule = get_schedule(session)
         start_scheduler(schedule)

@@ -164,8 +164,13 @@ def test_customer_marker_adds_bonus(ks):
 
 def test_minus_word_in_phrase_gap_is_not_suppressed(ks):
     # «детского» попало в промежуток фразы «комплект … постельного белья», но это не слово ключа
-    result = classify(ks, TenderText("Поставка комплекта детского постельного белья с вышивкой",
-                                     customer_name="БУ «Социально-реабилитационный центр»"))
+    result = classify(
+        ks,
+        TenderText(
+            "Поставка комплекта детского постельного белья с вышивкой",
+            customer_name="БУ «Социально-реабилитационный центр»",
+        ),
+    )
     minus = [m for m in result.matches if m.kind == "minus" and m.fragment.lower() == "детского"]
     assert minus and not minus[0].suppressed
     assert result.relevance == Relevance.REVIEW
