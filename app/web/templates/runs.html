@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Журнал прогонов{% endblock %}
+{% block content %}
+<h1>Журнал прогонов</h1>
+<p><a href="/sources">← площадки</a></p>
+{% for run in runs %}
+<section class="card">
+  <h2>№{{ run.id }} · {{ run.started_at|dt }} · {{ {'schedule': 'по расписанию', 'manual': 'вручную', 'import': 'импорт'}.get(run.trigger, run.trigger) }}
+    · {{ {'running': 'идёт', 'success': 'успешно', 'partial': 'с ошибками', 'failed': 'сбой'}.get(run.status, run.status) }}</h2>
+  <p>Новых {{ run.new_count }} ({{ run.new_relevant }} релевантных, {{ run.new_review }} на проверку), обновлено {{ run.updated_count }}.
+    {% if run.error %}<span class="warn">{{ run.error }}</span>{% endif %}</p>
+  <table class="small">
+    <tr><th>Площадка</th><th>Статус</th><th>Окно</th><th>Запросы</th><th>Найдено</th><th>Новых</th><th>Обновлено</th><th>Длительность</th><th>Ошибки</th></tr>
+    {% for st in run.source_stats %}
+    <tr class="{% if st.status not in ('ok', 'running') %}row-error{% endif %}">
+      <td>{{ titles[st.source_code].title if st.source_code in titles else st.source_code }}</td>
+      <td>{{ st.status }}</td>
+      <td class="nowrap">{% if st.window_from %}{{ st.window_from.strftime('%d.%m') }}–{{ st.window_to.strftime('%d.%m') }}{% endif %}</td>
+      <td>{{ st.queries_done }}/{{ st.queries_total }}</td><td>{{ st.found }}</td><td>{{ st.new }}</td><td>{{ st.updated }}</td>
+      <td>{{ (st.duration_sec|round|int ~ ' с') if st.duration_sec else '' }}</td>
+      <td>{% if st.errors %}<details><summary>{{ st.errors|length }}</summary><pre class="code">{{ st.errors|join('\n') }}</pre></details>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% else %}
+<div class="card muted">Прогонов ещё не было.</div>
+{% endfor %}
+{% endblock %}

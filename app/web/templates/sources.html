@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Площадки{% endblock %}
+{% block content %}
+<h1>Площадки</h1>
+
+<section class="card">
+  <form hx-post="/runs/start" hx-target="#run-progress" class="inline">
+    <button type="submit">Запустить сейчас</button>
+    <a href="/runs">Журнал прогонов</a>
+  </form>
+  <div id="run-progress">
+    {% if active_run %}<div hx-get="/runs/progress" hx-trigger="load" hx-swap="outerHTML"></div>{% endif %}
+  </div>
+</section>
+
+<section class="card table-card">
+<table>
+  <tr><th>Площадка</th><th>Режим</th><th>Состояние</th><th>Последний успешный прогон</th><th>Последние прогоны</th><th></th></tr>
+  {% for s in states %}
+  <tr class="{% if s.level == 'error' %}row-error{% endif %}">
+    <td><a href="{{ s.info.url }}" target="_blank" rel="noopener">{{ s.info.title }}</a><div class="small muted">{{ s.info.note }}</div></td>
+    <td class="small">{{ {'api': 'автоматически', 'manual': 'Claude in Chrome', 'planned': 'в работе'}[s.info.mode] }}</td>
+    <td>{% if s.warning %}<span class="{{ 'warn' if s.level == 'error' else 'muted' }}">{{ s.warning }}</span>{% else %}<span class="ok">в порядке</span>{% endif %}
+      {% if s.setting and s.setting.last_error %}<details class="small"><summary>ошибки</summary><pre class="code">{{ s.setting.last_error }}</pre></details>{% endif %}</td>
+    <td class="nowrap">{{ s.setting.last_success_at|dt if s.setting else '—' }}</td>
+    <td class="small">
+      {% for st in stats.get(s.info.code, [])[:5] %}
+        <div>{{ st.started_at|dt }} — {{ st.status }}: запросов {{ st.queries_done }}/{{ st.queries_total }}, найдено {{ st.found }}, новых {{ st.new }}, обновлено {{ st.updated }}{% if st.duration_sec %}, {{ st.duration_sec|round|int }} с{% endif %}{% if st.errors %}, ошибок {{ st.errors|length }}{% endif %}</div>
+      {% endfor %}
+    </td>
+    <td>{% if s.info.mode != 'planned' %}
+      <form method="post" action="/sources/{{ s.info.code }}/toggle"><button class="secondary small-btn">{{ 'Выключить' if s.enabled else 'Включить' }}</button></form>
+    {% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+</section>
+{% endblock %}

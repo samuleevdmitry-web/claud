@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}{{ tabs[f.tab] }}{% endblock %}
+{% block content %}
+<div class="tabs">
+  {% for key, label in tabs.items() %}
+    <a href="/?{{ f.query_string(tab=key, page=1) }}" class="tab {% if f.tab == key %}active{% endif %}">{{ label }}
+      <span class="count">{{ counts[key] }}</span></a>
+  {% endfor %}
+</div>
+
+<form class="filters card" method="get" action="/">
+  <input type="hidden" name="tab" value="{{ f.tab }}">
+  <label>Поиск <input name="q" value="{{ f.q }}" placeholder="название, заказчик, номер"></label>
+  <label>Площадка
+    <select name="source"><option value="">все</option>
+      {% for s in options.sources %}<option value="{{ s.code }}" {% if f.source == s.code %}selected{% endif %}>{{ s.title }}</option>{% endfor %}
+    </select></label>
+  <label>Закон
+    <select name="law"><option value="">все</option>
+      {% for l in options.laws %}<option {% if f.law == l %}selected{% endif %}>{{ l }}</option>{% endfor %}
+    </select></label>
+  <label>Регион <input name="region" value="{{ f.region }}" list="regions">
+    <datalist id="regions">{% for r in options.regions %}<option value="{{ r }}">{% endfor %}</datalist></label>
+  <label>НМЦК от <input name="nmck_from" value="{{ f.nmck_from }}" inputmode="numeric"></label>
+  <label>НМЦК до <input name="nmck_to" value="{{ f.nmck_to }}" inputmode="numeric"></label>
+  <label>Срок подачи с <input type="date" name="deadline_from" value="{{ f.deadline_from }}"></label>
+  <label>по <input type="date" name="deadline_to" value="{{ f.deadline_to }}"></label>
+  <label>Категория
+    <select name="category"><option value="">все</option>
+      {% for c in options.categories %}<option {% if f.category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select></label>
+  <label>Мой статус
+    <select name="user_status"><option value="">все</option>
+      {% for s in options.user_statuses %}<option {% if f.user_status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select></label>
+  <label>Сортировка
+    <select name="sort">{% for k, v in sorts.items() %}<option value="{{ k }}" {% if f.sort == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+  <div class="filter-actions">
+    <button type="submit">Показать</button>
+    <a href="/?tab={{ f.tab }}">Сбросить</a>
+    <a href="/export.xlsx?{{ f.query_string(page=1) }}">Экспорт в Excel</a>
+  </div>
+</form>
+
+<div class="list-head">
+  <span class="muted">Найдено: {{ page.total }}</span>
+  {% if f.tab == 'new' and page.total %}
+    <form method="post" action="/tenders/seen-all?{{ f.query_string(page=1) }}" class="inline">
+      <button type="submit" class="secondary">Отметить все просмотренными</button></form>
+  {% endif %}
+</div>
+
+{% if page.items %}
+<div class="card table-card">
+<table class="tenders">
+  <tr><th>Срок подачи</th><th>Статус</th><th>Закупка</th><th>Заказчик / регион</th><th>НМЦК</th><th>Площадки</th><th></th></tr>
+  {% for t in page.items %}
+  {% set urgent = is_urgent(t) %}
+  <tr class="{% if urgent %}urgent{% elif is_expired(t) %}expired{% endif %}">
+    <td class="nowrap">{{ t.application_deadline|dt }}{% if urgent %}<div class="small warn">меньше 3 дней</div>{% endif %}</td>
+    <td><span class="pill pill-{{ t.relevance }}">{{ relevance_labels[t.relevance] }}</span>
+      <div class="small muted">score {{ t.score }}</div>
+      {% if t.is_new %}<span class="pill pill-new">новый</span>{% endif %}
+      {% if t.is_updated %}<span class="pill pill-updated">обновлён</span>{% endif %}</td>
+    <td><a href="/tenders/{{ t.id }}">{{ t.title }}</a>
+      <div class="small muted">{{ t.law }}{% if t.eis_number %} · № {{ t.eis_number }}{% endif %}{% if t.categories %} · {{ t.categories|join(', ') }}{% endif %}</div>
+      {% if t.user_status != 'новый' %}<div class="small"><b>{{ t.user_status }}</b></div>{% endif %}</td>
+    <td>{{ t.customer_name }}<div class="small muted">{{ t.region or '' }}</div></td>
+    <td class="nowrap">{{ t.nmck|money }}</td>
+    <td class="small">{% for s in t.sources %}<a href="{{ s.url }}" target="_blank" rel="noopener">{{ source_titles[s.source_code].title if s.source_code in source_titles else s.source_code }}</a><br>{% endfor %}</td>
+    <td>{% if t.is_new or t.is_updated %}<button class="secondary small-btn" hx-post="/tenders/{{ t.id }}/seen" hx-swap="outerHTML">Просмотрен</button>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% if page.pages > 1 %}
+<div class="pager">
+  {% if page.page > 1 %}<a href="/?{{ f.query_string(page=page.page - 1) }}">← назад</a>{% endif %}
+  <span>стр. {{ page.page }} из {{ page.pages }}</span>
+  {% if page.page < page.pages %}<a href="/?{{ f.query_string(page=page.page + 1) }}">вперёд →</a>{% endif %}
+</div>
+{% endif %}
+{% else %}
+  <div class="card muted">Тендеров нет. {% if f.tab == 'new' %}Новые появятся после следующего прогона.{% endif %}</div>
+{% endif %}
+{% endblock %}

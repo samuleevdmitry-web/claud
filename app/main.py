@@ -6,16 +6,15 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from fastapi import Depends, FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.config import PROJECT_ROOT, get_settings
 from app.db import get_engine, session_scope
 from app.services.keywords import bootstrap_keywords
-from app.web.auth import require_auth
 from app.web.routes_import import router as import_router
 from app.web.routes_keywords import router as keywords_router
+from app.web.routes_tenders import router as tenders_router
 
 log = logging.getLogger(__name__)
 
@@ -44,11 +43,7 @@ app = FastAPI(title="Velmorium — мониторинг тендеров", lifes
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
 app.include_router(keywords_router)
 app.include_router(import_router)
-
-
-@app.get("/", dependencies=[Depends(require_auth)])
-def index():
-    return RedirectResponse("/keywords")
+app.include_router(tenders_router)
 
 
 @app.get("/health")

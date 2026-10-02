@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Уведомления{% endblock %}
+{% block content %}
+<h1>Уведомления</h1>
+<form method="post" action="/notifications/read-all" class="inline"><button class="secondary">Отметить все прочитанными</button></form>
+<section class="card">
+  {% for n in items %}
+  <div class="notification level-{{ n.level }} {% if not n.is_read %}unread{% endif %}">
+    <div class="small muted">{{ n.created_at|dt }}</div>
+    <div><b>{{ n.title }}</b></div>
+    {% if n.body %}<div class="small pre">{{ n.body }}</div>{% endif %}
+  </div>
+  {% else %}
+  <p class="muted">Уведомлений нет.</p>
+  {% endfor %}
+</section>
+{% endblock %}

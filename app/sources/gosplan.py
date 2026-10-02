@@ -228,6 +228,12 @@ def parse_fz223(data: dict[str, Any], source_code: str = "eis_gosplan") -> Tende
     except (TypeError, ValueError):
         local_tz = MSK
     deadline = parse_dt(src.get("submissionCloseDateTime") or data.get("submission_close_at"), local_tz)
+    if deadline is None:
+        # Неэлектронные процедуры: срок подачи совпадает с окончанием предоставления документации.
+        end = dig(src, "documentationDelivery", "deliveryEndDateTime")
+        if end and len(str(end)) == 10:
+            end = f"{end}T23:59:00"
+        deadline = parse_dt(end, local_tz)
     return TenderDetails(
         source_code=source_code,
         external_id=f"fz223:{number}",

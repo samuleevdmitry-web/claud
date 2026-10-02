@@ -1,0 +1,15 @@
+<div {% if run and run.status == 'running' %}hx-get="/runs/progress" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %} class="progress">
+{% if run %}
+  <p><b>Прогон №{{ run.id }}</b> ({{ run.started_at|dt }}) —
+    {{ {'running': 'идёт', 'success': 'завершён', 'partial': 'завершён с ошибками', 'failed': 'сбой'}.get(run.status, run.status) }}.
+    {% if run.status != 'running' %}Новых {{ run.new_count }} ({{ run.new_relevant }} релевантных, {{ run.new_review }} на проверку), обновлено {{ run.updated_count }}.{% endif %}</p>
+  <table class="small">
+    {% for st in run.source_stats %}
+    <tr><td>{{ titles[st.source_code].title if st.source_code in titles else st.source_code }}</td>
+      <td>{{ st.status }}</td>
+      <td><progress max="{{ st.queries_total or 1 }}" value="{{ st.queries_done }}"></progress> {{ st.queries_done }}/{{ st.queries_total }}</td>
+      <td>найдено {{ st.found }}, новых {{ st.new }}, обновлено {{ st.updated }}</td></tr>
+    {% endfor %}
+  </table>
+{% else %}<p class="muted">Прогонов ещё не было.</p>{% endif %}
+</div>

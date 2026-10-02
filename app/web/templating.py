@@ -20,5 +20,22 @@ def _local_dt(value: datetime | None, fmt: str = "%d.%m.%Y %H:%M") -> str:
     return value.astimezone(ZoneInfo(get_settings().timezone)).strftime(fmt)
 
 
+def _header():
+    """Счётчики новых тендеров, непрочитанные уведомления и тревоги по площадкам для шапки."""
+    from app.db import get_session_factory
+    from app.services.tenders import header_info
+
+    with get_session_factory()() as session:
+        return header_info(session)
+
+
+def _money(value) -> str:
+    if value is None:
+        return "—"
+    return f"{float(value):,.2f}".replace(",", " ").replace(".", ",") + " ₽"
+
+
 templates.env.filters["dt"] = _local_dt
+templates.env.filters["money"] = _money
+templates.env.globals["header"] = _header
 templates.env.globals["highlight"] = highlight

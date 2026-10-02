@@ -315,3 +315,9 @@ def test_client_sends_user_agent():
 
     asyncio.run(go())
     assert seen["ua"].startswith("VelmoriumTenderMonitor")
+
+
+def test_gosplan_fz223_deadline_from_documentation_delivery():
+    d = parse_fz223(load("gosplan/fz223_purchase_no_close.json"))
+    # 05.10.2026 23:59 по времени заказчика (МСК+4 = UTC+7)
+    assert d.application_deadline.isoformat() == "2026-10-05T16:59:00+00:00"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -19,7 +20,12 @@ def make_engine(url: str) -> Engine:
     if url.startswith("sqlite:///") and ":memory:" not in url:
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    engine = create_engine(url, connect_args=connect_args, pool_pre_ping=True)
+    engine = create_engine(
+        url,
+        connect_args=connect_args,
+        pool_pre_ping=True,
+        json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False, default=str),
+    )
     if url.startswith("sqlite"):
 
         @event.listens_for(engine, "connect")

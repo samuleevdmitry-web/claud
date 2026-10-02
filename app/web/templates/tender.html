@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}{{ t.title[:60] }}{% endblock %}
+{% block content %}
+<p><a href="{{ back }}">← к списку</a></p>
+<h1 class="tender-title">{{ highlight(t.title, matches, 'title') }}</h1>
+<p>
+  <span class="pill pill-{{ t.relevance }}">{{ relevance_labels[t.relevance] }}</span>
+  <span class="muted">score {{ t.score }}</span>
+  {% if t.is_new %}<span class="pill pill-new">новый</span>{% endif %}
+  {% if t.is_updated %}<span class="pill pill-updated">обновлён</span>{% endif %}
+  {% if t.is_new or t.is_updated %}<button class="secondary small-btn" hx-post="/tenders/{{ t.id }}/seen" hx-swap="outerHTML">Отметить просмотренным</button>{% endif %}
+</p>
+
+<div class="grid2">
+<section class="card">
+  <h2>Закупка</h2>
+  <table class="kv">
+    <tr><th>Срок подачи</th><td class="{% if is_urgent %}warn{% endif %}"><b>{{ t.application_deadline|dt }}</b>
+      {% if is_urgent %} — меньше 3 дней{% elif is_expired %} — истёк{% endif %}</td></tr>
+    <tr><th>Заказчик</th><td>{{ highlight(t.customer_name or '', matches, 'customer') }}{% if t.customer_inn %} <span class="muted">ИНН {{ t.customer_inn }}</span>{% endif %}</td></tr>
+    <tr><th>Регион</th><td>{{ t.region or '—' }}</td></tr>
+    <tr><th>Место поставки</th><td>{{ highlight(t.delivery_place or '—', matches, 'delivery_place') }}</td></tr>
+    <tr><th>Закон</th><td>{{ t.law }}</td></tr>
+    <tr><th>Способ</th><td>{{ t.procedure_type or '—' }}</td></tr>
+    <tr><th>НМЦК</th><td>{{ t.nmck|money }}{% if t.currency != 'RUB' %} {{ t.currency }}{% endif %}</td></tr>
+    <tr><th>Опубликовано</th><td>{{ t.published_at|dt }}</td></tr>
+    <tr><th>Статус на площадке</th><td>{{ t.status or '—' }}</td></tr>
+    <tr><th>Номер ЕИС</th><td>{{ t.eis_number or '—' }}</td></tr>
+    <tr><th>Коды ОКПД2/КТРУ</th><td>{{ (t.okpd2_codes or [])|join(', ') or '—' }}</td></tr>
+    <tr><th>Впервые найден</th><td>{{ t.first_seen_at|dt }}; последний раз: {{ t.last_seen_at|dt }}</td></tr>
+  </table>
+  <h3>Источники</h3>
+  <ul>{% for s in t.sources %}
+    <li><a href="{{ s.url }}" target="_blank" rel="noopener">{{ source_titles[s.source_code].title if s.source_code in source_titles else s.source_code }}</a>
+      <span class="muted small">№ {{ s.external_id }}, найден {{ s.first_seen_at|dt }}</span></li>
+  {% endfor %}</ul>
+</section>
+
+<section class="card">
+  <h2>Работа с тендером</h2>
+  <form hx-post="/tenders/{{ t.id }}/status" hx-trigger="change" hx-target="#status-saved" class="inline">
+    <label>Мой статус
+      <select name="user_status">{% for s in user_statuses %}<option {% if t.user_status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    </label>
+    <span id="status-saved"></span>
+  </form>
+  <form hx-post="/tenders/{{ t.id }}/notes" hx-target="#notes-saved" class="try-form">
+    <label>Заметки <textarea name="notes" rows="5">{{ t.notes }}</textarea></label>
+    <div><button type="submit">Сохранить заметки</button> <span id="notes-saved"></span></div>
+  </form>
+  <h3>Почему такой статус</h3>
+  <ul class="reasons">{% for r in t.classification_reasons or [] %}<li>{{ r }}</li>{% endfor %}</ul>
+  {% if t.categories %}<p>Категории: {{ t.categories|join(', ') }}</p>{% endif %}
+  {% if t.change_log %}
+  <h3>Изменения</h3>
+  <ul>{% for c in t.change_log|reverse %}<li><span class="muted small">{{ c.at[:16].replace('T', ' ') }} UTC</span> {{ c.changes|join('; ') }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+</div>
+
+{% if t.positions %}
+<section class="card">
+  <h2>Позиции ({{ t.positions|length }})</h2>
+  <table>
+    <tr><th>№</th><th>Наименование</th><th>Кол-во</th><th>Ед.</th><th>ОКПД2/КТРУ</th><th>Цена</th></tr>
+    {% for p in t.positions %}
+    <tr><td>{{ loop.index }}</td><td>{{ highlight(p.name or '', matches, 'positions', loop.index0) }}</td>
+      <td>{{ p.qty if p.qty is not none else '' }}</td><td>{{ p.unit or '' }}</td><td><code>{{ p.code or '' }}</code></td>
+      <td class="nowrap">{{ p.price|money if p.price is not none else '' }}</td></tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
+{% if t.notice_text %}
+<section class="card">
+  <h2>Извещение / ТЗ</h2>
+  <div class="notice">{{ highlight(t.notice_text, matches, 'notice') }}</div>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Найденные ключи</h2>
+  <p class="small"><mark class="hl-product">товарный ключ</mark> <mark class="hl-marker">маркер заказчика</mark> <mark class="hl-minus">минус-слово</mark></p>
+  <table class="small">
+    <tr><th>Тип</th><th>Ключ</th><th>Маска</th><th>Поле</th><th>Фрагмент</th></tr>
+    {% for m in matches %}
+    <tr class="{{ 'muted' if m.suppressed }}">
+      <td>{{ {'product': 'товарный ключ', 'marker': 'маркер', 'minus': 'минус-слово', 'code': 'код', 'code_excluded': 'код-исключение'}[m.kind] }}
+        {% if m.strength %}({{ 'сильное' if m.strength == 'strong' else 'среднее' }}){% endif %}
+        {% if m.suppressed %}— не учитывается{% endif %}</td>
+      <td>{{ m.label }}</td><td><code>{{ m.mask }}</code></td>
+      <td>{{ field_labels[m.field] }}{% if m.position_index is not none %} №{{ m.position_index + 1 }}{% endif %}</td>
+      <td>{{ m.context }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endblock %}
