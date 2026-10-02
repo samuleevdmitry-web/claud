@@ -22,7 +22,8 @@ from enum import StrEnum
 
 from app.keywords.codes import normalize_code
 from app.keywords.loader import KeyType, KeywordSet, Strength
-from app.keywords.text import TokenIndex
+from app.keywords.masks import Mask, WordPattern
+from app.keywords.text import TokenIndex, tokenize
 
 
 class Relevance(StrEnum):
@@ -205,23 +206,47 @@ def _find_matches(ks: KeywordSet, tender: TenderText) -> list[MatchRecord]:
                 priority=listed.priority,
             )
         )
-    _suppress_nested_minus(matches)
+    masks = {k.id: k.mask for k in [*ks.products, *ks.markers]}
+    _suppress_nested_minus(matches, masks)
     return matches
 
 
-def _suppress_nested_minus(matches: list[MatchRecord]) -> None:
+def _mask_words(mask: Mask) -> list[WordPattern]:
+    words: list[WordPattern] = []
+
+    def walk(elem) -> None:
+        if isinstance(elem, WordPattern):
+            words.append(elem)
+        else:
+            for alt in elem.alternatives:
+                for item in alt.items:
+                    walk(item)
+
+    walk(mask.root)
+    return words
+
+
+def _suppress_nested_minus(matches: list[MatchRecord], masks: dict[str, Mask]) -> None:
+    """Минус-слово не учитывается, если оно — слово самого ключа («кроват*» в «дорожк* на кроват*»).
+
+    Слова, попавшие в допустимый промежуток фразы («комплект детского постельного белья»), не подавляются.
+    """
     covers = [m for m in matches if m.kind in ("product", "marker")]
     for m in matches:
         if m.kind != "minus":
             continue
+        tokens = [t.text for t in tokenize(m.fragment)]
         for c in covers:
-            if (
+            if not (
                 c.field == m.field
                 and c.position_index == m.position_index
                 and c.start <= m.start
                 and m.end <= c.end
                 and (c.start, c.end) != (m.start, m.end)
             ):
+                continue
+            words = _mask_words(masks[c.key_id]) if c.key_id in masks else []
+            if tokens and all(any(w.regex.fullmatch(tok) for w in words) for tok in tokens):
                 m.suppressed = True
                 break
 
