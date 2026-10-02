@@ -475,3 +475,20 @@ def test_eis_search_params_and_card_fallback():
     # Обновление старого тендера без выдачи: ошибка карточки — это ошибка
     with pytest.raises(SourceError):
         asyncio.run(EisAdapter(client=client_for(handler)).fetch_details(stubs[0]))
+
+
+def test_eis_parse_card44_positions_and_region():
+    from app.sources.eis import parse_card, parse_search
+
+    items = parse_search((FIX / "eis/search_polotenca.html").read_text(encoding="utf-8"))
+    base = next(d for d in items if d.external_id == "0860200000826008057")
+    d = parse_card((FIX / "eis/card44_ea.html").read_text(encoding="utf-8"), base)
+    assert d.region == "Саратовская обл"
+    assert d.application_deadline.isoformat() == "2026-10-14T04:00:00+00:00"  # 08:00 МСК+1
+    assert d.etp == "РОСЭЛТОРГ (АО«ЕЭТП»)"
+    assert d.delivery_place.startswith("Российская Федерация, обл. Саратовская")
+    assert len(d.positions) == 1  # строка «Преимущество …» — не позиция
+    p = d.positions[0]
+    assert p.name.startswith("Полотенце бумажное") and p.code == "17.22.11.130-00000005"
+    assert (p.qty, p.unit, p.price) == (1800.0, "Упаковка", 170.85)
+    assert d.okpd2_codes == ["17.22.11.130", "17.22.11.130-00000005"]

@@ -42,10 +42,10 @@
 | Фабрикант | API | HTML-выдача `/procedure/search` | готово по ответам `probe` |
 | РТС-тендер | Chrome | антибот (Anti-DDoS) | импорт |
 | Tender.Pro | Chrome | антибот | импорт |
-| ТЭК-Торг | Chrome → в работе | выдача с запросом подгружается скриптом | `probe --round 3` |
-| ЭТП ГПБ | в работе | Nuxt; есть страница `/procedures/api` | `probe --round 3` |
-| Сбербанк-АСТ (УТП) | в работе | поиск — `/UnitedPurchaseList.html` | `probe --round 3` |
-| B2B-Center | в работе | выдача с запросом подгружается скриптом | `probe --round 3` |
+| ТЭК-Торг | Chrome → в работе | `POST /api/getProcedures` (`params.name`) | `probe --round 4` |
+| ЭТП ГПБ | в работе | официальный RSS `procedures.rss` + фильтры поиска | `probe --round 4` |
+| Сбербанк-АСТ (УТП) | в работе | `POST {API}/Processing/main`, `/EsOpenUnitedPurchaseList` | `probe --round 4` |
+| B2B-Center | в работе | `GET /site/api/v1/market-search/` (JSON) | `probe --round 4` |
 | OTC.ru | Chrome | страница-заглушка антибота | импорт |
 | ЭТП НИТ | в работе | адрес уточняется (nistp.ru?) | — |
 | Bidzaar | Chrome | капча; позже — API поставщика по токену | импорт |
@@ -82,6 +82,22 @@
 - **Сбербанк-АСТ**: utp.sberbank-ast.ru перенаправляет на главную; строка поиска сохраняет
   фильтр в localStorage и открывает `/UnitedPurchaseList.html`.
 - **OTC.ru**: вместо выдачи — страница ожидания антибота (`noindex`, анимация загрузки).
+
+## Итоги probe №3 (02.10.2026)
+
+- **ЕИС**: фильтр `publishDateFrom`/`publishDateTo` работает (29 закупок за 2 дня вместо 1000).
+  Карточки 44-ФЗ (`zk20`, `ea20`) — пары `section__title`/`section__info`, позиции — строки
+  `tr.tableBlock__row` (коды ОКПД2/КТРУ, наименование, единица, количество, цена), поле «Регион».
+- **ЭТП ГПБ**: на странице `/procedures/api` описан RSS-канал: адрес страницы поиска с любыми
+  фильтрами, где `procedures` заменено на `procedures.rss`. `api/procedures.php?late=1` — только
+  номера и статусы за вчера.
+- **B2B-Center**: поиск — `GET /site/api/v1/market-search/` с параметрами `query`, `tab`
+  (`actual`), `sort` (`date_desc`), `page`, `page_size`, `date_start_dmy`, `macro_trade_type`.
+- **ТЭК-Торг**: выдача — `POST /api/getProcedures` с телом `{"params": {"name": …, "page": …,
+  "sort": …, "limit": 15, "sectionsCodes[0]": …}}`.
+- **Сбербанк-АСТ**: `/UnitedPurchaseList.html` вызывает `apiRequest("/EsOpenUnitedPurchaseList",
+  "MONITOR", "default", "", "es", <XML-фильтр>)` → `POST {API_BASE_URL}Processing/main`;
+  `API_BASE_URL` — в `/build/variable.json`.
 
 ## Online Contract — публичный API (проверено 02.10.2026)
 

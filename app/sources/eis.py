@@ -16,7 +16,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from selectolax.parser import HTMLParser, Node
 
 from app.sources.base import HealthStatus, PoliteClient, Position, SourceError, TenderDetails, TenderStub
-from app.sources.util import MSK, is_future, parse_dt, to_decimal
+from app.sources.util import MSK, is_future, parse_dt, to_decimal, to_float
 
 BASE = "https://zakupki.gov.ru"
 SEARCH = "/epz/order/extendedsearch/results.html"
@@ -141,26 +141,36 @@ def _first(values: dict[str, str], *prefixes: str) -> str:
     return ""
 
 
+def _codes_in(text: str) -> list[str]:
+    return [m.group(0) for m in _CODE_RE.finditer(text) if _OKPD_RE.match(m.group(0))]
+
+
 def _positions(doc: HTMLParser) -> list[Position]:
-    """Строки таблиц с кодом ОКПД2/КТРУ: наименование — самая длинная текстовая ячейка."""
+    """Объекты закупки 44-ФЗ: строки tableBlock__row — коды ОКПД2/КТРУ, наименование, единица,
+    количество, цена. Код позиции — КТРУ, если есть, иначе ОКПД2."""
     out: list[Position] = []
     seen: set[tuple[str, str]] = set()
-    for row in doc.css("tr"):
+    for row in doc.css("tr.tableBlock__row"):
         cells = [_text(td) for td in row.css("td")]
-        code = next((c for c in cells if _OKPD_RE.match(c)), None)
-        if code is None:
-            found = [m.group(0) for c in cells for m in _CODE_RE.finditer(c) if _OKPD_RE.match(m.group(0))]
-            code = found[0] if found else None
-        if code is None:
+        if len(cells) < 6:
             continue
-        names = [c for c in cells if c and not _OKPD_RE.match(c) and re.search(r"[А-Яа-яЁё]{3}", c)]
-        if not names:
+        codes = _codes_in(cells[1])
+        name = cells[2]
+        if not codes or not re.search(r"[А-Яа-яЁё]{3}", name):
             continue
-        name = max(names, key=len)
+        code = next((c for c in codes if "-" in c), codes[0])
         if (name, code) in seen:
             continue
         seen.add((name, code))
-        out.append(Position(name=name[:500], code=code))
+        out.append(
+            Position(
+                name=name[:500],
+                code=code,
+                unit=cells[3] or None,
+                qty=to_float(re.sub(r"[^\d,]", "", cells[4])),
+                price=to_float(re.sub(r"[^\d,]", "", cells[5])),
+            )
+        )
     return out
 
 
@@ -186,10 +196,12 @@ def parse_card(html: str, base: TenderDetails) -> TenderDetails:
         "Место оказания",
     )
     positions = _positions(doc)
-    codes = sorted({p.code for p in positions if p.code})
+    # КТРУ «17.22.11.130-00000005» даёт и код ОКПД2 «17.22.11.130»
+    codes = sorted({c for p in positions if p.code for c in {p.code, p.code.split("-")[0]}})
     d = TenderDetails(**{**base.__dict__})
     d.title = title
     d.customer_name = customer
+    d.region = _first(values, "Регион") or base.region
     d.delivery_place = place or _first(values, "Место нахождения", "Почтовый адрес")
     d.application_deadline = deadline or base.application_deadline
     d.is_open = is_future(d.application_deadline) if base.is_open is not False else False

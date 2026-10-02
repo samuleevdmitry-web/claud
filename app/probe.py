@@ -206,6 +206,84 @@ ROUND3: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+_SBER_FILTER = (
+    "<query><mainInput>" + Q + "</mainInput><searchBarType>anyWord</searchBarType><pagenum>0</pagenum>"
+    "<pagesize>20</pagesize><targetPageCode>OTUnitedPurchaseList</targetPageCode>"
+    "<fields><field>hasSt14</field></fields></query>"
+)
+
+# Четвёртый заход: образцы ответов найденных API поиска (адреса — из JS-модулей третьего захода).
+# Третий элемент — параметры запроса (метод, тело); «{sber_api}» — адрес API из variable.json.
+ROUND4: dict[str, list[tuple]] = {
+    "etpgpb": [
+        ("robots", "https://etpgpb.ru/robots.txt"),
+        ("rss_search", f"https://etpgpb.ru/procedures.rss?search={QE}"),
+        ("rss_actual", f"https://etpgpb.ru/procedures.rss?procedure%5Bcategory%5D=actual&search={QE}"),
+        (
+            "rss_accepting",
+            f"https://etpgpb.ru/procedures.rss?procedure%5Bstage%5D%5B0%5D=accepting&search={QE}&sort=by_date",
+        ),
+        ("rss_slash", f"https://etpgpb.ru/procedures/.rss?search={QE}"),
+    ],
+    "b2b_center": [
+        ("robots", "https://www.b2b-center.ru/robots.txt"),
+        (
+            "api_search",
+            f"https://www.b2b-center.ru/site/api/v1/market-search/?query={QE}&tab=actual&sort=date_desc"
+            "&page=1&page_size=20&company_type=2&macro_trade_type=buy",
+        ),
+        ("api_search_min", f"https://www.b2b-center.ru/site/api/v1/market-search/?query={QE}"),
+    ],
+    "tektorg": [
+        ("robots", "https://www.tektorg.ru/robots.txt"),
+        (
+            "api_procedures",
+            "https://www.tektorg.ru/api/getProcedures",
+            {
+                "method": "POST",
+                "json": {
+                    "params": {
+                        "name": Q,
+                        "sectionsCodes[0]": "zakupki",
+                        "page": 1,
+                        "sort": "datePublished_desc",
+                        "limit": 15,
+                    }
+                },
+            },
+        ),
+        ("page_name", f"https://www.tektorg.ru/223-fz/procedures?name={QE}&sort=datePublished_desc"),
+    ],
+    "sberbank_ast": [
+        ("robots", "https://www.sberbank-ast.ru/robots.txt"),
+        ("variables", "https://www.sberbank-ast.ru/build/variable.json"),
+        ("search_setting", "https://www.sberbank-ast.ru/public/configs/SearchSetting.json"),
+        (
+            "api_search",
+            "{sber_api}Processing/main",
+            {
+                "method": "POST",
+                "json": {
+                    "windowCode": "/EsOpenUnitedPurchaseList",
+                    "actionType": "MONITOR",
+                    "actionCode": "default",
+                    "documentBody": "",
+                    "parm": "es",
+                    "filterBody": _SBER_FILTER,
+                },
+            },
+        ),
+        (
+            "classic_search",
+            "https://www.sberbank-ast.ru/SearchQuery.aspx?name=Main",
+            {
+                "method": "POST",
+                "data": {"xmlData": _SBER_FILTER, "orgId": "0", "targetPageCode": "UnitedPurchaseList"},
+            },
+        ),
+    ],
+}
+
 _SCRIPT_RE = re.compile(rb"<script[^>]+src=[\"']([^\"']+)[\"']", re.I)
 MAX_SCRIPTS = 8
 MAX_SCRIPT_BYTES = 6_000_000
@@ -282,17 +360,32 @@ async def probe(sources: list[str] | None = None, out_root: Path | None = None, 
     async with httpx.AsyncClient(
         headers=headers, timeout=40, follow_redirects=True, verify=ssl_context()
     ) as client:
-        for code, urls in {1: PROBES, 2: ROUND2, 3: ROUND3}[round_].items():
+        ctx: dict[str, str] = {}
+        for code, urls in {1: PROBES, 2: ROUND2, 3: ROUND3, 4: ROUND4}[round_].items():
             if sources and code not in sources:
                 continue
             (out / code).mkdir(exist_ok=True)
             report[code] = []
-            for name, url in urls:
-                entry: dict = {"name": name, "url": url}
+            for name, url, *extra in urls:
+                opts: dict = extra[0] if extra else {}
+                if "{" in url:
+                    if not all(k in ctx for k in re.findall(r"{(\w+)}", url)):
+                        continue
+                    url = url.format(**ctx)
+                entry: dict = {"name": name, "url": url, "method": opts.get("method", "GET")}
                 name, _, mode = name.partition("+")
                 js_only = mode.partition(":")[2]
                 try:
-                    r = await client.get(url)
+                    r = await client.request(
+                        opts.get("method", "GET"), url, json=opts.get("json"), data=opts.get("data")
+                    )
+                    if name == "variables" and r.status_code == 200:
+                        try:
+                            base = r.json().get("API_BASE_URL", "")
+                        except ValueError:
+                            base = ""
+                        if base:
+                            ctx["sber_api"] = base if base.endswith("/") else base + "/"
                     ext = _ext(r.headers.get("content-type", ""), r.content)
                     (out / code / f"{name}.{ext}").write_bytes(r.content)
                     if mode.startswith("js") and r.status_code == 200:
