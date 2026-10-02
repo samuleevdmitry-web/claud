@@ -12,6 +12,7 @@ def client(tmp_path, monkeypatch, keywords_file):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
     monkeypatch.setenv("APP_PASSWORD", "secret")
     monkeypatch.setenv("KEYWORDS_FILE", str(keywords_file))
+    monkeypatch.setenv("SCHEDULER_ENABLED", "false")
     get_settings.cache_clear()
     db_module._engine = None
     db_module._session_factory = None
@@ -223,3 +224,17 @@ def test_runs_and_notifications_pages(client):
     r = client.get("/notifications", auth=AUTH)
     assert "Загружена новая версия ключевых слов" in r.text
     client.post("/notifications/read-all", auth=AUTH)
+
+
+def test_schedule_form(client):
+    r = client.post(
+        "/schedule",
+        auth=AUTH,
+        data={"interval_hours": "24", "start_time": "07:15", "enabled": "true"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    page = client.get("/sources", auth=AUTH).text
+    assert 'value="07:15"' in page and 'value="24"' in page
+    r = client.post("/schedule", auth=AUTH, data={"interval_hours": "24", "start_time": "утром"})
+    assert "ЧЧ:ММ" in r.text

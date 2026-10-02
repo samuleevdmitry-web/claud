@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import PROJECT_ROOT, get_settings
 from app.db import get_engine, session_scope
 from app.services.keywords import bootstrap_keywords
+from app.services.scheduler import shutdown_scheduler, start_scheduler
 from app.web.routes_import import router as import_router
 from app.web.routes_keywords import router as keywords_router
 from app.web.routes_tenders import router as tenders_router
@@ -36,7 +37,12 @@ async def lifespan(_app: FastAPI):
     run_migrations()
     with session_scope() as session:
         bootstrap_keywords(session)
-    yield
+        if get_settings().scheduler_enabled:
+            start_scheduler(session)
+    try:
+        yield
+    finally:
+        shutdown_scheduler()
 
 
 app = FastAPI(title="Velmorium — мониторинг тендеров", lifespan=lifespan)

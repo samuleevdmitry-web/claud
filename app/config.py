@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     # Правило беглой гласной при сопоставлении масок (подушк* → подушек).
     mask_fleeting_vowels: bool = True
 
-    # Расписание прогонов (используется планировщиком на этапе 5).
+    # Расписание прогонов (значения по умолчанию; в интерфейсе можно поменять).
+    scheduler_enabled: bool = True
     run_interval_hours: int = 48
     run_start_time: str = "06:00"
     timezone: str = "Europe/Moscow"

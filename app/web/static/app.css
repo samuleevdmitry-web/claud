@@ -98,3 +98,6 @@ tr.expired td { opacity: .6; }
 .progress progress { width: 120px; }
 select { font: inherit; }
 @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } .kv th { width: auto; } }
+.schedule-form { margin-top: 12px; }
+.schedule-form input.num { width: 70px; }
+.schedule-form input[type=time] { width: auto; }

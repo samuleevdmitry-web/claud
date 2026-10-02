@@ -17,6 +17,7 @@ from app.keywords.queries import build_queries, search_codes
 from app.models import Notification, Run, RunSourceStat, SourceSetting, Tender, TenderSource, utcnow
 from app.services.ingest import ingest
 from app.services.keywords import get_active_keyword_set
+from app.services.notify import send_external
 from app.sources.base import SourceAdapter, SourceError, TenderStub
 from app.sources.registry import SourceInfo, adapter_sources, get_source
 from app.sources.util import MSK, aware
@@ -105,22 +106,26 @@ async def run_source(
     failed_queries = 0
     try:
         for i, query in enumerate(queries, 1):
+            fresh: list[TenderStub] = []
             try:
                 async for stub in adapter.search(query, window_from, window_to):
                     if first_run and stub.application_deadline and stub.application_deadline < utcnow():
                         continue  # историческая выгрузка — только с открытым приёмом заявок
-                    stubs.setdefault(stub.external_id, stub)
+                    if stub.external_id not in stubs:
+                        stubs[stub.external_id] = stub
+                        fresh.append(stub)
             except SourceError as exc:
                 if exc.status in ("blocked", "captcha"):
                     raise
                 failed_queries += 1
                 result.errors.append(f"запрос «{query}»: {exc}")
+            result.found = len(stubs)
             _update_stat(factory, stat_id, queries_done=i, found=len(stubs), errors=result.errors)
-        result.found = len(stubs)
+            # Карточки — сразу после запроса: прерванный прогон не теряет найденное.
+            await _process_stubs(factory, adapter, fresh, ks, keyword_set_id, result, stat_id)
         if queries and failed_queries == len(queries):
             raise SourceError("все поисковые запросы завершились ошибкой")
 
-        await _process_stubs(factory, adapter, list(stubs.values()), ks, keyword_set_id, result, stat_id)
         await _refresh_open(factory, adapter, info.code, set(stubs), ks, keyword_set_id, result, stat_id)
         if result.details_attempted and result.details_failed == result.details_attempted:
             raise SourceError("ни одну карточку не удалось получить или разобрать")
@@ -319,18 +324,17 @@ def _finish_run(factory, run_id: int, results: list[SourceRunResult], error: str
                 run_id=run_id,
             )
         )
+        messages = [(body, error or "")]
         for r in bad:
-            title = get_source(r.code).title
+            title = f"Площадка {get_source(r.code).title} не проверена ({_status_label(r.status)})"
+            details = "\n".join(r.errors[-5:])
             session.add(
-                Notification(
-                    kind="source_failure",
-                    level="error",
-                    run_id=run_id,
-                    title=f"Площадка {title} не проверена ({_status_label(r.status)})",
-                    body="\n".join(r.errors[-5:]),
-                )
+                Notification(kind="source_failure", level="error", run_id=run_id, title=title, body=details)
             )
+            messages.append((title, details))
         session.commit()
+    if run.new_relevant or run.new_review or bad or error:
+        send_external(messages)
 
 
 def _status_label(status: str) -> str:

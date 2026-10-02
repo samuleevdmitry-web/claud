@@ -8,6 +8,15 @@
     <button type="submit">Запустить сейчас</button>
     <a href="/runs">Журнал прогонов</a>
   </form>
+  <form method="post" action="/schedule" class="inline schedule-form">
+    <b>Расписание:</b>
+    <label><input type="checkbox" name="enabled" value="true" {% if schedule.enabled %}checked{% endif %}> включено</label>
+    <label>каждые <input type="number" name="interval_hours" min="1" max="720" value="{{ schedule.interval_hours }}" class="num"> ч</label>
+    <label>начиная с <input type="time" name="start_time" value="{{ schedule.start_time }}"></label>
+    <button class="secondary small-btn">Сохранить</button>
+    <span class="muted small">Следующий запуск: {{ next_run|dt if next_run else ('выключен' if not schedule.enabled else 'планировщик не запущен') }}</span>
+  </form>
+  {% if schedule_error %}<div class="flash flash-error">{{ schedule_error }}</div>{% endif %}
   <div id="run-progress">
     {% if active_run %}<div hx-get="/runs/progress" hx-trigger="load" hx-swap="outerHTML"></div>{% endif %}
   </div>

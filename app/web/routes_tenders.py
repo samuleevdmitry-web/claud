@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -13,6 +14,7 @@ from app.models import Notification, Run, RunSourceStat, Tender, UserStatus
 from app.services.export import export_xlsx
 from app.services.jobs import active_run_id, launch_run
 from app.services.runner import get_source_setting
+from app.services.scheduler import Schedule, apply_schedule, get_schedule, next_run_time, save_schedule
 from app.services.tenders import (
     SORTS,
     TABS,
@@ -164,8 +166,34 @@ def sources_page(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request,
         "sources.html",
-        {"states": source_states(db), "stats": by_source, "active_run": active_run_id()},
+        {
+            "states": source_states(db),
+            "stats": by_source,
+            "active_run": active_run_id(),
+            "schedule": get_schedule(db),
+            "next_run": next_run_time(),
+            "schedule_error": request.query_params.get("schedule_error"),
+        },
     )
+
+
+@router.post("/schedule")
+def update_schedule(
+    interval_hours: int = Form(...),
+    start_time: str = Form(...),
+    enabled: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    schedule = Schedule(
+        interval_hours=max(1, min(interval_hours, 24 * 30)), start_time=start_time.strip(), enabled=enabled
+    )
+    try:
+        save_schedule(db, schedule)
+    except ValueError as exc:
+        return RedirectResponse(f"/sources?schedule_error={quote(str(exc))}", status_code=303)
+    db.commit()
+    apply_schedule(schedule)
+    return RedirectResponse("/sources", status_code=303)
 
 
 @router.post("/sources/{code}/toggle")
