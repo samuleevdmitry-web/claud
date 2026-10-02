@@ -58,14 +58,14 @@ def test_scheduler_persists_job_and_reschedules(tmp_path, monkeypatch):
 
     async def scenario():
         with Session(engine) as s:
-            sched.start_scheduler(s)
+            sched.start_scheduler(get_schedule(s))
             job = sched._scheduler.get_job(sched.JOB_ID)
             assert job is not None and job.trigger.interval == timedelta(hours=48)
             first = sched.next_run_time()
             sched.shutdown_scheduler()
 
             # после перезапуска задание берётся из БД и не сдвигается
-            sched.start_scheduler(s)
+            sched.start_scheduler(get_schedule(s))
             assert sched.next_run_time() == first
 
             sched.apply_schedule(Schedule(12, "06:00"))

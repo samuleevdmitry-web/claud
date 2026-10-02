@@ -96,7 +96,7 @@ async def scheduled_run() -> None:
         log.warning("Плановый прогон пропущен: предыдущий ещё идёт")
 
 
-def start_scheduler(session: Session) -> AsyncIOScheduler:
+def start_scheduler(schedule: Schedule) -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is not None:
         return _scheduler
@@ -109,7 +109,7 @@ def start_scheduler(session: Session) -> AsyncIOScheduler:
     )
     scheduler.start()
     _scheduler = scheduler
-    apply_schedule(get_schedule(session))
+    apply_schedule(schedule)
     return scheduler
 
 
