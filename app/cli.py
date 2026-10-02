@@ -55,6 +55,57 @@ def classify_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_cmd(args: argparse.Namespace) -> int:
+    import asyncio
+    import logging
+
+    from sqlalchemy import select
+
+    from app.db import get_session_factory, session_scope
+    from app.main import run_migrations
+    from app.models import Run
+    from app.services.keywords import bootstrap_keywords
+    from app.services.runner import run_all
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    run_migrations()
+    with session_scope() as session:
+        bootstrap_keywords(session)
+    factory = get_session_factory()
+    run_id = asyncio.run(
+        run_all(
+            factory,
+            trigger="manual",
+            only=args.source or None,
+            max_queries=args.max_queries,
+            queries=args.query or None,
+        )
+    )
+    with factory() as session:
+        run = session.get(Run, run_id)
+        print(
+            f"Прогон №{run.id}: {run.status}; новых {run.new_count} (релевантных {run.new_relevant}, "
+            f"на проверку {run.new_review}), обновлено {run.updated_count}"
+        )
+        for st in session.scalars(select(Run).where(Run.id == run_id)).one().source_stats:
+            print(
+                f"  {st.source_code}: {st.status}, запросов {st.queries_done}/{st.queries_total}, "
+                f"найдено {st.found}, новых {st.new}, обновлено {st.updated}, {st.duration_sec} с"
+            )
+            for err in st.errors[-5:]:
+                print(f"    ! {err}")
+    return 0 if run.status == "success" else 1
+
+
+def probe_cmd(args: argparse.Namespace) -> int:
+    import asyncio
+
+    from app.probe import probe
+
+    asyncio.run(probe(args.source or None))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -73,6 +124,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--notice", default="")
     p.add_argument("--file")
     p.set_defaults(func=classify_cmd)
+
+    p = sub.add_parser("run", help="прогон по площадкам сейчас")
+    p.add_argument("--source", action="append", help="код площадки (можно несколько)")
+    p.add_argument("--max-queries", type=int, help="ограничить число запросов (для проверки)")
+    p.add_argument("--query", action="append", help="свой поисковый запрос вместо запросов из файла")
+    p.set_defaults(func=run_cmd)
+
+    p = sub.add_parser("probe", help="снять ответы площадок для разработки адаптеров (с вашего компьютера)")
+    p.add_argument("--source", action="append", help="код площадки (можно несколько)")
+    p.set_defaults(func=probe_cmd)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -53,3 +53,4 @@ mark { padding: 0 2px; border-radius: 3px; }
 .hl-marker { background: var(--hl-marker); }
 .hl-minus { background: var(--hl-minus); }
 .hl-suppressed { text-decoration: line-through; opacity: .6; }
+pre.code { background: #f1f3f5; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 13px; }

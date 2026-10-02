@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Импорт{% endblock %}
+{% block content %}
+<h1>Импорт тендеров</h1>
+
+{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+{% if result %}
+  <div class="flash">{{ result.source }}: получено {{ result.received }}, новых {{ result.new }},
+    обновлено {{ result.updated }}. Площадка {{ 'отмечена как проверенная' if result.status == 'ok' else 'проверена не полностью' }}.</div>
+{% endif %}
+
+<section class="card">
+  <h2>Загрузить результаты</h2>
+  <p class="muted">Сюда загружаются тендеры, которые собрал Claude in Chrome (или человек) на площадках
+    с капчей и антиботом. Они проходят ту же классификацию и дедупликацию, что и данные адаптеров.</p>
+  <form action="/import" method="post" enctype="multipart/form-data" class="try-form">
+    <label>JSON с результатами <textarea name="data" rows="10" placeholder='{"source": "bidzaar", "tenders": [...]}'>{{ data or '' }}</textarea></label>
+    <label>или файл .json <input type="file" name="file" accept=".json,application/json"></label>
+    <button type="submit">Импортировать</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Поисковые запросы ({{ queries|length }})</h2>
+  <p class="muted">Строятся из активного файла ключевых слов. Их нужно прогнать на площадке.</p>
+  <textarea rows="8" readonly>{% for q in queries %}{{ q.text }}
+{% endfor %}</textarea>
+</section>
+
+<section class="card">
+  <h2>Формат данных</h2>
+  <p>Код площадки (<code>source</code>):</p>
+  <table class="small">
+    <tr><th>Код</th><th>Площадка</th><th>Как проверяется</th></tr>
+    {% for s in sources %}
+    <tr><td><code>{{ s.code }}</code></td><td>{{ s.title }}</td>
+      <td>{{ {'api': 'автоматически', 'manual': 'Claude in Chrome / вручную', 'planned': 'адаптер в работе'}[s.mode] }}</td></tr>
+    {% endfor %}
+  </table>
+  <p>Пример. Обязательны только <code>source</code>, <code>external_id</code> и <code>title</code>;
+    чем больше полей (позиции, заказчик, место поставки), тем точнее классификация.
+    <code>complete: true</code> — площадка проверена по всем запросам.</p>
+  <pre class="code">{{ example }}</pre>
+</section>
+{% endblock %}

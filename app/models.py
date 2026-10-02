@@ -113,6 +113,7 @@ class TenderSource(Base):
     source_code: Mapped[str] = mapped_column(String(50))
     external_id: Mapped[str] = mapped_column(String(255))
     url: Mapped[str] = mapped_column(Text, default="")
+    revision: Mapped[str | None] = mapped_column(String(255))  # метка версии на площадке
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

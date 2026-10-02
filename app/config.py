@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     request_delay_max: float = 5.0
     user_agent: str = "VelmoriumTenderMonitor/0.1"
 
+    # Источники.
+    gosplan_api_key: str = ""  # пусто — тестовый сервер ГосПлана (10 запросов в минуту)
+    gosplan_base_url: str = ""
+    # Ключ для приёма тендеров от Claude in Chrome и других внешних сборщиков (/api/import).
+    import_token: str = ""
+
     # Уведомления (опционально).
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""

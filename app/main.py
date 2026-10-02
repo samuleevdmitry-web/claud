@@ -14,6 +14,7 @@ from app.config import PROJECT_ROOT, get_settings
 from app.db import get_engine, session_scope
 from app.services.keywords import bootstrap_keywords
 from app.web.auth import require_auth
+from app.web.routes_import import router as import_router
 from app.web.routes_keywords import router as keywords_router
 
 log = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Velmorium — мониторинг тендеров", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
 app.include_router(keywords_router)
+app.include_router(import_router)
 
 
 @app.get("/", dependencies=[Depends(require_auth)])
