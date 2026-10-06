@@ -1,0 +1,1003 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Отрасли — CNS</title>
+<meta name="description" content="Прототип страницы «Отрасли» для cns-corp.ru: отрасли → направления бизнеса → решения.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* Цвета — заглушки. Заменить на фирменные цвета cns-corp.ru */
+  :root {
+    --c-bg: #ffffff;
+    --c-soft: #f3f6fb;
+    --c-ink: #0e1a2b;
+    --c-ink-2: #46566b;
+    --c-muted: #7a8799;
+    --c-line: #e1e7f0;
+    --c-accent: #1f5bff;
+    --c-accent-hover: #1547d6;
+    --c-accent-soft: #e9efff;
+    --c-on-accent: #ffffff;
+    --c-dark: #0b1a33;
+    --c-dark-2: #142a52;
+    --c-on-dark: #e8eef9;
+    --c-on-dark-muted: #9fb0cc;
+    --radius: 14px;
+    --radius-sm: 10px;
+    --shadow: 0 1px 2px rgba(14, 26, 43, .05), 0 8px 24px rgba(14, 26, 43, .06);
+    --shadow-hover: 0 2px 4px rgba(14, 26, 43, .06), 0 14px 32px rgba(14, 26, 43, .10);
+    --wrap: 1200px;
+    --gutter: 24px;
+    --font: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--c-ink);
+    background: var(--c-bg);
+    overflow-x: hidden;
+  }
+  a { color: inherit; }
+  img, svg { display: block; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 var(--gutter); }
+  .ico { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ---------- Плашка прототипа ---------- */
+  .proto-bar {
+    background: #fff7db; color: #6b4e00; font-size: 13px; border-bottom: 1px solid #f1e2a8;
+  }
+  .proto-bar .wrap { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding-top: 8px; padding-bottom: 8px; }
+  .proto-bar button { background: none; border: 0; cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; color: inherit; }
+
+  /* ---------- Шапка ---------- */
+  .header { position: sticky; top: 0; z-index: 30; background: rgba(255, 255, 255, .94); backdrop-filter: saturate(1.4) blur(8px); border-bottom: 1px solid var(--c-line); }
+  .header .wrap { display: flex; align-items: center; gap: 28px; height: 68px; }
+  .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 800; font-size: 22px; letter-spacing: .02em; }
+  .logo-mark { width: 34px; height: 34px; border-radius: 9px; background: var(--c-accent); color: var(--c-on-accent); display: grid; place-items: center; font-size: 13px; letter-spacing: .04em; }
+  .nav { display: flex; gap: 22px; font-size: 15px; font-weight: 600; color: var(--c-ink-2); }
+  .nav a { text-decoration: none; padding: 6px 0; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .nav a:hover { color: var(--c-ink); }
+  .nav a[aria-current="page"] { color: var(--c-accent); border-bottom-color: var(--c-accent); }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 18px; }
+  .phone { font-weight: 700; text-decoration: none; white-space: nowrap; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    border: 0; border-radius: 10px; padding: 12px 20px; font-weight: 700; font-size: 15px;
+    text-decoration: none; cursor: pointer; transition: background .15s, transform .15s, box-shadow .15s;
+    background: var(--c-accent); color: var(--c-on-accent); white-space: nowrap;
+  }
+  .btn:hover { background: var(--c-accent-hover); }
+  .btn:active { transform: translateY(1px); }
+  .btn-sm { padding: 9px 16px; font-size: 14px; }
+  .btn-ghost { background: transparent; color: var(--c-on-dark); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .35); }
+  .btn-ghost:hover { background: rgba(255, 255, 255, .08); }
+  .burger { display: none; }
+
+  /* ---------- Hero ---------- */
+  .hero { background: linear-gradient(135deg, var(--c-dark) 0%, var(--c-dark-2) 100%); color: var(--c-on-dark); position: relative; overflow: hidden; }
+  .hero::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background-image: radial-gradient(rgba(255, 255, 255, .07) 1px, transparent 1px);
+    background-size: 22px 22px; mask-image: linear-gradient(90deg, transparent 30%, #000 100%);
+    -webkit-mask-image: linear-gradient(90deg, transparent 30%, #000 100%);
+  }
+  .hero .wrap { position: relative; z-index: 1; padding-top: 28px; padding-bottom: 64px; }
+  .crumbs { font-size: 13px; color: var(--c-on-dark-muted); display: flex; gap: 8px; flex-wrap: wrap; }
+  .crumbs a { text-decoration: none; }
+  .crumbs a:hover { color: var(--c-on-dark); }
+  .hero-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 48px; align-items: center; margin-top: 36px; }
+  .hero h1 { font-size: clamp(34px, 5vw, 54px); line-height: 1.08; margin: 0 0 18px; letter-spacing: -.02em; font-weight: 800; }
+  .hero p.lead { font-size: 18px; color: var(--c-on-dark-muted); margin: 0 0 28px; max-width: 560px; }
+  .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 40px; max-width: 620px; }
+  .stat b { display: block; font-size: 28px; font-weight: 800; color: #fff; letter-spacing: -.01em; }
+  .stat span { font-size: 13px; color: var(--c-on-dark-muted); }
+
+  .scheme { background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .12); border-radius: 18px; padding: 22px; }
+  .scheme-title { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--c-on-dark-muted); margin-bottom: 14px; font-weight: 700; }
+  .scheme-row { display: flex; align-items: center; gap: 14px; background: rgba(255, 255, 255, .06); border-radius: 12px; padding: 12px 14px; }
+  .scheme-row + .scheme-arrow { margin: 6px 0 6px 26px; color: var(--c-on-dark-muted); }
+  .scheme-row .lvl { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--c-on-dark-muted); font-weight: 700; }
+  .scheme-row .val { font-weight: 700; color: #fff; }
+  .scheme-badge { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: rgba(255, 255, 255, .1); color: #fff; flex: none; }
+  .scheme-row.is-1 .scheme-badge { background: var(--c-accent); }
+  .scheme-row.is-3 { margin-left: 28px; }
+  .scheme-row.is-2 { margin-left: 14px; }
+
+  /* ---------- Секции ---------- */
+  section { scroll-margin-top: 80px; }
+  .section { padding: 72px 0; }
+  .section-soft { background: var(--c-soft); }
+  .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 32px; flex-wrap: wrap; }
+  .eyebrow { font-size: 13px; text-transform: uppercase; letter-spacing: .1em; color: var(--c-accent); font-weight: 800; margin-bottom: 8px; }
+  h2 { font-size: clamp(26px, 3.4vw, 38px); line-height: 1.15; margin: 0; letter-spacing: -.015em; font-weight: 800; }
+  .section-head p { margin: 10px 0 0; color: var(--c-ink-2); max-width: 640px; }
+
+  /* ---------- Сетка отраслей ---------- */
+  .ind-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .ind-card {
+    position: relative; display: flex; flex-direction: column; gap: 12px; text-align: left;
+    background: var(--c-bg); border: 1px solid var(--c-line); border-radius: var(--radius); padding: 22px;
+    cursor: pointer; transition: box-shadow .2s, border-color .2s, transform .2s; min-height: 210px; text-decoration: none; color: inherit;
+  }
+  .ind-card:hover { box-shadow: var(--shadow-hover); border-color: transparent; transform: translateY(-2px); }
+  .ind-card.is-active { border-color: var(--c-accent); box-shadow: 0 0 0 1px var(--c-accent), var(--shadow); }
+  .ind-card .ind-ico { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; background: var(--c-accent-soft); color: var(--c-accent); }
+  .ind-card .ind-ico .ico { width: 26px; height: 26px; }
+  .ind-card h3 { margin: 0; font-size: 19px; line-height: 1.25; font-weight: 800; }
+  .ind-card p { margin: 0; font-size: 14px; color: var(--c-ink-2); flex: 1; }
+  .ind-meta { display: flex; gap: 14px; font-size: 13px; color: var(--c-muted); font-weight: 600; }
+  .ind-meta b { color: var(--c-ink); }
+  .ind-num { position: absolute; top: 18px; right: 20px; font-size: 13px; color: var(--c-muted); font-weight: 700; }
+
+  /* ---------- Детальная отрасль ---------- */
+  .tabs-wrap { position: sticky; top: 68px; z-index: 20; background: rgba(243, 246, 251, .96); backdrop-filter: blur(6px); border-bottom: 1px solid var(--c-line); }
+  .tabs { position: relative; display: flex; gap: 4px; overflow-x: auto; padding: 10px 0; scrollbar-width: thin; }
+  .tab {
+    flex: none; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--c-line); background: var(--c-bg);
+    border-radius: 999px; padding: 7px 11px; font-size: 13.5px; font-weight: 700; cursor: pointer; color: var(--c-ink-2); white-space: nowrap;
+  }
+  .tab .ico { width: 16px; height: 16px; }
+  .tab:hover { color: var(--c-ink); border-color: #c9d3e2; }
+  .tab[aria-selected="true"] { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-on-accent); }
+
+  .ind-head { display: grid; grid-template-columns: 1.2fr .8fr; gap: 40px; margin: 40px 0 36px; }
+  .ind-title { display: flex; gap: 18px; align-items: flex-start; }
+  .ind-title .ind-ico { width: 64px; height: 64px; border-radius: 16px; display: grid; place-items: center; background: var(--c-accent); color: var(--c-on-accent); flex: none; }
+  .ind-title .ind-ico .ico { width: 34px; height: 34px; }
+  .ind-title p { color: var(--c-ink-2); font-size: 17px; margin: 12px 0 0; }
+  .ind-url { margin-top: 14px; font-size: 13px; color: var(--c-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  .tasks { background: var(--c-bg); border: 1px solid var(--c-line); border-radius: var(--radius); padding: 22px 24px; }
+  .tasks h3 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: var(--c-muted); }
+  .tasks ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .tasks li { display: flex; gap: 10px; font-size: 15px; font-weight: 600; }
+  .tasks li::before { content: ""; flex: none; width: 18px; height: 18px; margin-top: 3px; border-radius: 50%; background: var(--c-accent-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f5bff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 12l4 4 8-8'/%3E%3C/svg%3E") center/12px no-repeat; }
+
+  .counters { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+  .counter { background: var(--c-bg); border: 1px solid var(--c-line); border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 700; color: var(--c-ink-2); }
+  .counter b { color: var(--c-accent); }
+
+  .sub-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 0 0 18px; flex-wrap: wrap; }
+  .sub-head h3 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -.01em; }
+  .sub-head .hint { font-size: 14px; color: var(--c-muted); }
+
+  .dir-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .dir-card {
+    background: var(--c-bg); border: 1px solid var(--c-line); border-radius: var(--radius); padding: 20px 20px 14px;
+    display: flex; flex-direction: column; scroll-margin-top: 150px; transition: box-shadow .3s, border-color .3s;
+  }
+  .dir-card.is-flash { border-color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-soft); }
+  .dir-top { display: flex; gap: 12px; align-items: center; }
+  .dir-ico { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--c-accent-soft); color: var(--c-accent); flex: none; }
+  .dir-top h4 { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.25; }
+  .dir-top h4 a { text-decoration: none; }
+  .dir-top h4 a:hover { color: var(--c-accent); }
+  .dir-level { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--c-muted); font-weight: 700; }
+  .dir-note { margin: 12px 0 12px; font-size: 14px; color: var(--c-ink-2); }
+  .sol-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--c-line); }
+  .sol-list li + li { border-top: 1px dashed var(--c-line); }
+  .sol-list a { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 2px; text-decoration: none; font-size: 14.5px; font-weight: 600; }
+  .sol-list a:hover { color: var(--c-accent); }
+  .sol-list a .arr { color: var(--c-muted); transition: transform .15s, color .15s; flex: none; width: 16px; height: 16px; }
+  .sol-list a:hover .arr { transform: translateX(3px); color: var(--c-accent); }
+
+  .cases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .case {
+    display: flex; flex-direction: column; gap: 10px; background: var(--c-dark); color: var(--c-on-dark); text-decoration: none;
+    border-radius: var(--radius); padding: 22px; min-height: 200px; transition: transform .2s, box-shadow .2s;
+  }
+  .case:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .case .tag { align-self: flex-start; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: rgba(255, 255, 255, .1); color: var(--c-on-dark-muted); }
+  .case h4 { margin: 0; font-size: 17px; line-height: 1.3; color: #fff; }
+  .case p { margin: 0; font-size: 14px; color: var(--c-on-dark-muted); flex: 1; }
+  .case .more { font-size: 14px; font-weight: 700; color: #fff; display: flex; gap: 6px; align-items: center; }
+  .case .more .ico { width: 16px; height: 16px; }
+
+  .cta-band {
+    margin-top: 40px; border-radius: 18px; padding: 28px 32px; background: var(--c-accent); color: var(--c-on-accent);
+    display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+  }
+  .cta-band h3 { margin: 0; font-size: 22px; font-weight: 800; }
+  .cta-band p { margin: 6px 0 0; opacity: .85; }
+  .cta-band .btn { background: #fff; color: var(--c-accent); }
+  .cta-band .btn:hover { background: #eef3ff; }
+
+  /* ---------- Карта решений ---------- */
+  .matrix-wrap { overflow-x: auto; border: 1px solid var(--c-line); border-radius: var(--radius); background: var(--c-bg); }
+  table.matrix { border-collapse: collapse; width: 100%; min-width: 920px; font-size: 14px; }
+  .matrix th, .matrix td { border-bottom: 1px solid var(--c-line); padding: 0; text-align: center; }
+  .matrix thead th { padding: 14px 8px; font-size: 12.5px; font-weight: 700; color: var(--c-ink-2); vertical-align: bottom; line-height: 1.25; }
+  .matrix thead th .ico { margin: 0 auto 6px; width: 20px; height: 20px; color: var(--c-accent); }
+  .matrix tbody th { text-align: left; padding: 12px 16px; font-weight: 700; white-space: nowrap; }
+  .matrix tr > :first-child { position: sticky; left: 0; z-index: 1; background: var(--c-bg); box-shadow: inset -1px 0 0 var(--c-line); }
+  .matrix tbody th button { background: none; border: 0; padding: 0; cursor: pointer; font-weight: 700; text-align: left; }
+  .matrix tbody th button:hover { color: var(--c-accent); }
+  .matrix tbody tr:last-child th, .matrix tbody tr:last-child td { border-bottom: 0; }
+  .matrix td button {
+    width: 100%; min-height: 46px; border: 0; background: transparent; cursor: pointer; font-weight: 800; font-size: 15px;
+    display: grid; place-items: center;
+  }
+  .matrix td button span { min-width: 34px; height: 30px; border-radius: 8px; display: grid; place-items: center; padding: 0 8px; }
+  .matrix td button:hover span { outline: 2px solid var(--c-accent); }
+  .matrix .l1 span { background: #eef3ff; color: #3a5bb0; }
+  .matrix .l2 span { background: #d6e2ff; color: #1d44a8; }
+  .matrix .l3 span { background: #9fbaff; color: #0d2e85; }
+  .matrix .l4 span { background: var(--c-accent); color: #fff; }
+  .matrix td.empty { color: #c3ccd9; }
+  .matrix tfoot td, .matrix tfoot th { padding: 12px 8px; font-size: 13px; color: var(--c-muted); font-weight: 700; border-bottom: 0; border-top: 1px solid var(--c-line); }
+  .matrix tfoot th { text-align: left; padding-left: 16px; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--c-muted); margin-top: 14px; align-items: center; }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; margin-right: 6px; }
+
+  /* ---------- Форма ---------- */
+  .form-section { background: var(--c-dark); color: var(--c-on-dark); }
+  .form-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 48px; align-items: start; }
+  .form-section h2 { color: #fff; }
+  .form-section .section-head p { color: var(--c-on-dark-muted); }
+  .contacts-list { list-style: none; padding: 0; margin: 28px 0 0; display: grid; gap: 14px; }
+  .contacts-list li { display: flex; gap: 12px; align-items: flex-start; color: var(--c-on-dark-muted); }
+  .contacts-list li b { color: #fff; display: block; font-weight: 700; }
+  .contacts-list .ico { color: var(--c-on-dark); margin-top: 2px; }
+  form.lead-form { background: var(--c-bg); color: var(--c-ink); border-radius: 18px; padding: 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .field { display: grid; gap: 6px; }
+  .field.full { grid-column: 1 / -1; }
+  .field label { font-size: 13px; font-weight: 700; color: var(--c-ink-2); }
+  .field input, .field select, .field textarea {
+    width: 100%; border: 1px solid var(--c-line); border-radius: 10px; padding: 11px 13px; background: var(--c-soft); outline: none;
+    transition: border-color .15s, background .15s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--c-accent); background: #fff; }
+  .field textarea { resize: vertical; min-height: 90px; }
+  .form-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .form-foot small { color: var(--c-muted); font-size: 12.5px; flex: 1; min-width: 200px; }
+  .form-msg { grid-column: 1 / -1; display: none; background: #e9f8ef; color: #17633a; border-radius: 10px; padding: 12px 14px; font-weight: 600; font-size: 14px; }
+  .form-msg.is-on { display: block; }
+
+  /* ---------- Подвал ---------- */
+  .footer { background: #07122a; color: var(--c-on-dark-muted); font-size: 14px; }
+  .footer .wrap { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; padding-top: 28px; padding-bottom: 28px; }
+  .footer a { text-decoration: none; }
+  .footer a:hover { color: #fff; }
+  .footer nav { display: flex; gap: 18px; flex-wrap: wrap; }
+
+  /* ---------- Адаптив ---------- */
+  @media (max-width: 1100px) {
+    .nav { gap: 16px; font-size: 14px; }
+    .header-right .btn { display: none; }
+    .dir-grid { grid-template-columns: repeat(2, 1fr); }
+    .cases { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 960px) {
+    .nav { display: none; }
+    .burger { display: inline-flex; background: none; border: 1px solid var(--c-line); border-radius: 10px; padding: 8px; cursor: pointer; }
+    .nav.is-open { display: flex; flex-direction: column; position: absolute; top: 68px; left: 0; right: 0; background: #fff; padding: 12px var(--gutter) 18px; border-bottom: 1px solid var(--c-line); gap: 4px; box-shadow: var(--shadow); }
+    .hero-grid { grid-template-columns: 1fr; gap: 32px; }
+    .ind-grid { grid-template-columns: repeat(2, 1fr); }
+    .ind-head { grid-template-columns: 1fr; gap: 24px; }
+    .form-grid { grid-template-columns: 1fr; gap: 32px; }
+  }
+  @media (max-width: 640px) {
+    :root { --gutter: 16px; }
+    .section { padding: 52px 0; }
+    .header .wrap { height: 60px; gap: 12px; }
+    .nav.is-open { top: 60px; }
+    .tabs-wrap { top: 60px; }
+    .phone { font-size: 14px; }
+    .logo { font-size: 20px; }
+    .stats { grid-template-columns: repeat(2, 1fr); row-gap: 18px; }
+    .ind-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .ind-card { min-height: 0; padding: 16px; gap: 10px; }
+    .ind-card p, .ind-card .ind-num { display: none; }
+    .ind-card h3 { font-size: 16px; }
+    .ind-card .ind-ico { width: 40px; height: 40px; }
+    .ind-meta { flex-direction: column; gap: 0; font-size: 12.5px; }
+    .dir-grid, .cases { grid-template-columns: 1fr; }
+    .ind-title { flex-direction: column; gap: 14px; }
+    form.lead-form { grid-template-columns: 1fr; padding: 20px; }
+    .cta-band { padding: 22px; }
+    .scheme-row.is-2 { margin-left: 8px; }
+    .scheme-row.is-3 { margin-left: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-bar" id="protoBar">
+  <div class="wrap">
+    <span><b>Прототип.</b> Направления и решения — из разделов «Услуги» и «Решения» cns-corp.ru, кейсы — из «Кейсов». Ссылки ведут на существующие страницы сайта.</span>
+    <button type="button" aria-label="Скрыть" onclick="document.getElementById('protoBar').remove()">×</button>
+  </div>
+</div>
+
+<header class="header">
+  <div class="wrap">
+    <a class="logo" href="https://cns-corp.ru/" target="_blank" rel="noopener"><span class="logo-mark">CNS</span><span class="visually-hidden">CNS — на главную</span></a>
+    <nav class="nav" id="nav" aria-label="Основное меню">
+      <a href="https://cns-corp.ru/it-uslugi/" target="_blank" rel="noopener">Услуги</a>
+      <a href="#" aria-current="page">Отрасли</a>
+      <a href="https://cns-corp.ru/oborudovanie/" target="_blank" rel="noopener">Оборудование</a>
+      <a href="https://cns-corp.ru/po/" target="_blank" rel="noopener">ПО</a>
+      <a href="https://cns-corp.ru/kejsy/" target="_blank" rel="noopener">Кейсы</a>
+      <a href="https://cns-corp.ru/about/" target="_blank" rel="noopener">О компании</a>
+      <a href="https://cns-corp.ru/contacts/" target="_blank" rel="noopener">Контакты</a>
+    </nav>
+    <div class="header-right">
+      <a class="phone" href="tel:+74959559096">+7 (495) 955-90-96</a>
+      <a class="btn btn-sm" href="#zayavka">Оставить заявку</a>
+      <button class="burger" type="button" aria-label="Меню" aria-expanded="false" aria-controls="nav" id="burger">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <nav class="crumbs" aria-label="Хлебные крошки">
+        <a href="https://cns-corp.ru/" target="_blank" rel="noopener">Главная</a><span>/</span><span>Отрасли</span>
+      </nav>
+      <div class="hero-grid">
+        <div>
+          <h1>ИТ-решения для&nbsp;вашей отрасли</h1>
+          <p class="lead">Подбираем инфраструктуру, сети, безопасность, связь и мультимедиа под задачи конкретной отрасли — от проекта и поставки до внедрения и поддержки.</p>
+          <div class="hero-actions">
+            <a class="btn" href="#otrasli">Выбрать отрасль</a>
+            <a class="btn btn-ghost" href="#karta">Карта решений</a>
+          </div>
+          <div class="stats">
+            <div class="stat"><b>15+</b><span>лет на рынке</span></div>
+            <div class="stat"><b>3000+</b><span>проектов</span></div>
+            <div class="stat"><b>1000+</b><span>клиентов</span></div>
+            <div class="stat"><b>200</b><span>вендоров</span></div>
+          </div>
+        </div>
+        <div class="scheme" aria-label="Как устроен раздел">
+          <div class="scheme-title">Как устроен раздел</div>
+          <div class="scheme-row is-1">
+            <div class="scheme-badge" data-icon="retail"></div>
+            <div><div class="lvl">1 · Отрасль</div><div class="val">Ритейл и FMCG</div></div>
+          </div>
+          <div class="scheme-arrow"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>
+          <div class="scheme-row is-2">
+            <div class="scheme-badge" data-icon="net"></div>
+            <div><div class="lvl">2 · Направление бизнеса</div><div class="val">Сети</div></div>
+          </div>
+          <div class="scheme-arrow" style="margin-left:40px"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>
+          <div class="scheme-row is-3">
+            <div class="scheme-badge" data-icon="check"></div>
+            <div><div class="lvl">3 · Решение</div><div class="val">Построение Wi-Fi сетей</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="otrasli">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">Отрасли</div>
+          <h2>Выберите отрасль</h2>
+          <p>Для каждой отрасли собрали направления бизнеса CNS и конкретные решения, которые закрывают её типовые задачи.</p>
+        </div>
+      </div>
+      <div class="ind-grid" id="indGrid"></div>
+    </div>
+  </section>
+
+  <section class="section-soft" id="otrasl" aria-live="polite">
+    <div class="tabs-wrap">
+      <div class="wrap"><div class="tabs" id="tabs" role="tablist" aria-label="Отрасли"></div></div>
+    </div>
+    <div class="wrap" style="padding-bottom:72px">
+      <div id="indDetail"></div>
+    </div>
+  </section>
+
+  <section class="section" id="karta">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">Карта решений</div>
+          <h2>Отрасли × направления бизнеса</h2>
+          <p>Число решений CNS на пересечении отрасли и направления. Нажмите на ячейку, чтобы открыть решения.</p>
+        </div>
+      </div>
+      <div class="matrix-wrap"><table class="matrix" id="matrix"></table></div>
+      <div class="legend">
+        <span><i style="background:#eef3ff"></i>1 решение</span>
+        <span><i style="background:#d6e2ff"></i>2</span>
+        <span><i style="background:#9fbaff"></i>3–4</span>
+        <span><i style="background:var(--c-accent)"></i>5+</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section form-section" id="zayavka">
+    <div class="wrap form-grid">
+      <div>
+        <div class="section-head" style="margin-bottom:0">
+          <div>
+            <div class="eyebrow" style="color:#8fb0ff">Консультация</div>
+            <h2>Обсудим задачи вашей отрасли</h2>
+            <p>Расскажите о проекте — инженер CNS подберёт решения и подготовит предложение.</p>
+          </div>
+        </div>
+        <ul class="contacts-list">
+          <li><svg class="ico" viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg><div><b><a href="tel:+74959559096" style="text-decoration:none">+7 (495) 955-90-96</a></b>Пн–Пт, 9:00–19:00</div></li>
+          <li><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg><div><b><a href="mailto:info@cns-corp.ru" style="text-decoration:none">info@cns-corp.ru</a></b>Ответим в течение рабочего дня</div></li>
+          <li><svg class="ico" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><div><b>127254, Москва</b>Огородный проезд, д. 5, стр. 2, офис 202</div></li>
+        </ul>
+      </div>
+      <form class="lead-form" id="leadForm" novalidate>
+        <div class="field"><label for="f-name">Имя</label><input id="f-name" name="name" autocomplete="name" placeholder="Как к вам обращаться"></div>
+        <div class="field"><label for="f-phone">Телефон</label><input id="f-phone" name="phone" type="tel" autocomplete="tel" placeholder="+7 (___) ___-__-__"></div>
+        <div class="field"><label for="f-company">Компания</label><input id="f-company" name="company" autocomplete="organization" placeholder="Название компании"></div>
+        <div class="field"><label for="f-ind">Отрасль</label><select id="f-ind" name="industry"></select></div>
+        <div class="field full"><label for="f-msg">Задача</label><textarea id="f-msg" name="message" placeholder="Например: открываем 10 магазинов, нужна сеть, видеонаблюдение и экраны"></textarea></div>
+        <div class="form-msg" id="formMsg" role="status">Это прототип — заявка не отправляется. На сайте форма уйдёт в CRM с пометкой отрасли.</div>
+        <div class="form-foot">
+          <button class="btn" type="submit">Отправить заявку</button>
+          <small>Нажимая кнопку, вы соглашаетесь с обработкой персональных данных.</small>
+        </div>
+      </form>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <span>© CNS · ИТ-интегратор и поставщик ИТ-оборудования</span>
+    <nav aria-label="Ссылки в подвале">
+      <a href="https://cns-corp.ru/it-uslugi/" target="_blank" rel="noopener">Услуги</a>
+      <a href="https://cns-corp.ru/kejsy/" target="_blank" rel="noopener">Кейсы</a>
+      <a href="https://cns-corp.ru/stati/" target="_blank" rel="noopener">Статьи</a>
+      <a href="https://cns-corp.ru/demo-laboratoriya/" target="_blank" rel="noopener">Демо-лаборатория</a>
+      <a href="https://cns-corp.ru/contacts/" target="_blank" rel="noopener">Контакты</a>
+    </nav>
+  </div>
+</footer>
+
+<!--
+  Данные страницы. Единый источник для вёрстки и для otrasli/STRUCTURE.md.
+  directions — направления бизнеса (раздел «Услуги» /it-uslugi/ + «Решения» /decision/),
+  industries[].directions — какие направления и решения показываем в отрасли,
+  cases — кейсы со страницы /kejsy/ (если отдельной страницы не нашлось — ссылка на /kejsy/).
+-->
+<script type="application/json" id="data">
+{
+  "site": "https://cns-corp.ru",
+  "directions": [
+    {
+      "id": "infra", "icon": "infra", "name": "ИТ-инфраструктура", "url": "/it-uslugi/infrastruktura/",
+      "solutions": [
+        { "id": "audit", "name": "Аудит ИТ-инфраструктуры", "url": "/it-uslugi/infrastruktura/audit/" },
+        { "id": "servers", "name": "Серверные решения", "url": "/it-uslugi/infrastruktura/servernye-resheniya/" },
+        { "id": "virt", "name": "Виртуализация", "url": "/it-uslugi/infrastruktura/virtualizacziya/" },
+        { "id": "dc", "name": "Управление и автоматизация ЦОД", "url": "/decision/computing-infrastructure/management-and-automation-of-data-centers/" },
+        { "id": "import", "name": "Импортозамещение", "url": "/it-uslugi/infrastruktura/importozameshhenie/" },
+        { "id": "move", "name": "ИТ-переезд", "url": "/it-uslugi/infrastruktura/it-pereezd/" }
+      ]
+    },
+    {
+      "id": "net", "icon": "net", "name": "Сети", "url": "/it-uslugi/seti/",
+      "solutions": [
+        { "id": "netsol", "name": "Сетевые решения", "url": "/it-uslugi/seti/setevye-resheniya/" },
+        { "id": "dcn", "name": "Распределённая корпоративная сеть", "url": "/decision/network-solutions/distributed-corporate-network/" },
+        { "id": "wifi", "name": "Построение Wi-Fi сетей", "url": "/it-uslugi/seti/postroenie-wi-fi-setej/" },
+        { "id": "sks", "name": "Монтаж СКС", "url": "/it-uslugi/seti/montazh-sks/" },
+        { "id": "vols", "name": "Монтаж ВОЛС", "url": "/it-uslugi/seti/montazh-vols/" }
+      ]
+    },
+    {
+      "id": "sec", "icon": "sec", "name": "Безопасность", "url": "/it-uslugi/bezopasnost/",
+      "solutions": [
+        { "id": "video", "name": "Видеонаблюдение", "url": "/it-uslugi/bezopasnost/videonablyudenie/" },
+        { "id": "skud", "name": "СКУД", "url": "/it-uslugi/bezopasnost/skud/" },
+        { "id": "fire", "name": "Пожарная безопасность", "url": "/it-uslugi/bezopasnost/pozharnaya-bezopasnost/" },
+        { "id": "ib", "name": "Информационная безопасность", "url": "/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/" },
+        { "id": "dlp", "name": "Защита от утечек данных (DLP)", "url": "/it-uslugi/bezopasnost/" },
+        { "id": "policy", "name": "Управление политиками и доступом", "url": "/decision/information-security/policy-management-and-access/" },
+        { "id": "vpn", "name": "Виртуальные частные сети (VPN)", "url": "/decision/information-security/vpn/" }
+      ]
+    },
+    {
+      "id": "comm", "icon": "comm", "name": "Коммуникации", "url": "/it-uslugi/kommunikaczii/",
+      "solutions": [
+        { "id": "vks", "name": "Видеоконференцсвязь", "url": "/it-uslugi/kommunikaczii/videokonferenczsvyaz/" },
+        { "id": "tel", "name": "АТС и IP-телефония", "url": "/it-uslugi/kommunikaczii/telefoniya/" }
+      ]
+    },
+    {
+      "id": "mm", "icon": "mm", "name": "Мультимедиа", "url": "/it-uslugi/multimedia/",
+      "solutions": [
+        { "id": "walls", "name": "Видеостены", "url": "/it-uslugi/multimedia/videosteny/" },
+        { "id": "display", "name": "Системы отображения информации", "url": "/it-uslugi/multimedia/sistemy-otobrazheniya-informaczii/" },
+        { "id": "screens", "name": "Информационно-рекламные экраны", "url": "/it-uslugi/multimedia/informaczionno-reklamnye-ekrany/" },
+        { "id": "stage", "name": "Сценическое оборудование", "url": "/it-uslugi/multimedia/sczenicheskoe-oborudovanie/" },
+        { "id": "sound", "name": "Акустические системы", "url": "https://multimedia.cns-corp.ru/uslugi/akusticheskie-sistemi" },
+        { "id": "light", "name": "Световое оборудование", "url": "https://multimedia.cns-corp.ru/uslugi/svetovoe-oborudovanie" },
+        { "id": "booking", "name": "Бронирование переговорных", "url": "/it-uslugi/multimedia/sistema-bronirovaniya-peregovornyh-komnat/" },
+        { "id": "smart", "name": "Система умного дома", "url": "/it-uslugi/multimedia/sistema-umnogo-doma/" }
+      ]
+    },
+    {
+      "id": "support", "icon": "support", "name": "ИТ-поддержка", "url": "/it-uslugi/it-support/",
+      "solutions": [
+        { "id": "outsourcing", "name": "ИТ-аутсорсинг", "url": "/it-uslugi/it-support/it-autsorsing/" },
+        { "id": "outstaff", "name": "ИТ-аутстаффинг", "url": "/it-uslugi/it-support/it-autstaffing/" },
+        { "id": "warranty", "name": "Расширенная гарантия", "url": "/it-uslugi/rasshirennaya-garantiya/" }
+      ]
+    },
+    {
+      "id": "cloud", "icon": "cloud", "name": "Облачные сервисы", "url": "/it-uslugi/oblachnye-servisy/",
+      "solutions": [
+        { "id": "colo", "name": "Аренда стоек в ЦОД Tier III", "url": "/it-uslugi/oblachnye-servisy/arenda-stoek/" },
+        { "id": "vps", "name": "Виртуальные серверы", "url": "/it-uslugi/oblachnye-servisy/" }
+      ]
+    },
+    {
+      "id": "dev", "icon": "dev", "name": "Разработка и 1С", "url": "/decision/1c/development/",
+      "solutions": [
+        { "id": "c1", "name": "Разработка на 1С:Предприятие", "url": "/decision/1c/development/" },
+        { "id": "web", "name": "Разработка сайтов", "url": "https://multimedia.cns-corp.ru/uslugi/razrabotka-sajtov" }
+      ]
+    }
+  ],
+
+  "cases": {
+    "piknik": { "tag": "Ритейл", "title": "Комплексное оснащение сети фешн-магазинов ООО «ПикНик»", "text": "Три полностью оснащённых магазина сданы в срок.", "url": "/kejsy/kompleksnoe-osnashhenie-seti-feshn-magazinov-ooo-piknik/" },
+    "distributor": { "tag": "Дистрибуция", "title": "Техподдержка распределённой сетевой инфраструктуры на базе Cisco для федерального дистрибьютора", "text": "Сопровождение распределённой сети компании по всей стране.", "url": "/kejsy/tehnicheskaya-podderzhka-raspredelennoi-setevoi-infrastruktury-na-baze-cisco-dlya-federalnogo-distribyutora/" },
+    "pharmacy": { "tag": "Аптечная сеть", "title": "Монтаж кабельной системы для федеральной аптечной сети", "text": "СКС в 500+ аптеках по России, затем ИТ-обслуживание: 30+ проектов открытия и редизайна, 800+ заявок с SLA не ниже 97%.", "url": "/kejsy/montazh-kabelnoj-sistemy/" },
+    "generium": { "tag": "Фарма", "title": "Комплексное оснащение переговорных комнат для «Generium»", "text": "Оснащение переговорных комнат мультимедийным оборудованием.", "url": "/kejsy/kompleksnoe-osnashhenie-peregovornyh-komnat-dlya-generium/" },
+    "pharma": { "tag": "Фарма", "title": "Комплексная техподдержка распределённой ИТ-инфраструктуры фармацевтической компании", "text": "Трёхлетний контракт на сопровождение ИТ-инфраструктуры.", "url": "/kejsy/" },
+    "letovo": { "tag": "Школа", "title": "Система термометрии и контроля доступа для школы «Летово»", "text": "Термометрия на входе и СКУД для учебного комплекса.", "url": "/kejsy/it-autstaffing/" },
+    "schoolhall": { "tag": "Школа", "title": "Оборудование актового зала в школе", "text": "Сценическое, звуковое и световое оснащение актового зала.", "url": "/kejsy/oborudovanie-aktovogo-zala-v-shkole/" },
+    "oilgas": { "tag": "Нефтегаз", "title": "Модернизация видеонаблюдения и СКУД для лидера нефтегазовой отрасли", "text": "Отечественные системы видеонаблюдения и СКУД, автоматизация контроля ключей, усиление антитеррористического периметра.", "url": "/kejsy/modernizacziya-sistem-videonablyudeniya-i-kontrolya-dostupa-skud-dlya-lidera-neftegazovoi-otrasli/" },
+    "radio": { "tag": "Завод и склад", "title": "Радиообследование завода, склада при заводе и прилегающей территории", "text": "Выявлены зоны слабого и отсутствующего покрытия Wi-Fi.", "url": "/projects/a-comprehensive-radio-survey-of-the-plant-the-warehouse-at-the-plant-and-the-surrounding-area/" },
+    "pokrovsky": { "tag": "Добыча", "title": "Отказоустойчивая инфраструктура хранения и резервного копирования для «Покровского рудника»", "text": "СХД и система резервного копирования для горнодобывающей компании.", "url": "/kejsy/" },
+    "dealer": { "tag": "Спецтехника", "title": "Система кибербезопасности для крупного дилера спецтехники", "text": "От пилотного проекта до промышленной эксплуатации.", "url": "/kejsy/" },
+    "fish": { "tag": "Рыбопромышленность", "title": "Оснащение рабочих мест для крупного рыбопромышленного холдинга", "text": "Годовой контракт на 21 юридическое лицо холдинга.", "url": "/kejsy/" },
+    "puls": { "tag": "Спорт", "title": "Переход ФК «Пульс» на единый цифровой офис Яндекс 360", "text": "Бесшовный переход клуба на единую цифровую среду.", "url": "/kejsy/" },
+    "gov": { "tag": "Госсектор", "title": "Импортозамещение на государственном уровне", "text": "Перевод ИТ-инфраструктуры на отечественные решения.", "url": "/kejsy/" }
+  },
+
+  "industries": [
+    {
+      "id": "ritejl-i-fmcg", "icon": "retail", "name": "Ритейл и FMCG",
+      "short": "Торговые сети, дистрибьюторы и производители товаров повседневного спроса.",
+      "lead": "ИТ-инфраструктура для торговых сетей и дистрибьюторов: быстрое открытие точек, единая сеть магазинов и складов, экраны в торговом зале и контроль потерь.",
+      "tasks": [
+        "Открывать, переезжать и закрывать точки без простоя",
+        "Объединить магазины, склады и офис в единую защищённую сеть",
+        "Управлять контентом на экранах в торговом зале",
+        "Снижать потери: видеонаблюдение и контроль доступа",
+        "Обслуживать ИТ сети точек по единому SLA"
+      ],
+      "directions": [
+        { "id": "net", "note": "Единая сеть для магазинов, складов и офиса, Wi-Fi для торгового зала и терминалов сбора данных.", "solutions": ["dcn", "netsol", "wifi", "sks"] },
+        { "id": "sec", "note": "Видеонаблюдение в зале и на складе, защищённые каналы между точками и офисом.", "solutions": ["video", "skud", "vpn", "dlp"] },
+        { "id": "mm", "note": "Digital signage и информационные экраны в торговом зале, фоновый звук.", "solutions": ["screens", "display", "sound"] },
+        { "id": "support", "note": "ИТ-обслуживание всех точек сети по единому SLA.", "solutions": ["outsourcing", "warranty"] },
+        { "id": "infra", "note": "Серверы и виртуализация для учётных систем, переезды офисов и складов.", "solutions": ["servers", "virt", "move"] },
+        { "id": "comm", "note": "Телефония для магазинов и колл-центра, ВКС для управляющих.", "solutions": ["tel", "vks"] },
+        { "id": "cloud", "note": "Учётные системы в ЦОД вместо серверных в каждой точке.", "solutions": ["vps", "colo"] },
+        { "id": "dev", "note": "Автоматизация торговли и учёта на 1С, сайт сети.", "solutions": ["c1", "web"] }
+      ],
+      "cases": ["piknik", "pharmacy", "distributor"]
+    },
+    {
+      "id": "agroprom", "icon": "agro", "name": "Агропром",
+      "short": "Агрохолдинги, фермы, элеваторы, пищевая и рыбная промышленность.",
+      "lead": "Связь и безопасность для агрохолдингов и пищевых предприятий: большие территории, удалённые площадки и много юрлиц в одной ИТ-среде.",
+      "tasks": [
+        "Связь на удалённых площадках и больших территориях",
+        "Охрана периметра, техники и складов",
+        "Единая ИТ-среда для холдинга с несколькими юрлицами",
+        "ИТ-поддержка без штата на каждой площадке",
+        "Учёт и планирование в 1С"
+      ],
+      "directions": [
+        { "id": "net", "note": "Wi-Fi и ВОЛС для производственных площадок, складов и элеваторов, сеть между филиалами.", "solutions": ["wifi", "vols", "dcn"] },
+        { "id": "sec", "note": "Видеонаблюдение периметра и техники, СКУД, пожарная безопасность складов.", "solutions": ["video", "skud", "fire"] },
+        { "id": "support", "note": "Обслуживание рабочих мест на всех площадках и юрлицах холдинга.", "solutions": ["outsourcing", "outstaff"] },
+        { "id": "comm", "note": "ВКС и телефония для связи офиса с удалёнными площадками.", "solutions": ["vks", "tel"] },
+        { "id": "infra", "note": "Серверная инфраструктура, аудит и переход на отечественные решения.", "solutions": ["servers", "audit", "import"] },
+        { "id": "cloud", "note": "Облачные ресурсы вместо серверной на каждой площадке.", "solutions": ["vps", "colo"] },
+        { "id": "dev", "note": "Учёт, планирование и отчётность на 1С.", "solutions": ["c1"] }
+      ],
+      "cases": ["fish", "radio"]
+    },
+    {
+      "id": "proizvodstvo", "icon": "factory", "name": "Производство",
+      "short": "Заводы, добывающие и нефтегазовые компании, промышленные предприятия.",
+      "lead": "Надёжная ИТ-инфраструктура для заводов, добывающих и нефтегазовых компаний — от отказоустойчивого хранения данных до защищённого периметра.",
+      "tasks": [
+        "Отказоустойчивое хранение данных и резервное копирование",
+        "Wi-Fi в цехах и на складах, связь между корпусами",
+        "Антитеррористическая защищённость и контроль доступа",
+        "Переход на отечественное оборудование и ПО",
+        "Диспетчерские и ситуационные центры"
+      ],
+      "directions": [
+        { "id": "infra", "note": "Отказоустойчивые серверы и СХД, виртуализация, импортозамещение, управление ЦОД.", "solutions": ["servers", "virt", "dc", "import", "audit"] },
+        { "id": "net", "note": "Радиообследование и Wi-Fi для цехов и складов, ВОЛС между корпусами.", "solutions": ["wifi", "vols", "sks", "netsol"] },
+        { "id": "sec", "note": "Видеонаблюдение, СКУД, пожарная безопасность, защита периметра сети.", "solutions": ["video", "skud", "fire", "ib", "policy"] },
+        { "id": "mm", "note": "Видеостены для диспетчерских и ситуационных центров.", "solutions": ["walls", "display"] },
+        { "id": "comm", "note": "ВКС и телефония для связи с удалёнными площадками.", "solutions": ["vks", "tel"] },
+        { "id": "support", "note": "Поддержка инфраструктуры и расширенная гарантия на серверы 24/7.", "solutions": ["outsourcing", "warranty"] },
+        { "id": "dev", "note": "Автоматизация производственного учёта и планирования на 1С.", "solutions": ["c1"] }
+      ],
+      "cases": ["oilgas", "pokrovsky", "radio"]
+    },
+    {
+      "id": "logistika", "icon": "truck", "name": "Логистика",
+      "short": "Склады, распределительные центры, транспортные и дистрибуционные компании.",
+      "lead": "ИТ для складов и распределительных центров: сплошное покрытие Wi-Fi для терминалов, распределённая сеть и контроль территории 24/7.",
+      "tasks": [
+        "Сплошное покрытие Wi-Fi склада для терминалов сбора данных",
+        "Связь между складами, РЦ и офисом",
+        "Видеоконтроль зон погрузки и территории",
+        "Круглосуточная работа систем без простоев",
+        "Учёт и складские операции в 1С"
+      ],
+      "directions": [
+        { "id": "net", "note": "Радиообследование и Wi-Fi склада, распределённая сеть РЦ и филиалов.", "solutions": ["wifi", "dcn", "sks", "vols"] },
+        { "id": "sec", "note": "Видеонаблюдение зон погрузки и территории, СКУД, пожарная безопасность, VPN.", "solutions": ["video", "skud", "fire", "vpn"] },
+        { "id": "infra", "note": "Серверы и виртуализация для складских и учётных систем, переезд склада.", "solutions": ["servers", "virt", "move"] },
+        { "id": "cloud", "note": "Размещение систем в ЦОД Tier III.", "solutions": ["colo", "vps"] },
+        { "id": "support", "note": "Поддержка 24/7 и расширенная гарантия на оборудование.", "solutions": ["outsourcing", "warranty"] },
+        { "id": "comm", "note": "Телефония для диспетчерской, ВКС с филиалами.", "solutions": ["tel", "vks"] },
+        { "id": "mm", "note": "Видеостены и экраны для диспетчерской.", "solutions": ["walls", "display"] },
+        { "id": "dev", "note": "Складской учёт и документооборот на 1С.", "solutions": ["c1"] }
+      ],
+      "cases": ["distributor", "radio"]
+    },
+    {
+      "id": "stroitelstvo", "icon": "crane", "name": "Строительство",
+      "short": "Девелоперы, генподрядчики, дилеры спецтехники.",
+      "lead": "ИТ-инфраструктура для девелоперов, генподрядчиков и дилеров спецтехники: слаботочные системы в новых зданиях, контроль площадок и защита данных.",
+      "tasks": [
+        "СКС и сети в строящихся и новых зданиях",
+        "Видеоконтроль строительных площадок",
+        "Связь штаба с удалёнными объектами",
+        "Защита проектной документации и данных",
+        "Учёт материалов, этапов работ и подрядчиков"
+      ],
+      "directions": [
+        { "id": "net", "note": "СКС, ВОЛС и Wi-Fi для новых зданий и площадок.", "solutions": ["sks", "vols", "wifi", "netsol"] },
+        { "id": "sec", "note": "Видеонаблюдение и СКУД на площадках, пожарная безопасность, кибербезопасность.", "solutions": ["video", "skud", "fire", "ib", "policy"] },
+        { "id": "mm", "note": "Умный дом и мультимедиа для жилых и коммерческих объектов.", "solutions": ["smart", "display", "sound"] },
+        { "id": "comm", "note": "ВКС и телефония для связи штаба с объектами.", "solutions": ["vks", "tel"] },
+        { "id": "infra", "note": "ИТ-переезд и запуск офиса, серверы для проектных систем.", "solutions": ["move", "servers", "virt"] },
+        { "id": "support", "note": "ИТ-поддержка офиса и объектов, специалисты на время проекта.", "solutions": ["outsourcing", "outstaff"] },
+        { "id": "dev", "note": "Учёт материалов, этапов работ и подрядчиков на 1С.", "solutions": ["c1"] }
+      ],
+      "cases": ["dealer"]
+    },
+    {
+      "id": "obrazovanie", "icon": "edu", "name": "Образование",
+      "short": "Школы, вузы, колледжи и учебные центры.",
+      "lead": "Оснащаем школы, вузы и учебные центры: безопасный вход, мультимедийные аудитории и актовые залы, дистанционное обучение.",
+      "tasks": [
+        "Безопасный вход: СКУД, термометрия, видеонаблюдение",
+        "Оснащение актовых залов и аудиторий",
+        "Дистанционное и гибридное обучение",
+        "Wi-Fi во всех учебных корпусах",
+        "Переход на отечественное ПО"
+      ],
+      "directions": [
+        { "id": "sec", "note": "СКУД и термометрия на входе, видеонаблюдение, пожарная безопасность.", "solutions": ["skud", "video", "fire"] },
+        { "id": "mm", "note": "Актовые залы под ключ — сцена, звук, свет; системы отображения для аудиторий.", "solutions": ["stage", "sound", "light", "display", "walls"] },
+        { "id": "comm", "note": "ВКС для дистанционного и гибридного обучения.", "solutions": ["vks", "tel"] },
+        { "id": "net", "note": "Wi-Fi и СКС для учебных корпусов.", "solutions": ["wifi", "sks", "netsol"] },
+        { "id": "infra", "note": "Серверная инфраструктура и переход на отечественное ПО.", "solutions": ["import", "servers", "virt"] },
+        { "id": "support", "note": "ИТ-аутсорсинг и аутстаффинг для школ и вузов.", "solutions": ["outsourcing", "outstaff"] }
+      ],
+      "cases": ["letovo", "schoolhall"]
+    },
+    {
+      "id": "medicina", "icon": "med", "name": "Медицина",
+      "short": "Клиники, аптечные сети, фармацевтические компании.",
+      "lead": "ИТ для клиник, аптечных сетей и фармкомпаний: защищённая работа с данными, типовое оснащение филиалов и поддержка по SLA.",
+      "tasks": [
+        "Защита персональных и медицинских данных",
+        "Типовое ИТ-оснащение аптек и филиалов",
+        "Поддержка распределённой сети по SLA",
+        "Информационные экраны и навигация для посетителей",
+        "Связь между филиалами и ВКС"
+      ],
+      "directions": [
+        { "id": "net", "note": "СКС и сеть для аптек и клиник, объединение филиалов.", "solutions": ["sks", "dcn", "wifi"] },
+        { "id": "sec", "note": "Защита данных пациентов, VPN между филиалами, видеонаблюдение и СКУД.", "solutions": ["ib", "dlp", "vpn", "video", "skud"] },
+        { "id": "support", "note": "Обслуживание сети филиалов по SLA.", "solutions": ["outsourcing", "warranty"] },
+        { "id": "infra", "note": "Серверы, резервирование и импортозамещение для медицинских систем.", "solutions": ["servers", "virt", "import", "audit"] },
+        { "id": "mm", "note": "Информационные экраны, оснащение переговорных и конференц-залов.", "solutions": ["display", "screens", "booking"] },
+        { "id": "comm", "note": "ВКС для консилиумов и связи с филиалами.", "solutions": ["vks", "tel"] },
+        { "id": "cloud", "note": "Размещение медицинских систем в ЦОД Tier III.", "solutions": ["colo", "vps"] }
+      ],
+      "cases": ["pharmacy", "pharma", "generium"]
+    },
+    {
+      "id": "socialnaya-sfera", "icon": "social", "name": "Социальная сфера",
+      "short": "Госучреждения, культура, спорт, социальная защита.",
+      "lead": "Решения для госучреждений, учреждений культуры и спорта: импортозамещение, безопасность посетителей и современные общественные пространства.",
+      "tasks": [
+        "Переход на отечественное оборудование и ПО",
+        "Безопасность посетителей и сотрудников",
+        "Оснащение залов, сцен и общественных пространств",
+        "Информирование посетителей",
+        "Единая цифровая среда для совместной работы"
+      ],
+      "directions": [
+        { "id": "infra", "note": "Импортозамещение ИТ-инфраструктуры, аудит, серверы.", "solutions": ["import", "audit", "servers", "virt"] },
+        { "id": "sec", "note": "Видеонаблюдение, СКУД, пожарная безопасность, защита информации.", "solutions": ["video", "skud", "fire", "ib"] },
+        { "id": "mm", "note": "Сцена, звук и свет для залов; экраны и видеостены для музеев и общественных пространств.", "solutions": ["stage", "sound", "light", "display", "walls"] },
+        { "id": "comm", "note": "ВКС и телефония для учреждений.", "solutions": ["vks", "tel"] },
+        { "id": "net", "note": "Wi-Fi для посетителей и СКС в зданиях.", "solutions": ["wifi", "sks"] },
+        { "id": "support", "note": "ИТ-обслуживание учреждений.", "solutions": ["outsourcing"] },
+        { "id": "dev", "note": "Сайты учреждений.", "solutions": ["web"] }
+      ],
+      "cases": ["gov", "puls"]
+    }
+  ]
+}
+</script>
+
+<script>
+(function () {
+  const DATA = JSON.parse(document.getElementById('data').textContent);
+  const SITE = DATA.site;
+
+  const ICONS = {
+    retail: '<path d="M5 8h14l-1.2 12H6.2L5 8z"/><path d="M9 8V7a3 3 0 0 1 6 0v1"/>',
+    agro: '<path d="M12 21v-9"/><path d="M12 12C12 8 9 5 5 5c0 4 3 7 7 7z"/><path d="M12 14c0-3.5 2.5-6 6-6 0 3.5-2.5 6-6 6z"/><path d="M7 21h10"/>',
+    factory: '<path d="M3 20V10l5 3v-3l5 3v-3l5 3V4h3v16H3z"/><path d="M7 16h2M12 16h2M17 16h1"/>',
+    truck: '<path d="M2 6h12v10H2z"/><path d="M14 9h4l3 3v4h-7"/><circle cx="6" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>',
+    crane: '<path d="M6 21V4"/><path d="M3 21h7"/><path d="M6 6h14"/><path d="M6 4l4 2"/><path d="M17 6v4"/><path d="M15 10h4v3h-4z"/><path d="M6 10l4-4"/>',
+    edu: '<path d="M2 9l10-5 10 5-10 5L2 9z"/><path d="M6 11v5c0 1.4 2.7 3 6 3s6-1.6 6-3v-5"/><path d="M22 9v6"/>',
+    med: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/>',
+    social: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.4"/><path d="M16.5 14.2c2.6.4 4.5 2.8 4.5 5.8"/>',
+    infra: '<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/>',
+    net: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="2" y="16" width="6" height="5" rx="1"/><rect x="16" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M5 16v-4h14v4"/>',
+    sec: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/>',
+    comm: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/>',
+    mm: '<rect x="2" y="4" width="20" height="13" rx="1.5"/><path d="M8 21h8M12 17v4"/>',
+    support: '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/>',
+    cloud: '<path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 9.6 4.2 4.2 0 0 0 7 18z"/>',
+    dev: '<path d="M8 8l-5 4 5 4M16 8l5 4-5 4M14 5l-4 14"/>',
+    check: '<path d="M5 12l5 5 9-10"/>',
+    arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    ext: '<path d="M7 17L17 7M9 7h8v8"/>'
+  };
+  const icon = (name, cls) => `<svg class="ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+  const href = (url) => /^https?:/.test(url) ? url : SITE + url;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const plural = (n, one, few, many) => {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+    return many;
+  };
+
+  const DIR = Object.fromEntries(DATA.directions.map((d) => [d.id, d]));
+  const SOL = {};
+  DATA.directions.forEach((d) => d.solutions.forEach((s) => { SOL[s.id] = { ...s, dir: d.id }; }));
+
+  // Проверка целостности данных — ошибки видны в консоли при правке JSON
+  DATA.industries.forEach((ind) => {
+    ind.directions.forEach((d) => {
+      if (!DIR[d.id]) console.warn('Нет направления', d.id, 'в', ind.id);
+      d.solutions.forEach((s) => { if (!SOL[s] || SOL[s].dir !== d.id) console.warn('Решение', s, 'не из направления', d.id, 'в', ind.id); });
+    });
+    ind.cases.forEach((c) => { if (!DATA.cases[c]) console.warn('Нет кейса', c, 'в', ind.id); });
+  });
+
+  const solCount = (ind) => ind.directions.reduce((n, d) => n + d.solutions.length, 0);
+
+  // Иконки в схеме hero
+  document.querySelectorAll('[data-icon]').forEach((el) => { el.innerHTML = icon(el.dataset.icon); });
+
+  // ---------- Карточки отраслей ----------
+  const grid = document.getElementById('indGrid');
+  grid.innerHTML = DATA.industries.map((ind, i) => `
+    <a class="ind-card" href="#${ind.id}" data-ind="${ind.id}">
+      <span class="ind-num">${String(i + 1).padStart(2, '0')}</span>
+      <span class="ind-ico">${icon(ind.icon)}</span>
+      <h3>${esc(ind.name)}</h3>
+      <p>${esc(ind.short)}</p>
+      <span class="ind-meta"><span><b>${ind.directions.length}</b> ${plural(ind.directions.length, 'направление', 'направления', 'направлений')}</span><span><b>${solCount(ind)}</b> ${plural(solCount(ind), 'решение', 'решения', 'решений')}</span></span>
+    </a>`).join('');
+
+  // ---------- Табы ----------
+  const tabs = document.getElementById('tabs');
+  tabs.innerHTML = DATA.industries.map((ind) => `
+    <button type="button" class="tab" role="tab" data-ind="${ind.id}" aria-selected="false">${icon(ind.icon)}${esc(ind.name)}</button>`).join('');
+
+  // ---------- Селект в форме ----------
+  const sel = document.getElementById('f-ind');
+  sel.innerHTML = '<option value="">Выберите отрасль</option>' +
+    DATA.industries.map((ind) => `<option value="${ind.id}">${esc(ind.name)}</option>`).join('') +
+    '<option value="other">Другая</option>';
+
+  // ---------- Детальный блок отрасли ----------
+  const detail = document.getElementById('indDetail');
+
+  function renderIndustry(ind) {
+    const nSol = solCount(ind);
+    const dirs = ind.directions.map((d) => {
+      const dir = DIR[d.id];
+      const sols = d.solutions.map((sid) => SOL[sid]).filter(Boolean);
+      return `
+        <article class="dir-card" id="dir-${dir.id}">
+          <div class="dir-top">
+            <span class="dir-ico">${icon(dir.icon)}</span>
+            <div>
+              <div class="dir-level">Направление</div>
+              <h4><a href="${href(dir.url)}" target="_blank" rel="noopener">${esc(dir.name)}</a></h4>
+            </div>
+          </div>
+          <p class="dir-note">${esc(d.note)}</p>
+          <ul class="sol-list" aria-label="Решения: ${esc(dir.name)}">
+            ${sols.map((s) => `<li><a href="${href(s.url)}" target="_blank" rel="noopener"><span>${esc(s.name)}</span>${icon('arrow', 'arr')}</a></li>`).join('')}
+          </ul>
+        </article>`;
+    }).join('');
+
+    const cases = ind.cases.map((cid) => DATA.cases[cid]).filter(Boolean).map((c) => `
+      <a class="case" href="${href(c.url)}" target="_blank" rel="noopener">
+        <span class="tag">${esc(c.tag)}</span>
+        <h4>${esc(c.title)}</h4>
+        <p>${esc(c.text)}</p>
+        <span class="more">${c.url === '/kejsy/' ? 'Все кейсы' : 'Читать кейс'} ${icon('arrow')}</span>
+      </a>`).join('');
+
+    detail.innerHTML = `
+      <div class="ind-head">
+        <div>
+          <div class="ind-title">
+            <span class="ind-ico">${icon(ind.icon)}</span>
+            <div>
+              <div class="eyebrow">Отрасль</div>
+              <h2>${esc(ind.name)}</h2>
+              <p>${esc(ind.lead)}</p>
+              <div class="counters">
+                <span class="counter"><b>${ind.directions.length}</b> ${plural(ind.directions.length, 'направление', 'направления', 'направлений')}</span>
+                <span class="counter"><b>${nSol}</b> ${plural(nSol, 'решение', 'решения', 'решений')}</span>
+                <span class="counter"><b>${ind.cases.length}</b> ${plural(ind.cases.length, 'кейс', 'кейса', 'кейсов')}</span>
+              </div>
+              <div class="ind-url">cns-corp.ru/otrasli/${ind.id}/</div>
+            </div>
+          </div>
+        </div>
+        <div class="tasks">
+          <h3>Задачи отрасли</h3>
+          <ul>${ind.tasks.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+        </div>
+      </div>
+
+      <div class="sub-head">
+        <h3>Направления бизнеса и решения</h3>
+        <span class="hint">Отрасль → направление → решение</span>
+      </div>
+      <div class="dir-grid">${dirs}</div>
+
+      ${cases ? `
+      <div class="sub-head" style="margin-top:44px">
+        <h3>Проекты CNS</h3>
+        <a class="hint" href="${SITE}/kejsy/" target="_blank" rel="noopener">Все кейсы →</a>
+      </div>
+      <div class="cases">${cases}</div>` : ''}
+
+      <div class="cta-band">
+        <div>
+          <h3>Подберём решение для отрасли «${esc(ind.name)}»</h3>
+          <p>Инженер CNS разберёт задачу и предложит состав работ и оборудования.</p>
+        </div>
+        <a class="btn" href="#zayavka" data-pick="${ind.id}">Получить консультацию</a>
+      </div>`;
+  }
+
+  // ---------- Карта решений ----------
+  function renderMatrix() {
+    const m = document.getElementById('matrix');
+    const level = (n) => n >= 5 ? 'l4' : n >= 3 ? 'l3' : n === 2 ? 'l2' : 'l1';
+    const head = `<thead><tr><th style="text-align:left;padding-left:16px">Отрасль</th>${DATA.directions.map((d) => `<th scope="col">${icon(d.icon)}${esc(d.name)}</th>`).join('')}<th scope="col">Всего</th></tr></thead>`;
+    const totals = Object.fromEntries(DATA.directions.map((d) => [d.id, 0]));
+    const body = DATA.industries.map((ind) => {
+      const map = Object.fromEntries(ind.directions.map((d) => [d.id, d.solutions.length]));
+      const cells = DATA.directions.map((d) => {
+        const n = map[d.id] || 0;
+        totals[d.id] += n;
+        if (!n) return '<td class="empty">—</td>';
+        return `<td class="${level(n)}"><button type="button" data-ind="${ind.id}" data-dir="${d.id}" aria-label="${esc(ind.name)}: ${esc(d.name)} — ${n}"><span>${n}</span></button></td>`;
+      }).join('');
+      return `<tr><th scope="row"><button type="button" data-ind="${ind.id}">${esc(ind.name)}</button></th>${cells}<td><b>${solCount(ind)}</b></td></tr>`;
+    }).join('');
+    const foot = `<tfoot><tr><th>Всего</th>${DATA.directions.map((d) => `<td>${totals[d.id]}</td>`).join('')}<td>${Object.values(totals).reduce((a, b) => a + b, 0)}</td></tr></tfoot>`;
+    m.innerHTML = head + '<tbody>' + body + '</tbody>' + foot;
+  }
+
+  // ---------- Состояние ----------
+  let current = null;
+
+  function select(id, opts = {}) {
+    const ind = DATA.industries.find((x) => x.id === id) || DATA.industries[0];
+    if (current !== ind.id) {
+      current = ind.id;
+      renderIndustry(ind);
+      document.querySelectorAll('.ind-card').forEach((el) => el.classList.toggle('is-active', el.dataset.ind === ind.id));
+      document.querySelectorAll('.tab').forEach((el) => {
+        const on = el.dataset.ind === ind.id;
+        el.setAttribute('aria-selected', on);
+        if (on) tabs.scrollTo({ left: el.offsetLeft - (tabs.clientWidth - el.offsetWidth) / 2, behavior: 'smooth' });
+      });
+      if (location.hash.slice(1) !== ind.id) history.replaceState(null, '', '#' + ind.id);
+    }
+    if (opts.dir) {
+      const card = document.getElementById('dir-' + opts.dir);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        card.classList.add('is-flash');
+        setTimeout(() => card.classList.remove('is-flash'), 1600);
+      }
+    } else if (opts.scroll) {
+      document.getElementById('otrasl').scrollIntoView({ behavior: 'smooth' });
+    }
+  }
+
+  grid.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-ind]');
+    if (!b) return;
+    e.preventDefault();
+    select(b.dataset.ind, { scroll: true });
+  });
+  tabs.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-ind]');
+    if (b) select(b.dataset.ind, { scroll: true });
+  });
+  document.getElementById('matrix').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-ind]');
+    if (b) select(b.dataset.ind, { scroll: !b.dataset.dir, dir: b.dataset.dir });
+  });
+  detail.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pick]');
+    if (b) sel.value = b.dataset.pick;
+  });
+  window.addEventListener('hashchange', () => {
+    const id = location.hash.slice(1);
+    if (DATA.industries.some((x) => x.id === id)) select(id, { scroll: true });
+  });
+
+  document.getElementById('leadForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    document.getElementById('formMsg').classList.add('is-on');
+  });
+
+  const burger = document.getElementById('burger');
+  burger.addEventListener('click', () => {
+    const nav = document.getElementById('nav');
+    const open = nav.classList.toggle('is-open');
+    burger.setAttribute('aria-expanded', open);
+  });
+
+  renderMatrix();
+  const start = location.hash.slice(1);
+  const valid = DATA.industries.some((x) => x.id === start);
+  select(valid ? start : DATA.industries[0].id, { scroll: valid });
+})();
+</script>
+</body>
+</html>
