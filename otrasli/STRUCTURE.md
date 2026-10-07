@@ -9,22 +9,23 @@
 - **Связь «отрасль → решение»** ставится только с основанием:
   - **сайт** — страница решения сама называет отрасль или объект (дословная цитата; блоки «Отраслевые решения» на страницах ИБ и AutoID, разделы «Кому нужна услуга», «Сферы применения»);
   - **кейс** — решение применено в проекте из «Проектов» у клиента этой отрасли;
-  - **рекомендация** — логичная связь, которой на сайте нет. Показана отдельно (жёлтым), её можно скрыть переключателем.
+  - **по логике** — связь, которой на сайте явно нет, но она следует из задач отрасли. На странице такие решения показаны наравне с остальными; основание видно в режиме «Показать источники».
 - Решения без отраслевых оснований (аудит, серверы, облако, поддержка и т. п.) не размазаны по всем отраслям, а вынесены в блок «Для любой отрасли».
-- Автопроверка: 64 цитаты найдены дословно на своих страницах; набор решений совпадает с меню; каждый кейс-основание действительно использует решение; числа в описаниях кейсов есть в текстах кейсов; все ссылки отвечают 200, кроме `/industries/logistics/` (страницы нет).
+- **Услуги с ценой** — 27 позиций из каталога услуг (PDF). Каждая привязана к решению сайта и показывается внутри него: в отрасли — если решение есть в отрасли, иначе в блоке «Для любой отрасли». Внимание: каталог оформлен как «SkyDynamics | Каталог услуг», ООО «Скай Дайнамикс» — на странице CNS бренд не указан, цены нужно подтвердить.
+- Автопроверка: 64 цитаты найдены дословно на своих страницах; набор решений совпадает с меню; каждый кейс-основание действительно использует решение; числа в описаниях кейсов есть в текстах кейсов; название, срок, цена и результат каждой из 27 услуг найдены в PDF; все ссылки отвечают 200, кроме `/industries/logistics/` (страницы нет).
 
 ## Сводка
 
-| Отрасль | Страница | Направлений | Решений (подтв.) | Рекомендаций | Кейсов |
-|---|---|---|---|---|---|
-| Ритейл и FMCG | `/industries/retail-and-fmcg/` | 6 | 14 | 0 | 4 |
-| Агропромышленный комплекс | `/industries/agropromyshlennyj-kompleks/` | 6 | 4 | 5 | 1 |
-| Производство | `/industries/proizvodstvo/` | 6 | 14 | 2 | 5 |
-| Логистика | `/industries/logistics/` — **нет на сайте (404)** | 6 | 14 | 0 | 3 |
-| Строительство | `/industries/stroitelstvo/` | 5 | 2 | 5 | 1 |
-| Образование | `/industries/obrazovanie/` | 5 | 11 | 2 | 2 |
-| Медицина | `/industries/medicina/` | 6 | 10 | 0 | 5 |
-| Социальная сфера | `/industries/socialnaya-sfera/` | 5 | 9 | 2 | 0 |
+| Отрасль | Страница | Направлений | Решений | из них по логике | Услуг с ценой | Кейсов |
+|---|---|---|---|---|---|---|
+| Ритейл и FMCG | `/industries/retail-and-fmcg/` | 6 | 14 | 0 | 19 | 4 |
+| Агропромышленный комплекс | `/industries/agropromyshlennyj-kompleks/` | 6 | 9 | 5 | 11 | 1 |
+| Производство | `/industries/proizvodstvo/` | 6 | 16 | 2 | 19 | 5 |
+| Логистика | `/industries/logistics/` — **нет на сайте (404)** | 6 | 14 | 0 | 18 | 3 |
+| Строительство | `/industries/stroitelstvo/` | 5 | 7 | 5 | 5 | 1 |
+| Образование | `/industries/obrazovanie/` | 5 | 13 | 2 | 7 | 2 |
+| Медицина | `/industries/medicina/` | 6 | 10 | 0 | 13 | 5 |
+| Социальная сфера | `/industries/socialnaya-sfera/` | 5 | 11 | 2 | 10 | 0 |
 
 ## 1. Ритейл и FMCG
 
@@ -36,9 +37,18 @@
   - [AutoID](https://cns-corp.ru/it-uslugi/infrastruktura/autoid/): «Приёмка и пересчёт товара, учёт остатков, маркировка, работа с возвратами и пересортицей.»
 - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) — Контроль привилегированного доступа (PAM), DLP, мониторинг инцидентов SIEM/SOAR, защита e-com и веб-ресурсов. _(сайт)_
   - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/): «Контроль привилегированного доступа (PAM), Предотвращение утечек данных (DLP), Мониторинг инцидентов (SIEM/SOAR), Защита e-com и веб-ресурсов»
+  - 💰 Анализ защищенности (Пентест) — от 50 000 ₽, от 40 ч
+  - 💰 Антивирусная защита (EDR/XDR) — от 10 000 ₽, от 3 ч
+  - 💰 Многофакторная аутентификация — от 6 000 ₽, от 2 ч
+  - 💰 Защищенный удаленный доступ — от 15 000 ₽, от 4 ч
+  - 💰 Защита периметра (NGFW / VPN) — от 12 000 ₽, от 4 ч
 - [Серверные решения](https://cns-corp.ru/it-uslugi/infrastruktura/servernye-resheniya/) — Серверы для магазинов и растущей сети без простоев. _(кейс)_
   - кейс [Комплексное оснащение сети фешн-магазинов ООО «ПикНик»](https://cns-corp.ru/kejsy/kompleksnoe-osnashhenie-seti-feshn-magazinov-ooo-piknik/)
   - кейс [Поставка и настройка серверного оборудования Supermicro и Mikrotik](https://cns-corp.ru/kejsy/postavka-i-nastrojka-servernogo-oborudovaniya-supermicro-i-mikrotik/)
+  - 💰 Настройка серверов (ОС, AD, FS) — от 10 000 ₽, 3 ч
+  - 💰 SQL серверы (БД) — от 15 000 ₽, от 4 ч
+  - 💰 Системы хранения данных (СХД) — от 15 000 ₽, от 4 ч
+  - 💰 Мониторинг и логирование — от 15 000 ₽, от 4 ч
 
 **[Безопасность](https://cns-corp.ru/it-uslugi/bezopasnost/)**
 
@@ -53,6 +63,12 @@
 - [IT-аутсорсинг](https://cns-corp.ru/it-uslugi/it-support/it-autsorsing/) — Поддержка сети точек: удалённая линия, выезды, открытие и закрытие объектов. _(кейс)_
   - кейс [IT-аутсорсинг. Техническая поддержка](https://cns-corp.ru/kejsy/it-autsorsing-tehnicheskaya-podderzhka/)
   - кейс [Монтаж кабельной системы](https://cns-corp.ru/kejsy/montazh-kabelnoj-sistemy/)
+  - 💰 Лицензионный консалтинг — от 5 000 ₽, от 2 ч
+  - 💰 Настройка рабочего места (ОС и ПО) — от 5 000 ₽, от 2 ч
+  - 💰 Политики управления (GPO) — от 5 000 ₽, от 2 ч
+  - 💰 Печать и периферия — от 3 000 ₽, от 1 ч
+  - 💰 Лицензирование рабочих станций — от 3 000 ₽, от 1 ч
+  - 💰 Техническое обслуживание и ремонт — от 3 000 ₽, от 1 ч
 
 **[Сети](https://cns-corp.ru/it-uslugi/seti/)**
 
@@ -60,6 +76,9 @@
   - [Сетевые решения](https://cns-corp.ru/it-uslugi/seti/setevye-resheniya/): «сетевой инфраструктуры торгового центра»
   - кейс [Комплексное оснащение сети фешн-магазинов ООО «ПикНик»](https://cns-corp.ru/kejsy/kompleksnoe-osnashhenie-seti-feshn-magazinov-ooo-piknik/)
   - кейс [Поставка и настройка серверного оборудования Supermicro и Mikrotik](https://cns-corp.ru/kejsy/postavka-i-nastrojka-servernogo-oborudovaniya-supermicro-i-mikrotik/)
+  - 💰 Проектирование и настройка сети — от 10 000 ₽, от 3 ч
+  - 💰 Импортозамещение сети — от 15 000 ₽, от 4 ч
+  - 💰 Профилактика сети — от 6 000 ₽, от 2 ч
 - [Монтаж СКС](https://cns-corp.ru/it-uslugi/seti/montazh-sks/) — Кабельная система для новых точек, касс, экранов и инфокиосков. _(кейс)_
   - кейс [Комплексное оснащение сети фешн-магазинов ООО «ПикНик»](https://cns-corp.ru/kejsy/kompleksnoe-osnashhenie-seti-feshn-magazinov-ooo-piknik/)
   - кейс [Монтаж кабельной системы](https://cns-corp.ru/kejsy/montazh-kabelnoj-sistemy/)
@@ -67,6 +86,7 @@
   - [Построение Wi-Fi сетей](https://cns-corp.ru/it-uslugi/seti/postroenie-wi-fi-setej/): «(офисы, склады, торговые пространства)»
 - [Радиообследование Wi-Fi](https://cns-corp.ru/it-uslugi/seti/radioobsledovanie-wi-fi/) — Обследование торговой площади перед развёртыванием Wi-Fi. _(сайт)_
   - [Радиообследование Wi-Fi](https://cns-corp.ru/it-uslugi/seti/radioobsledovanie-wi-fi/): «(офис, склад, торговая площадь)»
+  - 💰 Радиообследование Wi-Fi — от 50 000 ₽, от 20 ч
 
 **[Мультимедиа](https://cns-corp.ru/it-uslugi/multimedia/)**
 
@@ -98,8 +118,13 @@
 
 - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) — Защита индустриального интернета вещей (IIoT), аудит и мониторинг уязвимостей, комплексная защита периметра. _(сайт)_
   - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/): «Защита индустриального Интернета вещей (IIoT), аутсорсинг и облачные сервисы, аудит и мониторинг уязвимостей, комплексная защита периметра»
-- [AutoID: учёт и маркировка](https://cns-corp.ru/it-uslugi/infrastruktura/autoid/) — Учёт партий и маркировка на переработке и складах. _(**рекомендация**)_
-  - нет на сайте — Прямо на сайте АПК не назван. Сценарии AutoID для производства и склада («учёт партий и серий», маркировка «Честный знак») подходят пищевой переработке.
+  - 💰 Анализ защищенности (Пентест) — от 50 000 ₽, от 40 ч
+  - 💰 Антивирусная защита (EDR/XDR) — от 10 000 ₽, от 3 ч
+  - 💰 Многофакторная аутентификация — от 6 000 ₽, от 2 ч
+  - 💰 Защищенный удаленный доступ — от 15 000 ₽, от 4 ч
+  - 💰 Защита периметра (NGFW / VPN) — от 12 000 ₽, от 4 ч
+- [AutoID: учёт и маркировка](https://cns-corp.ru/it-uslugi/infrastruktura/autoid/) — Учёт партий и маркировка на переработке и складах. _(по логике)_
+  - по логике — Прямо на сайте АПК не назван. Сценарии AutoID для производства и склада («учёт партий и серий», маркировка «Честный знак») подходят пищевой переработке.
 
 **[Облачные сервисы](https://cns-corp.ru/it-uslugi/oblachnye-servisy/)**
 
@@ -110,25 +135,31 @@
 
 **[Безопасность](https://cns-corp.ru/it-uslugi/bezopasnost/)**
 
-- [Видеонаблюдение](https://cns-corp.ru/it-uslugi/bezopasnost/videonablyudenie/) — Охрана территорий, складов и техники. _(**рекомендация**)_
-  - нет на сайте — Отраслевой связи на сайте нет; страница видеонаблюдения — про контроль территории и номера транспорта.
+- [Видеонаблюдение](https://cns-corp.ru/it-uslugi/bezopasnost/videonablyudenie/) — Охрана территорий, складов и техники. _(по логике)_
+  - по логике — Отраслевой связи на сайте нет; страница видеонаблюдения — про контроль территории и номера транспорта.
 
 **[ИТ-поддержка](https://cns-corp.ru/it-uslugi/it-support/)**
 
 - [IT-аутсорсинг](https://cns-corp.ru/it-uslugi/it-support/it-autsorsing/) — ИТ и ИБ на аутсорсинге для удалённых площадок. _(сайт)_
   - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/): «аутсорсинг и облачные сервисы»
+  - 💰 Лицензионный консалтинг — от 5 000 ₽, от 2 ч
+  - 💰 Настройка рабочего места (ОС и ПО) — от 5 000 ₽, от 2 ч
+  - 💰 Политики управления (GPO) — от 5 000 ₽, от 2 ч
+  - 💰 Печать и периферия — от 3 000 ₽, от 1 ч
+  - 💰 Лицензирование рабочих станций — от 3 000 ₽, от 1 ч
+  - 💰 Техническое обслуживание и ремонт — от 3 000 ₽, от 1 ч
 
 **[Сети](https://cns-corp.ru/it-uslugi/seti/)**
 
-- [Построение Wi-Fi сетей](https://cns-corp.ru/it-uslugi/seti/postroenie-wi-fi-setej/) — Покрытие для IoT-датчиков и техники. _(**рекомендация**)_
-  - нет на сайте — На странице Wi-Fi — «внедрение IoT-устройств», в блоке ИБ для АПК — IIoT; прямой связи с АПК нет.
-- [Монтаж ВОЛС](https://cns-corp.ru/it-uslugi/seti/montazh-vols/) — Связь между удалёнными объектами хозяйства. _(**рекомендация**)_
-  - нет на сайте — На странице ВОЛС — «промышленным предприятиям… для связи между удалёнными технологическими узлами»; АПК не назван.
+- [Построение Wi-Fi сетей](https://cns-corp.ru/it-uslugi/seti/postroenie-wi-fi-setej/) — Покрытие для IoT-датчиков и техники. _(по логике)_
+  - по логике — На странице Wi-Fi — «внедрение IoT-устройств», в блоке ИБ для АПК — IIoT; прямой связи с АПК нет.
+- [Монтаж ВОЛС](https://cns-corp.ru/it-uslugi/seti/montazh-vols/) — Связь между удалёнными объектами хозяйства. _(по логике)_
+  - по логике — На странице ВОЛС — «промышленным предприятиям… для связи между удалёнными технологическими узлами»; АПК не назван.
 
 **[Коммуникации](https://cns-corp.ru/it-uslugi/kommunikaczii/)**
 
-- [Видеоконференцсвязь](https://cns-corp.ru/it-uslugi/kommunikaczii/videokonferenczsvyaz/) — Связь управляющей компании с удалёнными хозяйствами. _(**рекомендация**)_
-  - нет на сайте — ВКС названа для промышленного сектора; АПК отдельно не упомянут.
+- [Видеоконференцсвязь](https://cns-corp.ru/it-uslugi/kommunikaczii/videokonferenczsvyaz/) — Связь управляющей компании с удалёнными хозяйствами. _(по логике)_
+  - по логике — ВКС названа для промышленного сектора; АПК отдельно не упомянут.
 
 **Кейсы:** 
 
@@ -143,6 +174,11 @@
 - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) — Защита АСУ ТП, PAM, аудит и мониторинг SIEM/SOAR, DLP; отдельный раздел — безопасность КИИ и АСУ ТП. _(сайт)_
   - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/): «Защита АСУ ТП, Контроль привилегированного доступа (PAM), Аудит и мониторинг (SIEM / SOAR), Предотвращение утечек данных (DLP)»
   - кейс [Модернизация КСПД и создание отказоустойчивого ядра сети в распределённом ЦОД](https://cns-corp.ru/kejsy/modernizacziya-kspd-i-sozdanie-otkazoustojchivogo-yadra-seti-v-raspredelyonnom-czod/)
+  - 💰 Анализ защищенности (Пентест) — от 50 000 ₽, от 40 ч
+  - 💰 Антивирусная защита (EDR/XDR) — от 10 000 ₽, от 3 ч
+  - 💰 Многофакторная аутентификация — от 6 000 ₽, от 2 ч
+  - 💰 Защищенный удаленный доступ — от 15 000 ₽, от 4 ч
+  - 💰 Защита периметра (NGFW / VPN) — от 12 000 ₽, от 4 ч
 - [AutoID: учёт и маркировка](https://cns-corp.ru/it-uslugi/infrastruktura/autoid/) — Движение сырья, полуфабрикатов и готовой продукции между участками и складами, учёт партий и серий. _(сайт)_
   - [AutoID](https://cns-corp.ru/it-uslugi/infrastruktura/autoid/): «Движение сырья, полуфабрикатов и готовой продукции между участками и складами, учёт партий и серий.»
 - [Импортозамещение в ИТ](https://cns-corp.ru/it-uslugi/infrastruktura/importozameshhenie/) — Отечественные PLM, MES и промышленная идентификация; перевод серверов, СХД и виртуализации на российский стек. _(сайт)_
@@ -150,14 +186,23 @@
   - [Импортозамещение в ИТ](https://cns-corp.ru/it-uslugi/infrastruktura/importozameshhenie/): «PROF-IT MES: Машиностроение»
   - кейс [Импортозамещение серверной инфраструктуры и платформы виртуализации на государственном уровне](https://cns-corp.ru/kejsy/importozameshhenie-servernoj-infrastruktury-i-platformy-virtualizaczii-na-gosudarstvennom-urovne/)
   - кейс [Модернизация систем видеонаблюдения и контроля доступа (СКУД) для лидера нефтегазовой отрасли](https://cns-corp.ru/kejsy/modernizacziya-sistem-videonablyudeniya-i-kontrolya-dostupa-skud-dlya-lidera-neftegazovoi-otrasli/)
+  - 💰 Импортозамещение — от 25 000 ₽, от 8 ч
 - [Серверные решения](https://cns-corp.ru/it-uslugi/infrastruktura/servernye-resheniya/) — Отказоустойчивые серверы и СХД, резервное копирование, новые ЦОД. _(кейс)_
   - кейс [Построение отказоустойчивой ИТ-инфраструктуры хранения и резервного копирования для горнодобывающей компании «Покровский рудник»](https://cns-corp.ru/kejsy/postroenie-otkazoustojchivoj-it-infrastruktury-hraneniya-i-rezervnogo-kopirovaniya-dlya-gornodobyvayushhej-kompanii-pokrovskij-rudnik/)
   - кейс [Развёртывание серверной инфраструктуры и СХД для нового ЦОД легкой промышленности](https://cns-corp.ru/kejsy/razvertyvanie-servernoi-infrastruktury-i-shd-dlya-novogo-czod-legkoi-promyshlennosti/)
   - кейс [Импортозамещение серверной инфраструктуры и платформы виртуализации на государственном уровне](https://cns-corp.ru/kejsy/importozameshhenie-servernoj-infrastruktury-i-platformy-virtualizaczii-na-gosudarstvennom-urovne/)
+  - 💰 Настройка серверов (ОС, AD, FS) — от 10 000 ₽, 3 ч
+  - 💰 SQL серверы (БД) — от 15 000 ₽, от 4 ч
+  - 💰 Системы хранения данных (СХД) — от 15 000 ₽, от 4 ч
+  - 💰 Мониторинг и логирование — от 15 000 ₽, от 4 ч
 - [Виртуализация](https://cns-corp.ru/it-uslugi/infrastruktura/virtualizacziya/) — Миграция виртуальной инфраструктуры без остановки сервисов. _(кейс)_
   - кейс [Импортозамещение серверной инфраструктуры и платформы виртуализации на государственном уровне](https://cns-corp.ru/kejsy/importozameshhenie-servernoj-infrastruktury-i-platformy-virtualizaczii-na-gosudarstvennom-urovne/)
+  - 💰 Виртуализация и кластеры — от 15 000 ₽, от 4 ч
+  - 💰 Резервное копирование (Бэкап) — от 30 000 ₽, от 8 ч
 - [Аудиты и обследования](https://cns-corp.ru/it-uslugi/infrastruktura/audit/) — Аудит корпоративной сети перед модернизацией. _(кейс)_
   - кейс [Модернизация КСПД и создание отказоустойчивого ядра сети в распределённом ЦОД](https://cns-corp.ru/kejsy/modernizacziya-kspd-i-sozdanie-otkazoustojchivogo-yadra-seti-v-raspredelyonnom-czod/)
+  - 💰 Аудит ИТ-инфраструктуры — от 15 000 ₽, от 4 ч
+  - 💰 Обследование и инвентаризация — от 30 000 ₽, от 8 ч
 
 **[Безопасность](https://cns-corp.ru/it-uslugi/bezopasnost/)**
 
@@ -172,24 +217,29 @@
 
 - [Расширенная гарантия](https://cns-corp.ru/it-uslugi/rasshirennaya-garantiya/) — Поддержка серверов и СХД 24/7 с ЗИП на весь срок эксплуатации. _(кейс)_
   - кейс [Развёртывание серверной инфраструктуры и СХД для нового ЦОД легкой промышленности](https://cns-corp.ru/kejsy/razvertyvanie-servernoi-infrastruktury-i-shd-dlya-novogo-czod-legkoi-promyshlennosti/)
+  - 💰 Профилактика и ремонт — от 10 000 ₽, от 3 ч
 
 **[Сети](https://cns-corp.ru/it-uslugi/seti/)**
 
 - [Сетевые решения](https://cns-corp.ru/it-uslugi/seti/setevye-resheniya/) — Отказоустойчивое ядро корпоративной сети. _(кейс)_
   - кейс [Модернизация КСПД и создание отказоустойчивого ядра сети в распределённом ЦОД](https://cns-corp.ru/kejsy/modernizacziya-kspd-i-sozdanie-otkazoustojchivogo-yadra-seti-v-raspredelyonnom-czod/)
+  - 💰 Проектирование и настройка сети — от 10 000 ₽, от 3 ч
+  - 💰 Импортозамещение сети — от 15 000 ₽, от 4 ч
+  - 💰 Профилактика сети — от 6 000 ₽, от 2 ч
 - [Монтаж СКС](https://cns-corp.ru/it-uslugi/seti/montazh-sks/) — СКС для производственных помещений, серверных и ЦОД. _(сайт)_
   - [Монтаж СКС](https://cns-corp.ru/it-uslugi/seti/montazh-sks/): «(центры обработки данных, серверные, производственные помещения)»
 - [Монтаж ВОЛС](https://cns-corp.ru/it-uslugi/seti/montazh-vols/) — Связь между корпусами и удалёнными технологическими узлами. _(сайт)_
   - [Монтаж ВОЛС](https://cns-corp.ru/it-uslugi/seti/montazh-vols/): «Промышленным предприятиям и объектам инфраструктуры (транспорт, энергетика)»
 - [Радиообследование Wi-Fi](https://cns-corp.ru/it-uslugi/seti/radioobsledovanie-wi-fi/) — Обследование цехов перед развёртыванием Wi-Fi. _(сайт)_
   - [Радиообследование Wi-Fi](https://cns-corp.ru/it-uslugi/seti/radioobsledovanie-wi-fi/): «производственные цеха»
-- [Построение Wi-Fi сетей](https://cns-corp.ru/it-uslugi/seti/postroenie-wi-fi-setej/) — Беспроводная сеть для цехов по итогам радиообследования. _(**рекомендация**)_
-  - нет на сайте — Производство названо на странице радиообследования; на странице Wi-Fi — нет.
+  - 💰 Радиообследование Wi-Fi — от 50 000 ₽, от 20 ч
+- [Построение Wi-Fi сетей](https://cns-corp.ru/it-uslugi/seti/postroenie-wi-fi-setej/) — Беспроводная сеть для цехов по итогам радиообследования. _(по логике)_
+  - по логике — Производство названо на странице радиообследования; на странице Wi-Fi — нет.
 
 **[Мультимедиа](https://cns-corp.ru/it-uslugi/multimedia/)**
 
-- [Видеостены](https://cns-corp.ru/it-uslugi/multimedia/videosteny/) — Видеостены для диспетчерских и ситуационных центров. _(**рекомендация**)_
-  - нет на сайте — Диспетчерские и ситуационные центры на сайте названы для гос- и оперативных служб и корпоративного сектора, не для производства.
+- [Видеостены](https://cns-corp.ru/it-uslugi/multimedia/videosteny/) — Видеостены для диспетчерских и ситуационных центров. _(по логике)_
+  - по логике — Диспетчерские и ситуационные центры на сайте названы для гос- и оперативных служб и корпоративного сектора, не для производства.
 
 **[Коммуникации](https://cns-corp.ru/it-uslugi/kommunikaczii/)**
 
@@ -214,8 +264,15 @@
   - [AutoID](https://cns-corp.ru/it-uslugi/infrastruktura/autoid/): «Приёмка, размещение, отбор, упаковка, отгрузка, кросс-докинг, инвентаризация»
 - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) — Сетевая защита, управление доступом, мониторинг и реагирование. _(сайт)_
   - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/): «Сетевая защита, Управление доступом, Мониторинг и реагирование»
+  - 💰 Анализ защищенности (Пентест) — от 50 000 ₽, от 40 ч
+  - 💰 Антивирусная защита (EDR/XDR) — от 10 000 ₽, от 3 ч
+  - 💰 Многофакторная аутентификация — от 6 000 ₽, от 2 ч
+  - 💰 Защищенный удаленный доступ — от 15 000 ₽, от 4 ч
+  - 💰 Защита периметра (NGFW / VPN) — от 12 000 ₽, от 4 ч
 - [Аудиты и обследования](https://cns-corp.ru/it-uslugi/infrastruktura/audit/) — Аудит распределённой сети складов, ЦОД и филиалов. _(кейс)_
   - кейс [Модернизация КСПД и создание отказоустойчивого ядра сети в распределённом ЦОД](https://cns-corp.ru/kejsy/modernizacziya-kspd-i-sozdanie-otkazoustojchivogo-yadra-seti-v-raspredelyonnom-czod/)
+  - 💰 Аудит ИТ-инфраструктуры — от 15 000 ₽, от 4 ч
+  - 💰 Обследование и инвентаризация — от 30 000 ₽, от 8 ч
 
 **[Безопасность](https://cns-corp.ru/it-uslugi/bezopasnost/)**
 
@@ -230,6 +287,12 @@
 
 - [IT-аутсорсинг](https://cns-corp.ru/it-uslugi/it-support/it-autsorsing/) — Поддержка распределённой сетевой инфраструктуры. _(кейс)_
   - кейс [Техническая поддержка распределённой сетевой инфраструктуры на базе Cisco для федерального дистрибьютора](https://cns-corp.ru/kejsy/tehnicheskaya-podderzhka-raspredelennoi-setevoi-infrastruktury-na-baze-cisco-dlya-federalnogo-distribyutora/)
+  - 💰 Лицензионный консалтинг — от 5 000 ₽, от 2 ч
+  - 💰 Настройка рабочего места (ОС и ПО) — от 5 000 ₽, от 2 ч
+  - 💰 Политики управления (GPO) — от 5 000 ₽, от 2 ч
+  - 💰 Печать и периферия — от 3 000 ₽, от 1 ч
+  - 💰 Лицензирование рабочих станций — от 3 000 ₽, от 1 ч
+  - 💰 Техническое обслуживание и ремонт — от 3 000 ₽, от 1 ч
 
 **[Сети](https://cns-corp.ru/it-uslugi/seti/)**
 
@@ -237,11 +300,15 @@
   - [Построение Wi-Fi сетей](https://cns-corp.ru/it-uslugi/seti/postroenie-wi-fi-setej/): «(офисы, склады, торговые пространства)»
 - [Радиообследование Wi-Fi](https://cns-corp.ru/it-uslugi/seti/radioobsledovanie-wi-fi/) — Обследование складов с высокими стеллажами. _(сайт)_
   - [Радиообследование Wi-Fi](https://cns-corp.ru/it-uslugi/seti/radioobsledovanie-wi-fi/): «склады с высокими стеллажами»
+  - 💰 Радиообследование Wi-Fi — от 50 000 ₽, от 20 ч
 - [Монтаж ВОЛС](https://cns-corp.ru/it-uslugi/seti/montazh-vols/) — Связь на объектах транспортной инфраструктуры. _(сайт)_
   - [Монтаж ВОЛС](https://cns-corp.ru/it-uslugi/seti/montazh-vols/): «объектам инфраструктуры (транспорт, энергетика)»
 - [Сетевые решения](https://cns-corp.ru/it-uslugi/seti/setevye-resheniya/) — Сеть для складского комплекса, ЦОД и филиалов. _(кейс)_
   - кейс [Модернизация КСПД и создание отказоустойчивого ядра сети в распределённом ЦОД](https://cns-corp.ru/kejsy/modernizacziya-kspd-i-sozdanie-otkazoustojchivogo-yadra-seti-v-raspredelyonnom-czod/)
   - кейс [Техническая поддержка распределённой сетевой инфраструктуры на базе Cisco для федерального дистрибьютора](https://cns-corp.ru/kejsy/tehnicheskaya-podderzhka-raspredelennoi-setevoi-infrastruktury-na-baze-cisco-dlya-federalnogo-distribyutora/)
+  - 💰 Проектирование и настройка сети — от 10 000 ₽, от 3 ч
+  - 💰 Импортозамещение сети — от 15 000 ₽, от 4 ч
+  - 💰 Профилактика сети — от 6 000 ₽, от 2 ч
 
 **[Мультимедиа](https://cns-corp.ru/it-uslugi/multimedia/)**
 
@@ -256,6 +323,7 @@
 
 - [Почтовый сервис](https://cns-corp.ru/it-uslugi/kommunikaczii/pochtovyj-servis/) — Единый цифровой офис для офиса, складов и водителей. _(кейс)_
   - кейс [CNS обеспечил бесшовный переход ФК «Пульс» на единый цифровой офис с Яндекс 360](https://cns-corp.ru/kejsy/cns-obespechil-besshovnyi-perehod-fk-puls-na-edinyi-czifrovoi-ofis-s-yandeks-360/)
+  - 💰 Почтовые системы и миграция — от 18 000 ₽, от 6 ч
 
 **Кейсы:** 
 
@@ -272,30 +340,35 @@
 - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) — Безопасный документооборот, сетевая безопасность, антивирусная защита, управление доступом. _(сайт)_
   - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/): «Безопасный документооборот, Сетевая безопасность, Антивирусная защита, Управление доступом»
   - кейс [От пилота до промышленной эксплуатации: как CNS помог крупному дилеру спецтехники выстроить систему кибербезопасности](https://cns-corp.ru/kejsy/ot-pilota-do-promyshlennoj-ekspluataczii-kak-cns-pomog-krupnomu-dileru-specztehniki-vystroit-sistemu-kiberbezopasnosti/)
+  - 💰 Анализ защищенности (Пентест) — от 50 000 ₽, от 40 ч
+  - 💰 Антивирусная защита (EDR/XDR) — от 10 000 ₽, от 3 ч
+  - 💰 Многофакторная аутентификация — от 6 000 ₽, от 2 ч
+  - 💰 Защищенный удаленный доступ — от 15 000 ₽, от 4 ч
+  - 💰 Защита периметра (NGFW / VPN) — от 12 000 ₽, от 4 ч
 
 **[Безопасность](https://cns-corp.ru/it-uslugi/bezopasnost/)**
 
-- [Видеонаблюдение](https://cns-corp.ru/it-uslugi/bezopasnost/videonablyudenie/) — Контроль строительных площадок и техники. _(**рекомендация**)_
-  - нет на сайте — Отраслевой связи на сайте нет.
-- [СКУД](https://cns-corp.ru/it-uslugi/bezopasnost/skud/) — Пропускной режим для людей и транспорта на площадке. _(**рекомендация**)_
-  - нет на сайте — СКУД — «управление и контроль транспорта и людей на охраняемую территорию»; стройплощадки не названы.
+- [Видеонаблюдение](https://cns-corp.ru/it-uslugi/bezopasnost/videonablyudenie/) — Контроль строительных площадок и техники. _(по логике)_
+  - по логике — Отраслевой связи на сайте нет.
+- [СКУД](https://cns-corp.ru/it-uslugi/bezopasnost/skud/) — Пропускной режим для людей и транспорта на площадке. _(по логике)_
+  - по логике — СКУД — «управление и контроль транспорта и людей на охраняемую территорию»; стройплощадки не названы.
 
 **[Сети](https://cns-corp.ru/it-uslugi/seti/)**
 
 - [Монтаж ВОЛС](https://cns-corp.ru/it-uslugi/seti/montazh-vols/) — Телекоммуникационная инфраструктура в новых бизнес-центрах и жилых комплексах. _(сайт)_
   - [Монтаж ВОЛС](https://cns-corp.ru/it-uslugi/seti/montazh-vols/): «Застройщикам и управляющим компаниям для создания современной телекоммуникационной инфраструктуры в новых бизнес-центрах и жилых комплексах»
-- [Монтаж СКС](https://cns-corp.ru/it-uslugi/seti/montazh-sks/) — Единая кабельная система для сети, телефонии, СКУД и видеонаблюдения в новом здании. _(**рекомендация**)_
-  - нет на сайте — Страница СКС — про новые здания и интеграцию систем в единую среду; застройщики не названы.
+- [Монтаж СКС](https://cns-corp.ru/it-uslugi/seti/montazh-sks/) — Единая кабельная система для сети, телефонии, СКУД и видеонаблюдения в новом здании. _(по логике)_
+  - по логике — Страница СКС — про новые здания и интеграцию систем в единую среду; застройщики не названы.
 
 **[Мультимедиа](https://cns-corp.ru/it-uslugi/multimedia/)**
 
-- [Система управления под ключ](https://cns-corp.ru/it-uslugi/multimedia/sistema-umnogo-doma/) — Системы управления для жилых комплексов и бизнес-центров. _(**рекомендация**)_
-  - нет на сайте — Страница описывает систему «в Вашем жилье или офисе»; застройщики не названы.
+- [Система управления под ключ](https://cns-corp.ru/it-uslugi/multimedia/sistema-umnogo-doma/) — Системы управления для жилых комплексов и бизнес-центров. _(по логике)_
+  - по логике — Страница описывает систему «в Вашем жилье или офисе»; застройщики не названы.
 
 **[Коммуникации](https://cns-corp.ru/it-uslugi/kommunikaczii/)**
 
-- [Видеоконференцсвязь](https://cns-corp.ru/it-uslugi/kommunikaczii/videokonferenczsvyaz/) — Связь штаба с удалёнными объектами. _(**рекомендация**)_
-  - нет на сайте — Отраслевой связи на сайте нет.
+- [Видеоконференцсвязь](https://cns-corp.ru/it-uslugi/kommunikaczii/videokonferenczsvyaz/) — Связь штаба с удалёнными объектами. _(по логике)_
+  - по логике — Отраслевой связи на сайте нет.
 
 **Кейсы:** 
 
@@ -309,8 +382,14 @@
 
 - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) — Защита персональных данных, контентная фильтрация и веб-безопасность, защита конечных точек, обучение и симуляция атак. _(сайт)_
   - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/): «Защита персональных данных, Контентная фильтрация и веб-безопасность, Защита конечных точек, Обучение и симуляция атак»
+  - 💰 Анализ защищенности (Пентест) — от 50 000 ₽, от 40 ч
+  - 💰 Антивирусная защита (EDR/XDR) — от 10 000 ₽, от 3 ч
+  - 💰 Многофакторная аутентификация — от 6 000 ₽, от 2 ч
+  - 💰 Защищенный удаленный доступ — от 15 000 ₽, от 4 ч
+  - 💰 Защита периметра (NGFW / VPN) — от 12 000 ₽, от 4 ч
 - [Импортозамещение в ИТ](https://cns-corp.ru/it-uslugi/infrastruktura/importozameshhenie/) — Российские платформы телефонии и коммуникаций для школ и университетов. _(сайт)_
   - [Импортозамещение в ИТ](https://cns-corp.ru/it-uslugi/infrastruktura/importozameshhenie/): «для компаний, школ, университетов, госструктур и корпораций»
+  - 💰 Импортозамещение — от 25 000 ₽, от 8 ч
 
 **[Безопасность](https://cns-corp.ru/it-uslugi/bezopasnost/)**
 
@@ -322,8 +401,8 @@
 
 **[Сети](https://cns-corp.ru/it-uslugi/seti/)**
 
-- [Построение Wi-Fi сетей](https://cns-corp.ru/it-uslugi/seti/postroenie-wi-fi-setej/) — Wi-Fi для учебных корпусов. _(**рекомендация**)_
-  - нет на сайте — Отраслевой связи на сайте нет.
+- [Построение Wi-Fi сетей](https://cns-corp.ru/it-uslugi/seti/postroenie-wi-fi-setej/) — Wi-Fi для учебных корпусов. _(по логике)_
+  - по логике — Отраслевой связи на сайте нет.
 
 **[Мультимедиа](https://cns-corp.ru/it-uslugi/multimedia/)**
 
@@ -338,8 +417,8 @@
   - кейс [Оборудование актового зала в школе](https://cns-corp.ru/kejsy/oborudovanie-aktovogo-zala-v-shkole/)
 - [Акустические системы](https://cns-corp.ru/it-uslugi/multimedia/akusticheskie-sistemy/) — Звук для актового зала: микшерная консоль, акустика. _(кейс)_
   - кейс [Оборудование актового зала в школе](https://cns-corp.ru/kejsy/oborudovanie-aktovogo-zala-v-shkole/)
-- [Световое оборудование](https://cns-corp.ru/it-uslugi/multimedia/svetovoe-oborudovanie/) — Сценический свет для актовых залов. _(**рекомендация**)_
-  - нет на сайте — Страница светового оборудования — об оснащении сцен; в кейсе актового зала свет не упомянут.
+- [Световое оборудование](https://cns-corp.ru/it-uslugi/multimedia/svetovoe-oborudovanie/) — Сценический свет для актовых залов. _(по логике)_
+  - по логике — Страница светового оборудования — об оснащении сцен; в кейсе актового зала свет не упомянут.
 
 **[Коммуникации](https://cns-corp.ru/it-uslugi/kommunikaczii/)**
 
@@ -347,6 +426,7 @@
   - [Видеоконференцсвязь](https://cns-corp.ru/it-uslugi/kommunikaczii/videokonferenczsvyaz/): «образование – дистанционное обучение»
 - [Телефония](https://cns-corp.ru/it-uslugi/kommunikaczii/telefoniya/) — IP-телефония для школ и университетов. _(сайт)_
   - [Импортозамещение в ИТ](https://cns-corp.ru/it-uslugi/infrastruktura/importozameshhenie/): «для компаний, школ, университетов, госструктур и корпораций»
+  - 💰 IP-телефония и АТС — от 20 000 ₽, от 6 ч
 
 **Кейсы:** 
 
@@ -361,6 +441,11 @@
 
 - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) — Контроль доступа, DLP, анализ трафика и выявление аномалий, шифрование данных, аудит уязвимостей. _(сайт)_
   - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/): «Контроль доступа, Защита от утечек данных (DLP), Анализ трафика и выявление аномалий, Шифрование данных, Аудит уязвимостей»
+  - 💰 Анализ защищенности (Пентест) — от 50 000 ₽, от 40 ч
+  - 💰 Антивирусная защита (EDR/XDR) — от 10 000 ₽, от 3 ч
+  - 💰 Многофакторная аутентификация — от 6 000 ₽, от 2 ч
+  - 💰 Защищенный удаленный доступ — от 15 000 ₽, от 4 ч
+  - 💰 Защита периметра (NGFW / VPN) — от 12 000 ₽, от 4 ч
 
 **[Безопасность](https://cns-corp.ru/it-uslugi/bezopasnost/)**
 
@@ -372,8 +457,15 @@
 - [IT-аутсорсинг](https://cns-corp.ru/it-uslugi/it-support/it-autsorsing/) — Поддержка распределённой инфраструктуры и сети аптек. _(кейс)_
   - кейс [CNS заключил трёхлетний контракт на комплексную техническую поддержку распределённой ИТ-инфраструктуры крупной фармацевтической компании](https://cns-corp.ru/kejsy/cns-zaklyuchil-tryohletnij-kontrakt-na-kompleksnuyu-tehnicheskuyu-podderzhku-raspredelyonnoj-it-infrastruktury-krupnoj-farmaczevticheskoj-kompanii/)
   - кейс [Монтаж кабельной системы](https://cns-corp.ru/kejsy/montazh-kabelnoj-sistemy/)
+  - 💰 Лицензионный консалтинг — от 5 000 ₽, от 2 ч
+  - 💰 Настройка рабочего места (ОС и ПО) — от 5 000 ₽, от 2 ч
+  - 💰 Политики управления (GPO) — от 5 000 ₽, от 2 ч
+  - 💰 Печать и периферия — от 3 000 ₽, от 1 ч
+  - 💰 Лицензирование рабочих станций — от 3 000 ₽, от 1 ч
+  - 💰 Техническое обслуживание и ремонт — от 3 000 ₽, от 1 ч
 - [Расширенная гарантия](https://cns-corp.ru/it-uslugi/rasshirennaya-garantiya/) — Сервис серверов и СХД с ЗИП и выездом инженера. _(кейс)_
   - кейс [CNS заключил трёхлетний контракт на комплексную техническую поддержку распределённой ИТ-инфраструктуры крупной фармацевтической компании](https://cns-corp.ru/kejsy/cns-zaklyuchil-tryohletnij-kontrakt-na-kompleksnuyu-tehnicheskuyu-podderzhku-raspredelyonnoj-it-infrastruktury-krupnoj-farmaczevticheskoj-kompanii/)
+  - 💰 Профилактика и ремонт — от 10 000 ₽, от 3 ч
 
 **[Сети](https://cns-corp.ru/it-uslugi/seti/)**
 
@@ -397,6 +489,7 @@
   - кейс [Комплексное оснащение переговорных комнат для «Generium»](https://cns-corp.ru/kejsy/kompleksnoe-osnashhenie-peregovornyh-komnat-dlya-generium/)
 - [Почтовый сервис](https://cns-corp.ru/it-uslugi/kommunikaczii/pochtovyj-servis/) — Корпоративная почта и единый цифровой офис. _(кейс)_
   - кейс [CNS обеспечил бесшовный переход ФК «Пульс» на единый цифровой офис с Яндекс 360](https://cns-corp.ru/kejsy/cns-obespechil-besshovnyi-perehod-fk-puls-na-edinyi-czifrovoi-ofis-s-yandeks-360/)
+  - 💰 Почтовые системы и миграция — от 18 000 ₽, от 6 ч
 
 **Кейсы:** 
 
@@ -414,9 +507,15 @@
 
 - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) — Защита конфиденциальных данных, антифишинг, контроль инфраструктуры подрядчиков, киберстрахование, повышение осведомлённости. _(сайт)_
   - [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/): «Защита конфиденциальных данных, Антифишинг и защита от социальной инженерии, Контроль инфраструктуры подрядчиков, Киберстрахование, Повышение осведомленности»
+  - 💰 Анализ защищенности (Пентест) — от 50 000 ₽, от 40 ч
+  - 💰 Антивирусная защита (EDR/XDR) — от 10 000 ₽, от 3 ч
+  - 💰 Многофакторная аутентификация — от 6 000 ₽, от 2 ч
+  - 💰 Защищенный удаленный доступ — от 15 000 ₽, от 4 ч
+  - 💰 Защита периметра (NGFW / VPN) — от 12 000 ₽, от 4 ч
 - [Импортозамещение в ИТ](https://cns-corp.ru/it-uslugi/infrastruktura/importozameshhenie/) — Отечественные ОС (Astra Linux — стандарт ФОИВов) и облака для госучреждений. _(сайт)_
   - [Импортозамещение в ИТ](https://cns-corp.ru/it-uslugi/infrastruktura/importozameshhenie/): «ОС Astra Linux – стандарт ФОИВов»
   - [Импортозамещение в ИТ](https://cns-corp.ru/it-uslugi/infrastruktura/importozameshhenie/): «Облачные сервисы для бизнеса и госучреждений»
+  - 💰 Импортозамещение — от 25 000 ₽, от 8 ч
 
 **[Безопасность](https://cns-corp.ru/it-uslugi/bezopasnost/)**
 
@@ -427,6 +526,9 @@
 
 - [Сетевые решения](https://cns-corp.ru/it-uslugi/seti/setevye-resheniya/) — Сетевая инфраструктура стадионов и общественных объектов. _(сайт)_
   - [Сетевые решения](https://cns-corp.ru/it-uslugi/seti/setevye-resheniya/): «торгового центра, стадиона»
+  - 💰 Проектирование и настройка сети — от 10 000 ₽, от 3 ч
+  - 💰 Импортозамещение сети — от 15 000 ₽, от 4 ч
+  - 💰 Профилактика сети — от 6 000 ₽, от 2 ч
 
 **[Мультимедиа](https://cns-corp.ru/it-uslugi/multimedia/)**
 
@@ -439,10 +541,10 @@
   - [Видеостены](https://cns-corp.ru/it-uslugi/multimedia/videosteny/): «спортивные арены»
 - [Акустические системы](https://cns-corp.ru/it-uslugi/multimedia/akusticheskie-sistemy/) — Концертные залы, клубы, конференц-центры. _(сайт)_
   - [Акустические системы](https://cns-corp.ru/it-uslugi/multimedia/akusticheskie-sistemy/): «концертных залов, клубов, конференц-центров»
-- [Сценическое оборудование](https://cns-corp.ru/it-uslugi/multimedia/sczenicheskoe-oborudovanie/) — Сцены домов культуры, театров и концертных залов. _(**рекомендация**)_
-  - нет на сайте — Концертные залы названы на странице акустики; на странице сценического оборудования отраслей нет.
-- [Световое оборудование](https://cns-corp.ru/it-uslugi/multimedia/svetovoe-oborudovanie/) — Сценический свет для залов. _(**рекомендация**)_
-  - нет на сайте — Отраслевой связи на сайте нет; логично в паре со сценой и звуком.
+- [Сценическое оборудование](https://cns-corp.ru/it-uslugi/multimedia/sczenicheskoe-oborudovanie/) — Сцены домов культуры, театров и концертных залов. _(по логике)_
+  - по логике — Концертные залы названы на странице акустики; на странице сценического оборудования отраслей нет.
+- [Световое оборудование](https://cns-corp.ru/it-uslugi/multimedia/svetovoe-oborudovanie/) — Сценический свет для залов. _(по логике)_
+  - по логике — Отраслевой связи на сайте нет; логично в паре со сценой и звуком.
 
 **[Коммуникации](https://cns-corp.ru/it-uslugi/kommunikaczii/)**
 
@@ -450,13 +552,14 @@
   - [Видеоконференцсвязь](https://cns-corp.ru/it-uslugi/kommunikaczii/videokonferenczsvyaz/): «государственный и промышленный сектор»
 - [Телефония](https://cns-corp.ru/it-uslugi/kommunikaczii/telefoniya/) — IP-телефония для госструктур на российских платформах. _(сайт)_
   - [Импортозамещение в ИТ](https://cns-corp.ru/it-uslugi/infrastruktura/importozameshhenie/): «для компаний, школ, университетов, госструктур и корпораций»
+  - 💰 IP-телефония и АТС — от 20 000 ₽, от 6 ч
 
 **Кейсы:** на сайте нет.
 
 
 ## Решение → отрасли
 
-Обратная проверка: в каких отраслях стоит каждое решение. ✓ — сайт или кейс, ◌ — рекомендация.
+Обратная проверка: в каких отраслях стоит каждое решение. ✓ — сайт или кейс, ◌ — по логике.
 
 | Направление | Решение | Отрасли |
 |---|---|---|
@@ -491,6 +594,42 @@
 | Коммуникации | [Телефония](https://cns-corp.ru/it-uslugi/kommunikaczii/telefoniya/) | ✓ Образование, ✓ Социальная сфера |
 | Коммуникации | [Почтовый сервис](https://cns-corp.ru/it-uslugi/kommunikaczii/pochtovyj-servis/) | ✓ Логистика, ✓ Медицина |
 | Коммуникации | [Видеоконференцсвязь](https://cns-corp.ru/it-uslugi/kommunikaczii/videokonferenczsvyaz/) | ✓ Ритейл и FMCG, ◌ Агропромышленный комплекс, ✓ Производство, ◌ Строительство, ✓ Образование, ✓ Медицина, ✓ Социальная сфера |
+
+## Услуги с ценой (каталог)
+
+Под каким решением сайта показана каждая услуга из прайса.
+
+| Раздел каталога | Услуга | Срок | Цена | Решение сайта | Направление |
+|---|---|---|---|---|---|
+| Каталог услуг | Аудит ИТ-инфраструктуры | от 4 ч | от 15 000 ₽ | [Аудиты и обследования](https://cns-corp.ru/it-uslugi/infrastruktura/audit/) | Инфраструктура |
+| Каталог услуг | Обследование и инвентаризация | от 8 ч | от 30 000 ₽ | [Аудиты и обследования](https://cns-corp.ru/it-uslugi/infrastruktura/audit/) | Инфраструктура |
+| Каталог услуг | Анализ защищенности (Пентест) | от 40 ч | от 50 000 ₽ | [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) | Инфраструктура |
+| Каталог услуг | Настройка серверов (ОС, AD, FS) | 3 ч | от 10 000 ₽ | [Серверные решения](https://cns-corp.ru/it-uslugi/infrastruktura/servernye-resheniya/) | Инфраструктура |
+| Каталог услуг | Почтовые системы и миграция | от 6 ч | от 18 000 ₽ | [Почтовый сервис](https://cns-corp.ru/it-uslugi/kommunikaczii/pochtovyj-servis/) | Коммуникации |
+| Каталог услуг | SQL серверы (БД) | от 4 ч | от 15 000 ₽ | [Серверные решения](https://cns-corp.ru/it-uslugi/infrastruktura/servernye-resheniya/) | Инфраструктура |
+| Каталог услуг | Системы хранения данных (СХД) | от 4 ч | от 15 000 ₽ | [Серверные решения](https://cns-corp.ru/it-uslugi/infrastruktura/servernye-resheniya/) | Инфраструктура |
+| Каталог услуг | Виртуализация и кластеры | от 4 ч | от 15 000 ₽ | [Виртуализация](https://cns-corp.ru/it-uslugi/infrastruktura/virtualizacziya/) | Инфраструктура |
+| Каталог услуг | Резервное копирование (Бэкап) | от 8 ч | от 30 000 ₽ | [Виртуализация](https://cns-corp.ru/it-uslugi/infrastruktura/virtualizacziya/) | Инфраструктура |
+| Каталог услуг | Мониторинг и логирование | от 4 ч | от 15 000 ₽ | [Серверные решения](https://cns-corp.ru/it-uslugi/infrastruktura/servernye-resheniya/) | Инфраструктура |
+| Каталог услуг | IP-телефония и АТС | от 6 ч | от 20 000 ₽ | [Телефония](https://cns-corp.ru/it-uslugi/kommunikaczii/telefoniya/) | Коммуникации |
+| Каталог услуг | Антивирусная защита (EDR/XDR) | от 3 ч | от 10 000 ₽ | [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) | Инфраструктура |
+| Каталог услуг | Многофакторная аутентификация | от 2 ч | от 6 000 ₽ | [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) | Инфраструктура |
+| Каталог услуг | Защищенный удаленный доступ | от 4 ч | от 15 000 ₽ | [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) | Инфраструктура |
+| Каталог услуг | Импортозамещение | от 8 ч | от 25 000 ₽ | [Импортозамещение в ИТ](https://cns-corp.ru/it-uslugi/infrastruktura/importozameshhenie/) | Инфраструктура |
+| Каталог услуг | Лицензионный консалтинг | от 2 ч | от 5 000 ₽ | [IT-аутсорсинг](https://cns-corp.ru/it-uslugi/it-support/it-autsorsing/) | ИТ-поддержка |
+| Каталог услуг | Профилактика и ремонт | от 3 ч | от 10 000 ₽ | [Расширенная гарантия](https://cns-corp.ru/it-uslugi/rasshirennaya-garantiya/) | ИТ-поддержка |
+| Сетевые решения и связность | Проектирование и настройка сети | от 3 ч | от 10 000 ₽ | [Сетевые решения](https://cns-corp.ru/it-uslugi/seti/setevye-resheniya/) | Сети |
+| Сетевые решения и связность | Защита периметра (NGFW / VPN) | от 4 ч | от 12 000 ₽ | [Услуги ИБ](https://cns-corp.ru/it-uslugi/infrastruktura/informaczionnaya-bezopasnost/) | Инфраструктура |
+| Сетевые решения и связность | Радиообследование Wi-Fi | от 20 ч | от 50 000 ₽ | [Радиообследование Wi-Fi](https://cns-corp.ru/it-uslugi/seti/radioobsledovanie-wi-fi/) | Сети |
+| Сетевые решения и связность | Импортозамещение сети | от 4 ч | от 15 000 ₽ | [Сетевые решения](https://cns-corp.ru/it-uslugi/seti/setevye-resheniya/) | Сети |
+| Сетевые решения и связность | Профилактика сети | от 2 ч | от 6 000 ₽ | [Сетевые решения](https://cns-corp.ru/it-uslugi/seti/setevye-resheniya/) | Сети |
+| Сопровождение рабочих мест и периферии | Настройка рабочего места (ОС и ПО) | от 2 ч | от 5 000 ₽ | [IT-аутсорсинг](https://cns-corp.ru/it-uslugi/it-support/it-autsorsing/) | ИТ-поддержка |
+| Сопровождение рабочих мест и периферии | Политики управления (GPO) | от 2 ч | от 5 000 ₽ | [IT-аутсорсинг](https://cns-corp.ru/it-uslugi/it-support/it-autsorsing/) | ИТ-поддержка |
+| Сопровождение рабочих мест и периферии | Печать и периферия | от 1 ч | от 3 000 ₽ | [IT-аутсорсинг](https://cns-corp.ru/it-uslugi/it-support/it-autsorsing/) | ИТ-поддержка |
+| Сопровождение рабочих мест и периферии | Лицензирование рабочих станций | от 1 ч | от 3 000 ₽ | [IT-аутсорсинг](https://cns-corp.ru/it-uslugi/it-support/it-autsorsing/) | ИТ-поддержка |
+| Сопровождение рабочих мест и периферии | Техническое обслуживание и ремонт | от 1 ч | от 3 000 ₽ | [IT-аутсорсинг](https://cns-corp.ru/it-uslugi/it-support/it-autsorsing/) | ИТ-поддержка |
+
+Привязки, требующие решения: «Защита периметра (NGFW / VPN)» в каталоге стоит в разделе сетей, но на сайте межсетевые экраны и VPN описаны в «Услугах ИБ» — показана там. «Лицензионный консалтинг» и услуги по рабочим местам — под «IT-аутсорсингом» (на его странице — обслуживание ПК и оргтехники); отдельной страницы про лицензирование в «Услугах» нет, есть раздел «ПО».
 
 ## Кейсы
 
