@@ -156,16 +156,6 @@
   .sub-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 0 0 24px; }
   .sub-head .hint { color: var(--muted); font-size: 15px; }
 
-  .dir-grid { columns: 2; column-gap: 24px; }
-  .dir { background: var(--soft); border-radius: var(--r-card); padding: 28px; scroll-margin-top: 170px; transition: box-shadow .3s; break-inside: avoid; margin-bottom: 24px; display: inline-block; width: 100%; }
-  .dir.is-flash { box-shadow: inset 0 0 0 2px var(--red); }
-  .dir-top { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
-  .dir-top .tile { width: 56px; height: 56px; border-radius: 16px; }
-  .dir-top .tile .ico { width: 28px; height: 28px; }
-  .dir-top .lvl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
-  .dir-top h4 { margin: 2px 0 0; font-size: 24px; font-weight: 400; }
-  .dir-top h4 a:hover { color: var(--red); }
-  .sols { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
   .sol { background: #fff; border-radius: 16px; padding: 16px 18px; }
   .sol-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
   .sol-name { font-size: 17px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; }
@@ -201,18 +191,33 @@
   .case .more .ico { width: 18px; height: 18px; }
   .empty-note { background: #fff; border-radius: var(--r-card); padding: 28px; color: var(--muted); }
 
-  .svc { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--line); }
-  .svc li { display: grid; grid-template-columns: 1fr auto; gap: 2px 16px; padding: 10px 0; border-bottom: 1px dashed var(--line); }
-  .svc li:last-child { border-bottom: 0; }
-  .svc .s-name { font-size: 15px; color: var(--ink-2); }
-  .svc .s-price { font-size: 15px; font-weight: 500; color: var(--ink); white-space: nowrap; text-align: right; }
-  .svc .s-res { font-size: 13px; color: var(--muted); }
-  .svc .s-time { font-size: 13px; color: var(--muted-2); white-space: nowrap; text-align: right; }
-  .svc-more summary { list-style: none; cursor: pointer; color: var(--red); font-size: 14px; padding: 8px 0 0; }
-  .svc-more summary::-webkit-details-marker { display: none; }
-  .svc-more[open] summary { display: none; }
-  .svc-more .svc { margin-top: 0; border-top: 1px dashed var(--line); }
-  .price-note { color: var(--muted); font-size: 14px; margin: -12px 0 24px; }
+  /* Аккордеон: направление → раскрывающийся список решений */
+  .acc-tools { display: flex; gap: 16px; align-items: center; }
+  .acc-toggle { background: none; border: 0; padding: 0; color: var(--red); font-size: 15px; cursor: pointer; }
+  .acc-toggle:hover { color: var(--red-hover); }
+  .dacc-list { display: grid; gap: 16px; }
+  .dacc { background: var(--soft); border-radius: var(--r-card); scroll-margin-top: 170px; transition: box-shadow .3s; }
+  .dacc.is-flash { box-shadow: inset 0 0 0 2px var(--red); }
+  .dacc > summary { list-style: none; display: grid; grid-template-columns: auto 1fr auto; gap: 20px; align-items: center; padding: 22px 28px; cursor: pointer; border-radius: var(--r-card); }
+  .dacc > summary::-webkit-details-marker { display: none; }
+  .dacc > summary:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+  .dacc > summary .tile { width: 56px; height: 56px; border-radius: 16px; }
+  .dacc > summary .tile .ico { width: 28px; height: 28px; }
+  .dacc-name { font-size: 26px; line-height: 1.2; }
+  .dacc-name small { font-size: 15px; color: var(--muted); margin-left: 10px; white-space: nowrap; }
+  .dacc-prev { display: block; color: var(--muted); font-size: 15px; margin-top: 4px; }
+  .dacc[open] .dacc-prev { display: none; }
+  .chev { width: 44px; height: 44px; border-radius: 50%; background: #fff; color: var(--red); display: grid; place-items: center; transition: transform .2s, background .2s, color .2s; flex: none; }
+  .chev .ico { width: 20px; height: 20px; }
+  .dacc > summary:hover .chev { background: var(--red); color: #fff; }
+  .dacc[open] .chev { transform: rotate(180deg); background: var(--red); color: #fff; }
+  .dacc-body { padding: 0 28px 28px; }
+  .dacc-body .dir-link { display: inline-flex; align-items: center; gap: 6px; color: var(--red); font-size: 15px; margin-bottom: 16px; }
+  .dacc-body .dir-link .ico { width: 16px; height: 16px; }
+  .sols { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .svc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .svc-chips span { font-size: 13px; border: 1px solid var(--line); border-radius: var(--r-pill); padding: 4px 10px; color: var(--ink-2); background: #fff; cursor: default; }
+  .svc-label { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 12px; }
 
   .base { margin-top: 56px; }
   .base > p { color: var(--muted); margin: 10px 0 0; }
@@ -220,7 +225,6 @@
   .base-card { break-inside: avoid; display: inline-block; width: 100%; margin-bottom: 24px; background: var(--soft); border-radius: var(--r-card); padding: 22px 24px; }
   .base-card .lvl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
   .base-card .sol-name { margin-top: 4px; }
-  .base-card .svc { border-top-color: #e2e2e2; }
 
   /* ---------- «Мы на связи» (как на сайте) ---------- */
   .contact { padding: 80px 0 96px; scroll-margin-top: 90px; }
@@ -294,7 +298,7 @@
     .nav.is-open a { padding: 8px 0; }
     .hero { grid-template-columns: 1fr; }
     .ind-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .dir-grid { columns: 1; }
+    .sols { grid-template-columns: 1fr; }
     .base-grid { columns: 2; }
     .contact-grid { grid-template-columns: 1fr; gap: 48px; }
     .cases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -322,7 +326,13 @@
     .ind-head { grid-template-columns: 1fr; gap: 18px; padding: 32px 0 28px; }
     .ind-head .tile { width: 72px; height: 72px; border-radius: 20px; }
     .ind-head .tile .ico { width: 38px; height: 38px; }
-    .dir { padding: 18px; }
+    .dacc > summary { grid-template-columns: auto 1fr; padding: 16px; gap: 14px; }
+    .dacc > summary .chev { display: none; }
+    .dacc > summary .tile { width: 44px; height: 44px; border-radius: 12px; }
+    .dacc > summary .tile .ico { width: 22px; height: 22px; }
+    .dacc-name { font-size: 20px; }
+    .dacc-name small { display: block; margin: 2px 0 0; }
+    .dacc-body { padding: 0 12px 12px; }
     .cases { grid-template-columns: 1fr; }
     .case { min-height: 0; }
     .cta { padding: 28px 22px; }
@@ -343,7 +353,7 @@
 
 <div class="proto">
   <div class="wrap">
-    <span><b>Прототип /industries/</b> · направления и решения — меню «Услуги» cns-corp.ru, цены — каталог услуг, кейсы — раздел «Проекты»</span>
+    <span><b>Прототип /industries/</b> · направления и решения — меню «Услуги» cns-corp.ru, услуги — каталог услуг, кейсы — раздел «Проекты»</span>
     <span class="sp"></span>
     <label class="switch"><input type="checkbox" id="swEv"><i></i>Показать источники</label>
   </div>
@@ -494,7 +504,7 @@
     ["case", <id кейса>]                                                — решение применено в кейсе этой отрасли
     ["logic", "<почему>"]                                                — связь по логике (на сайте явно не указана)
   Решения без отраслевых оснований собраны в блоке «Для любой отрасли» (base: true).
-  services: услуги из каталога с ценами (PDF); parent — решение сайта, под которым услуга показывается.
+  services: услуги из каталога услуг (PDF), без цен; parent — решение сайта, под которым услуга показывается.
 -->
 <script type="application/json" id="data">
 {
@@ -593,35 +603,35 @@
     "genclass": { "tag": "Биотех", "title": "Оснащение видео- и аудиооборудованием учебного класса для «Generium»", "url": "/kejsy/osnashhenie-video-i-audio-oborudovaniem-uchebnogo-klassa-dlya-generium/", "text": "Акустический расчёт, акустические панели, проектор и моторизированный экран.", "uses": ["sound", "display"] }
   },
 
-  "priceGroups": { "main": "Каталог услуг", "net": "Сетевые решения и связность", "ws": "Сопровождение рабочих мест и периферии" },
+  "serviceGroups": { "main": "Каталог услуг", "net": "Сетевые решения и связность", "ws": "Сопровождение рабочих мест и периферии" },
   "services": [
-    {"id": "p-audit", "name": "Аудит ИТ-инфраструктуры", "time": "от 4 ч", "price": "от 15 000 ₽", "result": "Отчет о «болевых точках» и список критических рекомендаций.", "parent": "audit", "group": "main"},
-    {"id": "p-inventory", "name": "Обследование и инвентаризация", "time": "от 8 ч", "price": "от 30 000 ₽", "result": "Полный паспорт ИТ-активов, оценка рисков и карта зрелости систем.", "parent": "audit", "group": "main"},
-    {"id": "p-pentest", "name": "Анализ защищенности (Пентест)", "time": "от 40 ч", "price": "от 50 000 ₽", "result": "Выявление дыр в безопасности, протокол тестирования и регламенты защиты.", "parent": "ib", "group": "main"},
-    {"id": "p-servers", "name": "Настройка серверов (ОС, AD, FS)", "time": "3 ч", "price": "от 10 000 ₽", "result": "Работающая служба каталогов, настроенные права доступа и роли.", "parent": "servers", "group": "main"},
-    {"id": "p-mail", "name": "Почтовые системы и миграция", "time": "от 6 ч", "price": "от 18 000 ₽", "result": "Настроенная почта, общие календари и безопасный обмен файлами.", "parent": "mail", "group": "main"},
-    {"id": "p-sql", "name": "SQL серверы (БД)", "time": "от 4 ч", "price": "от 15 000 ₽", "result": "Высокая скорость работы баз данных и их защита от сбоев.", "parent": "servers", "group": "main"},
-    {"id": "p-storage", "name": "Системы хранения данных (СХД)", "time": "от 4 ч", "price": "от 15 000 ₽", "result": "Отказоустойчивое хранилище с настроенным резервированием (RAID).", "parent": "servers", "group": "main"},
-    {"id": "p-virt", "name": "Виртуализация и кластеры", "time": "от 4 ч", "price": "от 15 000 ₽", "result": "Эффективное использование ресурсов и работа систем без простоев.", "parent": "virt", "group": "main"},
-    {"id": "p-backup", "name": "Резервное копирование (Бэкап)", "time": "от 8 ч", "price": "от 30 000 ₽", "result": "Гарантия восстановления данных при аварии (DR-план) и offsite-копии.", "parent": "virt", "group": "main"},
-    {"id": "p-monitoring", "name": "Мониторинг и логирование", "time": "от 4 ч", "price": "от 15 000 ₽", "result": "Система уведомлений об ошибках (алерты) до того, как о них узнает бизнес.", "parent": "servers", "group": "main"},
-    {"id": "p-tel", "name": "IP-телефония и АТС", "time": "от 6 ч", "price": "от 20 000 ₽", "result": "Стабильная связь, запись разговоров и готовый контакт-центр.", "parent": "tel", "group": "main"},
-    {"id": "p-edr", "name": "Антивирусная защита (EDR/XDR)", "time": "от 3 ч", "price": "от 10 000 ₽", "result": "Централизованный контроль угроз на всех ПК и шифрование данных.", "parent": "ib", "group": "main"},
-    {"id": "p-mfa", "name": "Многофакторная аутентификация", "time": "от 2 ч", "price": "от 6 000 ₽", "result": "Защита корпоративных аккаунтов от взлома через двойное подтверждение.", "parent": "ib", "group": "main"},
-    {"id": "p-remote", "name": "Защищенный удаленный доступ", "time": "от 4 ч", "price": "от 15 000 ₽", "result": "Безопасная работа сотрудников из любой точки мира через шифрованные каналы.", "parent": "ib", "group": "main"},
-    {"id": "p-import", "name": "Импортозамещение", "time": "от 8 ч", "price": "от 25 000 ₽", "result": "План и реализация перехода на независимое отечественное ПО и «железо».", "parent": "import", "group": "main"},
-    {"id": "p-licconsult", "name": "Лицензионный консалтинг", "time": "от 2 ч", "price": "от 5 000 ₽", "result": "Оптимизация затрат на софт и отсутствие юридических рисков.", "parent": "outsourcing", "group": "main"},
-    {"id": "p-repair", "name": "Профилактика и ремонт", "time": "от 3 ч", "price": "от 10 000 ₽", "result": "Продление срока службы оборудования и замена неисправных узлов.", "parent": "warranty", "group": "main"},
-    {"id": "p-net", "name": "Проектирование и настройка сети", "time": "от 3 ч", "price": "от 10 000 ₽", "result": "Логичная структура сети (VLAN), высокая скорость (LACP) и стабильная маршрутизация без «петель».", "parent": "setevye", "group": "net"},
-    {"id": "p-ngfw", "name": "Защита периметра (NGFW / VPN)", "time": "от 4 ч", "price": "от 12 000 ₽", "result": "Настроенный межсетевой экран, защищенные каналы связи и изоляция критичных зон (DMZ).", "parent": "ib", "group": "net"},
-    {"id": "p-radio", "name": "Радиообследование Wi-Fi", "time": "от 20 ч", "price": "от 50 000 ₽", "result": "Тепловая карта покрытия. Отсутствие «мертвых зон» и бесшовный роуминг без обрывов связи.", "parent": "radio", "group": "net"},
-    {"id": "p-netimport", "name": "Импортозамещение сети", "time": "от 4 ч", "price": "от 15 000 ₽", "result": "Подбор и замена оборудования (Cisco/HP) на доступные аналоги (Eltex, Mikrotik и др.) без потери связи.", "parent": "setevye", "group": "net"},
-    {"id": "p-netcare", "name": "Профилактика сети", "time": "от 2 ч", "price": "от 6 000 ₽", "result": "Своевременное выявление перегрева, ошибок на портах и обновление прошивок для стабильной работы.", "parent": "setevye", "group": "net"},
-    {"id": "p-ws", "name": "Настройка рабочего места (ОС и ПО)", "time": "от 2 ч", "price": "от 5 000 ₽", "result": "Готовый к работе ПК/ноутбук с полным набором софта, защитой и доступом в сеть.", "parent": "outsourcing", "group": "ws"},
-    {"id": "p-gpo", "name": "Политики управления (GPO)", "time": "от 2 ч", "price": "от 5 000 ₽", "result": "Единые стандарты настроек для всех ПК. Исключение самовольной установки ПО сотрудниками.", "parent": "outsourcing", "group": "ws"},
-    {"id": "p-print", "name": "Печать и периферия", "time": "от 1 ч", "price": "от 3 000 ₽", "result": "Стабильная работа принтеров, МФУ и сканеров. Настроенное сетевое сканирование.", "parent": "outsourcing", "group": "ws"},
-    {"id": "p-wslic", "name": "Лицензирование рабочих станций", "time": "от 1 ч", "price": "от 3 000 ₽", "result": "Оптимальный подбор лицензий (Windows, Office и др.) и поставка их на учет.", "parent": "outsourcing", "group": "ws"},
-    {"id": "p-wsrepair", "name": "Техническое обслуживание и ремонт", "time": "от 1 ч", "price": "от 3 000 ₽", "result": "Продление срока службы парка ПК. Оперативная замена комплектующих и чистка.", "parent": "outsourcing", "group": "ws"}
+    {"id": "p-audit", "name": "Аудит ИТ-инфраструктуры", "result": "Отчет о «болевых точках» и список критических рекомендаций.", "parent": "audit", "group": "main"},
+    {"id": "p-inventory", "name": "Обследование и инвентаризация", "result": "Полный паспорт ИТ-активов, оценка рисков и карта зрелости систем.", "parent": "audit", "group": "main"},
+    {"id": "p-pentest", "name": "Анализ защищенности (Пентест)", "result": "Выявление дыр в безопасности, протокол тестирования и регламенты защиты.", "parent": "ib", "group": "main"},
+    {"id": "p-servers", "name": "Настройка серверов (ОС, AD, FS)", "result": "Работающая служба каталогов, настроенные права доступа и роли.", "parent": "servers", "group": "main"},
+    {"id": "p-mail", "name": "Почтовые системы и миграция", "result": "Настроенная почта, общие календари и безопасный обмен файлами.", "parent": "mail", "group": "main"},
+    {"id": "p-sql", "name": "SQL серверы (БД)", "result": "Высокая скорость работы баз данных и их защита от сбоев.", "parent": "servers", "group": "main"},
+    {"id": "p-storage", "name": "Системы хранения данных (СХД)", "result": "Отказоустойчивое хранилище с настроенным резервированием (RAID).", "parent": "servers", "group": "main"},
+    {"id": "p-virt", "name": "Виртуализация и кластеры", "result": "Эффективное использование ресурсов и работа систем без простоев.", "parent": "virt", "group": "main"},
+    {"id": "p-backup", "name": "Резервное копирование (Бэкап)", "result": "Гарантия восстановления данных при аварии (DR-план) и offsite-копии.", "parent": "virt", "group": "main"},
+    {"id": "p-monitoring", "name": "Мониторинг и логирование", "result": "Система уведомлений об ошибках (алерты) до того, как о них узнает бизнес.", "parent": "servers", "group": "main"},
+    {"id": "p-tel", "name": "IP-телефония и АТС", "result": "Стабильная связь, запись разговоров и готовый контакт-центр.", "parent": "tel", "group": "main"},
+    {"id": "p-edr", "name": "Антивирусная защита (EDR/XDR)", "result": "Централизованный контроль угроз на всех ПК и шифрование данных.", "parent": "ib", "group": "main"},
+    {"id": "p-mfa", "name": "Многофакторная аутентификация", "result": "Защита корпоративных аккаунтов от взлома через двойное подтверждение.", "parent": "ib", "group": "main"},
+    {"id": "p-remote", "name": "Защищенный удаленный доступ", "result": "Безопасная работа сотрудников из любой точки мира через шифрованные каналы.", "parent": "ib", "group": "main"},
+    {"id": "p-import", "name": "Импортозамещение", "result": "План и реализация перехода на независимое отечественное ПО и «железо».", "parent": "import", "group": "main"},
+    {"id": "p-licconsult", "name": "Лицензионный консалтинг", "result": "Оптимизация затрат на софт и отсутствие юридических рисков.", "parent": "outsourcing", "group": "main"},
+    {"id": "p-repair", "name": "Профилактика и ремонт", "result": "Продление срока службы оборудования и замена неисправных узлов.", "parent": "warranty", "group": "main"},
+    {"id": "p-net", "name": "Проектирование и настройка сети", "result": "Логичная структура сети (VLAN), высокая скорость (LACP) и стабильная маршрутизация без «петель».", "parent": "setevye", "group": "net"},
+    {"id": "p-ngfw", "name": "Защита периметра (NGFW / VPN)", "result": "Настроенный межсетевой экран, защищенные каналы связи и изоляция критичных зон (DMZ).", "parent": "ib", "group": "net"},
+    {"id": "p-radio", "name": "Радиообследование Wi-Fi", "result": "Тепловая карта покрытия. Отсутствие «мертвых зон» и бесшовный роуминг без обрывов связи.", "parent": "radio", "group": "net"},
+    {"id": "p-netimport", "name": "Импортозамещение сети", "result": "Подбор и замена оборудования (Cisco/HP) на доступные аналоги (Eltex, Mikrotik и др.) без потери связи.", "parent": "setevye", "group": "net"},
+    {"id": "p-netcare", "name": "Профилактика сети", "result": "Своевременное выявление перегрева, ошибок на портах и обновление прошивок для стабильной работы.", "parent": "setevye", "group": "net"},
+    {"id": "p-ws", "name": "Настройка рабочего места (ОС и ПО)", "result": "Готовый к работе ПК/ноутбук с полным набором софта, защитой и доступом в сеть.", "parent": "outsourcing", "group": "ws"},
+    {"id": "p-gpo", "name": "Политики управления (GPO)", "result": "Единые стандарты настроек для всех ПК. Исключение самовольной установки ПО сотрудниками.", "parent": "outsourcing", "group": "ws"},
+    {"id": "p-print", "name": "Печать и периферия", "result": "Стабильная работа принтеров, МФУ и сканеров. Настроенное сетевое сканирование.", "parent": "outsourcing", "group": "ws"},
+    {"id": "p-wslic", "name": "Лицензирование рабочих станций", "result": "Оптимальный подбор лицензий (Windows, Office и др.) и поставка их на учет.", "parent": "outsourcing", "group": "ws"},
+    {"id": "p-wsrepair", "name": "Техническое обслуживание и ремонт", "result": "Продление срока службы парка ПК. Оперативная замена комплектующих и чистка.", "parent": "outsourcing", "group": "ws"}
   ],
 
   "industries": [
@@ -810,6 +820,7 @@
     support: '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/>',
     cloud: '<path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 9.6 4.2 4.2 0 0 0 7 18z"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    chev: '<path d="M6 9l6 6 6-6"/>',
     ext: '<path d="M7 17L17 7M9 7h8v8"/>'
   };
   const icon = (n) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
@@ -845,7 +856,7 @@
     <div><b>${D.industries.length}</b><span>отраслей</span></div>
     <div><b>${D.directions.length}</b><span>направлений</span></div>
     <div><b>${nSol}</b><span>${plural(nSol, 'решение', 'решения', 'решений')}</span></div>
-    <div><b>${D.services.length}</b><span>${plural(D.services.length, 'услуга', 'услуги', 'услуг')} с ценой</span></div>`;
+    <div><b>${D.services.length}</b><span>${plural(D.services.length, 'услуга', 'услуги', 'услуг')}</span></div>`;
 
   // ---------- Карточки ----------
   const grid = document.getElementById('indGrid');
@@ -872,14 +883,11 @@
   // ---------- Детально ----------
   const detail = document.getElementById('detail');
 
-  const svcRow = (s) => `<li><span class="s-name">${esc(s.name)}</span><span class="s-price">${esc(s.price)}</span><span class="s-res">${esc(s.result)}</span><span class="s-time">${esc(s.time)}</span></li>`;
+  // Услуги из каталога — метками под решением, результат во всплывающей подсказке
   function svcHtml(solId) {
     const list = SVC[solId] || [];
     if (!list.length) return '';
-    if (list.length <= 3) return `<ul class="svc">${list.map(svcRow).join('')}</ul>`;
-    const rest = list.length - 3;
-    return `<ul class="svc">${list.slice(0, 3).map(svcRow).join('')}</ul>
-      <details class="svc-more"><summary>Ещё ${rest} ${plural(rest, 'услуга', 'услуги', 'услуг')} с ценой</summary><ul class="svc">${list.slice(3).map(svcRow).join('')}</ul></details>`;
+    return `<span class="svc-label">Услуги</span><div class="svc-chips">${list.map((x) => `<span title="${esc(x.result)}">${esc(x.name)}</span>`).join('')}</div>`;
   }
 
   function evHtml(e) {
@@ -896,25 +904,32 @@
     const nItems = ind.items.length, nSvc = svcCount([...used]);
 
     const dirs = byDir.map(({ d, items }) => `
-      <article class="dir" id="dir-${d.id}">
-        <div class="dir-top">
+      <details class="dacc" id="dir-${d.id}">
+        <summary>
           <div class="tile">${icon(d.icon)}</div>
-          <div><div class="lvl">Направление</div><h4><a href="${href(d.url)}" target="_blank" rel="noopener">${esc(d.name)}</a></h4></div>
+          <div>
+            <div class="dacc-name">${esc(d.name)}<small>${items.length} ${plural(items.length, 'решение', 'решения', 'решений')}</small></div>
+            <span class="dacc-prev">${items.map((it) => esc(SOL[it.sol].name)).join(' · ')}</span>
+          </div>
+          <span class="chev">${icon('chev')}</span>
+        </summary>
+        <div class="dacc-body">
+          <a class="dir-link" href="${href(d.url)}" target="_blank" rel="noopener">Все услуги направления на сайте ${icon('ext')}</a>
+          <ul class="sols">${items.map((it) => {
+            const sl = SOL[it.sol];
+            const kinds = [...new Set(it.ev.map((e) => e[0] === 'page' ? 'site' : e[0]))];
+            return `<li class="sol">
+              <div class="sol-top">
+                <a class="sol-name" href="${href(sl.url)}" target="_blank" rel="noopener">${esc(sl.name)}${icon('ext')}</a>
+                <span class="badges">${kinds.map((x) => badge[x]).join('')}</span>
+              </div>
+              <p>${esc(it.note)}</p>
+              ${svcHtml(it.sol)}
+              <ul class="ev">${it.ev.map(evHtml).join('')}</ul>
+            </li>`;
+          }).join('')}</ul>
         </div>
-        <ul class="sols">${items.map((it) => {
-          const s = SOL[it.sol];
-          const kinds = [...new Set(it.ev.map((e) => e[0] === 'page' ? 'site' : e[0]))];
-          return `<li class="sol">
-            <div class="sol-top">
-              <a class="sol-name" href="${href(s.url)}" target="_blank" rel="noopener">${esc(s.name)}${icon('ext')}</a>
-              <span class="badges">${kinds.map((x) => badge[x]).join('')}</span>
-            </div>
-            <p>${esc(it.note)}</p>
-            ${svcHtml(it.sol)}
-            <ul class="ev">${it.ev.map(evHtml).join('')}</ul>
-          </li>`;
-        }).join('')}</ul>
-      </article>`).join('');
+      </details>`).join('');
 
     const cases = ind.cases.map((id) => {
       const k = D.cases[id];
@@ -936,18 +951,17 @@
           <div class="chips">
             <span class="chip"><b>${byDir.length}</b> ${plural(byDir.length, 'направление', 'направления', 'направлений')}</span>
             <span class="chip"><b>${nItems}</b> ${plural(nItems, 'решение', 'решения', 'решений')}</span>
-            <span class="chip"><b>${nSvc}</b> ${plural(nSvc, 'услуга', 'услуги', 'услуг')} с ценой</span>
+            <span class="chip"><b>${nSvc}</b> ${plural(nSvc, 'услуга', 'услуги', 'услуг')}</span>
             <span class="chip"><b>${ind.cases.length}</b> ${plural(ind.cases.length, 'кейс', 'кейса', 'кейсов')}</span>
             ${ind.noPage ? `<span class="chip chip-warn">/industries/${ind.slug}/ — страницы на сайте пока нет</span>` : `<a class="chip chip-link" href="${SITE}/industries/${ind.slug}/" target="_blank" rel="noopener">/industries/${ind.slug}/</a>`}
           </div>
         </div>
       </div>
 
-      <div class="sub-head"><h3 class="h3">Направления и решения</h3><span class="hint">Отрасль → направление → решение → услуги с ценой</span></div>
-      <p class="price-note">Цены — из каталога услуг, указаны «от».</p>
-      <div class="dir-grid">${dirs}</div>
+      <div class="sub-head"><h3 class="h3">Направления и решения</h3><span class="acc-tools"><button type="button" class="acc-toggle" id="accAll">Раскрыть все</button></span></div>
+      <div class="dacc-list">${dirs}</div>
 
-      <div class="sub-head" style="margin-top:32px"><h3 class="h3">Проекты CNS</h3><a class="hint" href="${SITE}/kejsy/" target="_blank" rel="noopener">Все проекты →</a></div>
+      <div class="sub-head" style="margin-top:56px"><h3 class="h3">Проекты CNS</h3><a class="hint" href="${SITE}/kejsy/" target="_blank" rel="noopener">Все проекты →</a></div>
       ${cases ? `<div class="cases">${cases}</div>` : `<div class="empty-note">Кейсов в этой отрасли на сайте пока нет — блок скрывается, пока не появится первый.</div>`}
 
       ${base.length ? `<div class="base">
@@ -1006,7 +1020,7 @@
     }
     if (opts.dir) {
       const el = document.getElementById('dir-' + opts.dir);
-      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.classList.add('is-flash'); setTimeout(() => el.classList.remove('is-flash'), 1600); }
+      if (el) { el.open = true; syncAll(); el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.classList.add('is-flash'); setTimeout(() => el.classList.remove('is-flash'), 1600); }
     } else if (opts.scroll) {
       document.getElementById('otrasl').scrollIntoView({ behavior: 'smooth' });
     }
@@ -1015,7 +1029,21 @@
   grid.addEventListener('click', (e) => { const b = e.target.closest('[data-ind]'); if (b) { e.preventDefault(); select(b.dataset.ind, { scroll: true }); } });
   tabs.addEventListener('click', (e) => { const b = e.target.closest('[data-ind]'); if (b) select(b.dataset.ind, { scroll: true }); });
   document.getElementById('matrix').addEventListener('click', (e) => { const b = e.target.closest('[data-ind]'); if (b) select(b.dataset.ind, { scroll: !b.dataset.dir, dir: b.dataset.dir }); });
-  detail.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) { fInd.value = b.dataset.pick; cbInd.value = b.dataset.pick; } });
+  detail.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pick]');
+    if (b) { fInd.value = b.dataset.pick; cbInd.value = b.dataset.pick; }
+    if (e.target.closest('#accAll')) {
+      const all = [...detail.querySelectorAll('.dacc')];
+      const open = !all.every((d) => d.open);
+      all.forEach((d) => { d.open = open; });
+      syncAll();
+    }
+  });
+  detail.addEventListener('toggle', () => syncAll(), true);
+  function syncAll() {
+    const btn = document.getElementById('accAll');
+    if (btn) btn.textContent = [...detail.querySelectorAll('.dacc')].every((d) => d.open) ? 'Свернуть все' : 'Раскрыть все';
+  }
   window.addEventListener('hashchange', () => { const ind = bySlug(location.hash.slice(1)); if (ind) select(ind.id, { scroll: true }); });
 
   document.getElementById('swEv').addEventListener('change', (e) => document.body.classList.toggle('show-ev', e.target.checked));
