@@ -19,7 +19,6 @@
     --color-accent-1: #10b981;
     --color-accent-2: #60a5fa;
     --color-accent-3: #c084fc;
-    --color-pending: #fbbf24;
     --color-glass-bg: rgba(255,255,255,0.05);
     --color-glass-border: rgba(255,255,255,0.09);
     --color-vignette: rgba(0,0,0,0.45);
@@ -60,11 +59,6 @@ body { font-family: var(--font-body); color: var(--color-text); overflow: hidden
 .slide::after { content:''; position:absolute; inset:0; z-index:1; pointer-events:none; background: radial-gradient(ellipse at center, transparent 50%, var(--color-vignette) 100%); }
 .kpi-card { background: var(--color-glass-bg); backdrop-filter: blur(12px); border:1px solid var(--color-glass-border); border-radius:12px; padding:1rem; }
 .bar-fill { height:100%; border-radius:0 6px 6px 0; transition: width 1s ease; }
-/* Слайды, по которым данные за сентябрь ещё не загружены */
-.pending-badge { display:inline-flex; align-items:center; gap:6px; font-size:.68rem; font-weight:600; color:var(--color-pending); background:rgba(251,191,36,0.08); border:1px dashed rgba(251,191,36,0.45); border-radius:20px; padding:3px 12px; margin-bottom:1rem; }
-.kpi-card.pending { border-style:dashed; border-color:rgba(255,255,255,0.16); }
-.pending-val { color:#6e7681 !important; }
-.bar-track-pending { border:1px dashed rgba(255,255,255,0.18); background:transparent !important; }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.2s !important; } }
 </style>
 </head>
@@ -526,11 +520,10 @@ body { font-family: var(--font-body); color: var(--color-text); overflow: hidden
     <div class="content">
         <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">Спрос в сети</p>
         <h2 style="font-family:'Playfair Display',serif;font-size:clamp(1.4rem,3vw,2.1rem);font-weight:700;margin-bottom:.3rem;" class="reveal">Спрос по ключевым запросам · 2026</h2>
-        <p style="font-size:.78rem;color:#8b949e;margin-bottom:.6rem;" class="reveal">С майского минимума спрос рос каждый месяц</p>
-        <div class="reveal"><span class="pending-badge">⏳ Данные за сентябрь ожидаются</span></div>
+        <p style="font-size:.78rem;color:#8b949e;margin-bottom:1rem;" class="reveal">После роста с мая в сентябре спрос впервые снизился, но остаётся заметно выше весеннего уровня</p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
             <div>
-                <div style="font-size:.85rem;color:#34d399;font-weight:800;margin-bottom:.5rem;" class="reveal">«Ткани оптом» (май→авг: +38.3%)</div>
+                <div style="font-size:.85rem;color:#34d399;font-weight:800;margin-bottom:.5rem;" class="reveal">«Ткани оптом» (май→сен: +27.0%)</div>
                 <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
                     <div style="font-size:.72rem;color:#e6edf3;">Май 26</div>
                     <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
@@ -565,13 +558,15 @@ body { font-family: var(--font-body); color: var(--color-text); overflow: hidden
                 </div>
                 <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
                     <div style="font-size:.72rem;color:#e6edf3;">Сен 26</div>
-                    <div class="bar-track-pending" style="border-radius:6px;height:14px;"></div>
-                    <div class="pending-val" style="text-align:right;font-size:.8rem;font-weight:700;">—</div>
-                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#8b949e;"></div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
+                        <div class="bar-fill" data-width="91.8" style="width:0%;background:linear-gradient(90deg,#10b981,#34d399);"></div>
+                    </div>
+                    <div style="text-align:right;font-size:.8rem;font-weight:700;color:#34d399;">27 900</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#f87171;">▼ -8.2%</div>
                 </div>
             </div>
             <div>
-                <div style="font-size:.85rem;color:#60a5fa;font-weight:800;margin-bottom:.5rem;" class="reveal">«Текстиль оптом» (май→авг: +66.7%)</div>
+                <div style="font-size:.85rem;color:#60a5fa;font-weight:800;margin-bottom:.5rem;" class="reveal">«Текстиль оптом» (май→сен: +61.0%)</div>
                 <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
                     <div style="font-size:.72rem;color:#e6edf3;">Май 26</div>
                     <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
@@ -606,9 +601,11 @@ body { font-family: var(--font-body); color: var(--color-text); overflow: hidden
                 </div>
                 <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
                     <div style="font-size:.72rem;color:#e6edf3;">Сен 26</div>
-                    <div class="bar-track-pending" style="border-radius:6px;height:14px;"></div>
-                    <div class="pending-val" style="text-align:right;font-size:.8rem;font-weight:700;">—</div>
-                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#8b949e;"></div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
+                        <div class="bar-fill" data-width="96.6" style="width:0%;background:linear-gradient(90deg,#60a5fa,#c084fc);"></div>
+                    </div>
+                    <div style="text-align:right;font-size:.8rem;font-weight:700;color:#60a5fa;">4 143</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#f87171;">▼ -3.4%</div>
                 </div>
             </div>
         </div>
@@ -616,39 +613,6 @@ body { font-family: var(--font-body); color: var(--color-text); overflow: hidden
 </div>
 
 <div class="slide slide-9" data-slide="9">
-    <div class="gradient-mesh">
-        <div class="blob" style="width:400px;height:400px;top:-90px;right:-90px;background:#0891b2;opacity:0.09;"></div>
-        <div class="blob" style="width:280px;height:280px;bottom:-70px;left:-50px;background:#34d399;opacity:0.06;"></div>
-    </div>
-    <div class="content">
-        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">Опрос клиентов</p>
-        <h2 style="font-family:'Playfair Display',serif;font-size:clamp(1.4rem,3vw,2.1rem);font-weight:700;margin-bottom:.4rem;" class="reveal">Приоритетные направления поддержки</h2>
-        <div class="reveal"><span class="pending-badge">⏳ Данные за сентябрь ожидаются</span></div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:1rem;">
-            <div class="kpi-card pending reveal" style="text-align:center;border-top:3px solid #0891b2;padding:.7rem .4rem;">
-                <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Респондентов</div>
-                <div class="pending-val" style="font-size:1.5rem;font-weight:900;">—</div>
-            </div>
-            <div class="kpi-card pending reveal" style="text-align:center;border-top:3px solid #34d399;padding:.7rem .4rem;">
-                <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Всего вариантов</div>
-                <div class="pending-val" style="font-size:1.5rem;font-weight:900;">—</div>
-            </div>
-            <div class="kpi-card pending reveal" style="text-align:center;border-top:3px solid #60a5fa;padding:.7rem .4rem;">
-                <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Ср. вариантов/анкету</div>
-                <div class="pending-val" style="font-size:1.5rem;font-weight:900;">—</div>
-            </div>
-            <div class="kpi-card pending reveal" style="text-align:center;border-top:3px solid #fbbf24;padding:.7rem .4rem;">
-                <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Выбрали «Другое»</div>
-                <div class="pending-val" style="font-size:1.5rem;font-weight:900;">—</div>
-            </div>
-        </div>
-        <div class="kpi-card pending reveal" style="padding:2.2rem 1rem;text-align:center;">
-            <div style="font-size:.8rem;color:#8b949e;">Распределение ответов по направлениям поддержки появится после загрузки результатов опроса</div>
-        </div>
-    </div>
-</div>
-
-<div class="slide slide-10" data-slide="10">
     <div class="gradient-mesh">
         <div class="blob" style="width:500px;height:500px;top:-100px;right:-100px;background:#10b981;opacity:0.13;"></div>
         <div class="blob" style="width:300px;height:300px;bottom:-80px;left:-60px;background:#60a5fa;opacity:0.1;"></div>
@@ -659,43 +623,43 @@ body { font-family: var(--font-body); color: var(--color-text); overflow: hidden
         <div style="display:flex;flex-direction:column;gap:.4rem;">
             <div class="reveal kpi-card" style="border-left:4px solid #34d399;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
                 <span style="font-size:1.05rem;">📈</span>
-                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Заявок стало больше — и с сайта, и по звонкам</div>
-                <div style="font-size:.63rem;color:#b1bac4;">С сайта: 324 vs 206 (+57.3%) · по звонкам: 650 vs 552 (+17.8%) · конверсия визитов 4.2% (+1.4 пп)</div></div>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Заявок стало больше на фоне снижения спроса</div>
+                <div style="font-size:.63rem;color:#b1bac4;">С сайта 324 vs 206 (+57.3%) · по звонкам 650 vs 552 (+17.8%) · конверсия визитов 4.2% (+1.4 пп)</div></div>
+            </div>
+            <div class="reveal kpi-card" style="border-left:4px solid #60a5fa;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.05rem;">🔎</span>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Поиск — главный источник заявок, видимость в Яндексе растёт</div>
+                <div style="font-size:.63rem;color:#b1bac4;">227 из 324 заявок (70%), CPL поиска 26 ₽ vs 33 ₽ · показы в выдаче 48 670 (+57%), клики 2 283 (+31%), ср. позиция 7.66 (лучше на 0.45)</div></div>
             </div>
             <div class="reveal kpi-card" style="border-left:4px solid #059669;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
                 <span style="font-size:1.05rem;">✨</span>
                 <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Трафик стал качественнее</div>
                 <div style="font-size:.63rem;color:#b1bac4;">Отказы 18.13% (-7.25 пп) · глубина 3.2 стр. (+0.5) · время на сайте 3 м 15 с (+42 с)</div></div>
             </div>
-            <div class="reveal kpi-card" style="border-left:4px solid #60a5fa;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
-                <span style="font-size:1.05rem;">🔎</span>
-                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Поиск — главный источник заявок, органика растёт</div>
-                <div style="font-size:.63rem;color:#b1bac4;">227 из 324 заявок (70%), CPL поиска 26 ₽ vs 33 ₽ · Яндекс: показы 48 670 (+57%), клики 2 283 (+31%), позиция 7.66 (лучше на 0.45), CTR 4.69% (-0.9 пп)</div></div>
-            </div>
             <div class="reveal kpi-card" style="border-left:4px solid #fbbf24;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
                 <span style="font-size:1.05rem;">🎯</span>
                 <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Реклама подешевела, Москва эффективнее Питера</div>
-                <div style="font-size:.63rem;color:#b1bac4;">Клиент: Москва 65 ₽ (авг. 81 ₽), Питер 104 ₽ (авг. 133 ₽) · действие: 37 ₽ vs 73 ₽ · e-mail: заявки 8 vs 5, CPL 1 430 ₽ vs 2 288 ₽</div></div>
+                <div style="font-size:.63rem;color:#b1bac4;">Клиент: Москва 65 ₽ (авг. 81 ₽), Питер 104 ₽ (авг. 133 ₽) · конверсия в клиента 26.2% vs 13.8% · e-mail: CPL 1 430 ₽ vs 2 288 ₽</div></div>
             </div>
             <div class="reveal kpi-card" style="border-left:4px solid #fb923c;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
                 <span style="font-size:1.05rem;">📍</span>
                 <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Карты: больше переходов, но меньше звонков</div>
-                <div style="font-size:.63rem;color:#b1bac4;">Яндекс Карты: профиль 4 165 (▲ 9%), сайт 234 (▲ 16%), маршруты 178 (▲ 5%), звонки 77 (▼ 27%) · 2ГИС: показы 3 446 (▼ 5.2%), позиция 33,42 vs 24,44</div></div>
+                <div style="font-size:.63rem;color:#b1bac4;">Яндекс Карты: профиль 4 165 (▲ 9%), сайт 234 (▲ 16%), звонки 77 (▼ 27%) · 2ГИС: показы 3 446 (▼ 5.2%), позиция 33,42 — из-за аномального дня 24.09</div></div>
+            </div>
+            <div class="reveal kpi-card" style="border-left:4px solid #f87171;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.05rem;">📊</span>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Спрос на ключевые запросы снизился впервые с мая</div>
+                <div style="font-size:.63rem;color:#b1bac4;">«Ткани оптом» 27 900 (-8.2%), «текстиль оптом» 4 143 (-3.4%) · при этом выше майского уровня на 27% и 61%</div></div>
             </div>
             <div class="reveal kpi-card" style="border-left:4px solid #f87171;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
                 <span style="font-size:1.05rem;">📉</span>
                 <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Трафик ниже августовского пика</div>
-                <div style="font-size:.63rem;color:#b1bac4;">Визиты -23.7% · посетители -35.7% · основной спад — прямые (-45%), внутренние (-44%) и рекомендательные (-61%) переходы</div></div>
+                <div style="font-size:.63rem;color:#b1bac4;">Визиты -23.7%, посетители -35.7% · основной спад — прямые (-45%), внутренние (-44%) и рекомендательные (-61%) переходы</div></div>
             </div>
             <div class="reveal kpi-card" style="border-left:4px solid #f87171;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
                 <span style="font-size:1.05rem;">💰</span>
                 <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">CPL немного вырос, с учётом ФОТ — снизился</div>
-                <div style="font-size:.63rem;color:#b1bac4;">CPL 47 ₽ vs 45 ₽ (+6.2%) при бюджете +21% · с ФОТ: 280 ₽ vs 310 ₽ (-9.7%) · лиды в CRM: 87 vs 94</div></div>
-            </div>
-            <div class="reveal kpi-card pending" style="border-left:4px dashed #fbbf24;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
-                <span style="font-size:1.05rem;">⏳</span>
-                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Спрос по ключевым запросам, опрос клиентов</div>
-                <div style="font-size:.63rem;color:#b1bac4;">Выводы добавим после загрузки данных за сентябрь</div></div>
+                <div style="font-size:.63rem;color:#b1bac4;">CPL 47 ₽ vs 45 ₽ (+6.2%) при бюджете +21% · с ФОТ 280 ₽ vs 310 ₽ (-9.7%) · лиды в CRM 87 vs 94 (-7.4%)</div></div>
             </div>
         </div>
     </div>
@@ -705,7 +669,7 @@ body { font-family: var(--font-body); color: var(--color-text); overflow: hidden
     <button class="nav-btn" onclick="changeSlide(-1)">&#8249;</button>
     <div class="slide-dots" id="dots"></div>
     <button class="nav-btn" onclick="changeSlide(1)">&#8250;</button>
-    <span class="slide-counter" id="counter">1 / 10</span>
+    <span class="slide-counter" id="counter">1 / 9</span>
 </div>
 <script>
 let current = 1;
