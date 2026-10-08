@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="slides-format" content="viewport">
+<title>Отчет · Сентябрь 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root {
+    --color-bg: #0d1117;
+    --color-bg-deep: #05070a;
+    --color-surface: #161b22;
+    --color-text: #e6edf3;
+    --color-text-secondary: #b1bac4;
+    --color-text-muted: #8b949e;
+    --color-accent-1: #10b981;
+    --color-accent-2: #60a5fa;
+    --color-accent-3: #c084fc;
+    --color-pending: #fbbf24;
+    --color-glass-bg: rgba(255,255,255,0.05);
+    --color-glass-border: rgba(255,255,255,0.09);
+    --color-vignette: rgba(0,0,0,0.45);
+    --font-display: 'Playfair Display', serif;
+    --font-body: 'Inter', sans-serif;
+    --glow-color-rgb: 16,185,129;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; border: 0 solid; }
+html { line-height: 1.5; -webkit-text-size-adjust: 100%; }
+h1, h2, h3, p { font-size: inherit; font-weight: inherit; }
+table { border-collapse: collapse; }
+button { font: inherit; color: inherit; background: transparent; }
+.text-center { text-align: center; }
+html, body { background: var(--color-bg); margin: 0; }
+body { font-family: var(--font-body); color: var(--color-text); overflow: hidden; height: 100vh; width: 100vw; }
+.deck { width: 100vw; height: 100vh; position: relative; }
+.slide { position: absolute; top:0; left:0; width:100%; height:100%; background: var(--color-bg); display:flex; flex-direction:column; align-items:center; justify-content:center; opacity:0; transform:scale(0.95); transition: opacity .7s ease, transform .7s ease; pointer-events:none; overflow:hidden; }
+.slide.active { opacity:1; transform:scale(1); pointer-events:all; }
+.slide > .content { position:relative; z-index:2; width:100%; max-width:1100px; padding:clamp(1.5rem,4vw,4rem); }
+.nav-controls { position:fixed; bottom:30px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:16px; z-index:100; background:var(--color-glass-bg); backdrop-filter:blur(10px); padding:10px 24px; border-radius:40px; border:1px solid var(--color-glass-border); }
+.nav-btn { width:40px; height:40px; border:none; background:var(--color-glass-bg); color:var(--color-accent-1); border-radius:50%; font-size:1.2rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .3s; }
+.nav-btn:hover { background: var(--color-glass-border); }
+.slide-dots { display:flex; gap:8px; }
+.slide-dots .dot { width:10px; height:10px; border-radius:50%; background:var(--color-glass-border); cursor:pointer; transition:background .3s, transform .3s; }
+.slide-dots .dot.active { background:var(--color-accent-1); transform:scale(1.3); }
+.slide-counter { font-size:.8rem; color:var(--color-text-muted); min-width:40px; text-align:center; }
+.reveal { opacity:0; transform:translateY(20px); }
+.text-glow { text-shadow: 0 0 20px rgba(var(--glow-color-rgb),0.5), 0 0 40px rgba(var(--glow-color-rgb),0.2); }
+.stat-glow { text-shadow: 0 0 30px rgba(var(--glow-color-rgb),0.6), 0 0 60px rgba(var(--glow-color-rgb),0.25); }
+@keyframes float-slow { 0%{transform:translate(0,0) scale(1);} 25%{transform:translate(60px,-50px) scale(1.12);} 50%{transform:translate(-40px,40px) scale(0.9);} 75%{transform:translate(50px,20px) scale(1.08);} 100%{transform:translate(0,0) scale(1);} }
+@keyframes float-drift { 0%{transform:translate(0,0) scale(1) rotate(0deg);} 33%{transform:translate(-50px,-60px) scale(1.15) rotate(3deg);} 66%{transform:translate(40px,30px) scale(0.88) rotate(-2deg);} 100%{transform:translate(0,0) scale(1) rotate(0deg);} }
+@keyframes float { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-15px);} }
+.gradient-mesh { position:absolute; inset:0; z-index:0; overflow:hidden; pointer-events:none; }
+.blob { position:absolute; border-radius:50%; filter:blur(80px); animation: float-slow 10s ease-in-out infinite; }
+.blob:nth-child(2) { animation: float-drift 14s ease-in-out infinite; }
+.blob:nth-child(3) { animation: float-slow 18s ease-in-out infinite reverse; }
+.slide::before { content:''; position:absolute; inset:0; z-index:1; pointer-events:none; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E"); background-repeat:repeat; background-size:256px 256px; opacity:.03; mix-blend-mode:overlay; }
+.slide::after { content:''; position:absolute; inset:0; z-index:1; pointer-events:none; background: radial-gradient(ellipse at center, transparent 50%, var(--color-vignette) 100%); }
+.kpi-card { background: var(--color-glass-bg); backdrop-filter: blur(12px); border:1px solid var(--color-glass-border); border-radius:12px; padding:1rem; }
+.bar-fill { height:100%; border-radius:0 6px 6px 0; transition: width 1s ease; }
+/* Слайды, по которым данные за сентябрь ещё не загружены */
+.pending-badge { display:inline-flex; align-items:center; gap:6px; font-size:.68rem; font-weight:600; color:var(--color-pending); background:rgba(251,191,36,0.08); border:1px dashed rgba(251,191,36,0.45); border-radius:20px; padding:3px 12px; margin-bottom:1rem; }
+.kpi-card.pending { border-style:dashed; border-color:rgba(255,255,255,0.16); }
+.pending-val { color:#6e7681 !important; }
+.bar-track-pending { border:1px dashed rgba(255,255,255,0.18); background:transparent !important; }
+@media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.2s !important; } }
+</style>
+</head>
+<body>
+<div class="mouse-spotlight" style="position:fixed;inset:0;z-index:99;pointer-events:none;"></div>
+<div class="deck">
+
+<div class="slide slide-1 active" data-slide="1">
+    <div class="gradient-mesh">
+        <div class="blob" style="width:500px;height:500px;top:-100px;right:-100px;background:#10b981;opacity:0.15;"></div>
+        <div class="blob" style="width:300px;height:300px;bottom:-80px;left:-60px;background:#60a5fa;opacity:0.12;"></div>
+        <div class="blob" style="width:200px;height:200px;top:40%;left:15%;background:#c084fc;opacity:0.1;"></div>
+    </div>
+    <canvas class="particle-canvas" style="position:absolute;inset:0;z-index:1;"></canvas>
+    <div class="content text-center">
+        <div style="font-size:100px;margin-bottom:1.2rem;animation: float 3s ease-in-out infinite;">📊</div>
+        <h1 class="reveal" style="font-family:'Playfair Display',serif;font-size:clamp(2.8rem,6vw,5rem);font-weight:900;background:linear-gradient(135deg,#10b981,#60a5fa,#10b981);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:1rem;">Отчет</h1>
+        <p class="reveal" style="font-size:clamp(0.9rem,1.5vw,1.4rem);font-weight:300;color:#8b949e;letter-spacing:6px;text-transform:uppercase;">Сентябрь 2026</p>
+    </div>
+</div>
+
+<div class="slide slide-2" data-slide="2">
+    <div class="gradient-mesh">
+        <div class="blob" style="width:350px;height:350px;top:-80px;right:-80px;background:#10b981;opacity:0.08;"></div>
+        <div class="blob" style="width:250px;height:250px;bottom:-60px;left:-40px;background:#60a5fa;opacity:0.06;"></div>
+    </div>
+    <div class="content">
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">Трафик сайта</p>
+        <h2 style="font-family:'Playfair Display',serif;font-size:clamp(2rem,4.5vw,3rem);font-weight:700;margin-bottom:1.2rem;" class="reveal">Сентябрь vs Август 2026</h2>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
+            <div class="kpi-card reveal" style="text-align:center;border-top:3px solid #10b981;">
+                <div style="font-size:.7rem;color:#8b949e;text-transform:uppercase;margin-bottom:.4rem;">Визиты</div>
+                <div style="font-size:2.4rem;font-weight:900;color:#10b981;">17 593</div>
+                <div style="font-size:.8rem;color:#f87171;font-weight:700;margin-top:.3rem;">▼ -23.7%</div>
+                <div style="font-size:.68rem;color:#8b949e;margin-top:.2rem;">Август: 23 061</div>
+            </div>
+            <div class="kpi-card reveal" style="text-align:center;border-top:3px solid #60a5fa;">
+                <div style="font-size:.7rem;color:#8b949e;text-transform:uppercase;margin-bottom:.4rem;">Посетители</div>
+                <div style="font-size:2.4rem;font-weight:900;color:#60a5fa;">11 549</div>
+                <div style="font-size:.8rem;color:#f87171;font-weight:700;margin-top:.3rem;">▼ -35.7%</div>
+                <div style="font-size:.68rem;color:#8b949e;margin-top:.2rem;">Август: 17 967</div>
+            </div>
+            <div class="kpi-card reveal" style="text-align:center;border-top:3px solid #fbbf24;">
+                <div style="font-size:.7rem;color:#8b949e;text-transform:uppercase;margin-bottom:.4rem;">Отказы</div>
+                <div style="font-size:2.4rem;font-weight:900;color:#fbbf24;">18.13%</div>
+                <div style="font-size:.8rem;color:#34d399;font-weight:700;margin-top:.3rem;">▼ -7.25 пп</div>
+                <div style="font-size:.68rem;color:#8b949e;margin-top:.2rem;">Август: 25.38%</div>
+            </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-top:20px;">
+            <div class="kpi-card reveal" style="text-align:center;">
+                <div style="font-size:.7rem;color:#8b949e;text-transform:uppercase;margin-bottom:.4rem;">Глубина просмотра</div>
+                <div style="font-size:1.8rem;font-weight:800;color:#e6edf3;">3.2 стр.</div>
+                <div style="font-size:.75rem;color:#34d399;margin-top:.2rem;">▲ +0.5 (Август: 2.7)</div>
+            </div>
+            <div class="kpi-card reveal" style="text-align:center;">
+                <div style="font-size:.7rem;color:#8b949e;text-transform:uppercase;margin-bottom:.4rem;">Время на сайте</div>
+                <div style="font-size:1.8rem;font-weight:800;color:#e6edf3;">3 м 15 с</div>
+                <div style="font-size:.75rem;color:#34d399;margin-top:.2rem;">▲ +42 с (Август: 2 м 33 с)</div>
+            </div>
+        </div>
+        <p style="font-size:.75rem;color:#8b949e;margin-top:1rem;" class="reveal">Трафик ниже августовского пика, но качественнее: меньше отказов, глубже и дольше просмотр.</p>
+    </div>
+</div>
+
+<div class="slide slide-3" data-slide="3">
+    <div class="gradient-mesh">
+        <div class="blob" style="width:380px;height:380px;top:-80px;right:-80px;background:#c084fc;opacity:0.09;"></div>
+        <div class="blob" style="width:260px;height:260px;bottom:-60px;left:-40px;background:#34d399;opacity:0.07;"></div>
+    </div>
+    <div class="content">
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">Заявки и конверсия</p>
+        <h2 style="font-family:'Playfair Display',serif;font-size:clamp(2rem,4.5vw,3rem);font-weight:700;margin-bottom:1.2rem;" class="reveal">Лиды: сайт и звонки</h2>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:20px;">
+            <div class="kpi-card reveal" style="border-left:4px solid #34d399;padding:1.4rem;">
+                <div style="font-size:.85rem;color:#8b949e;text-transform:uppercase;margin-bottom:.6rem;">Заявки с сайта (метрика)</div>
+                <div style="font-size:2.2rem;font-weight:900;color:#34d399;">324</div>
+                <div style="font-size:.8rem;color:#34d399;font-weight:700;margin-top:.3rem;">▲ +57.3% (Август: 206)</div>
+            </div>
+            <div class="kpi-card reveal" style="border-left:4px solid #c084fc;padding:1.4rem;">
+                <div style="font-size:.85rem;color:#8b949e;text-transform:uppercase;margin-bottom:.6rem;">Заявки по звонкам (колл-центр)</div>
+                <div style="font-size:2.2rem;font-weight:900;color:#c084fc;">650</div>
+                <div style="font-size:.8rem;color:#34d399;font-weight:700;margin-top:.3rem;">▲ +17.8% (Август: 552)</div>
+            </div>
+            <div class="kpi-card reveal" style="border-left:4px solid #60a5fa;padding:1.4rem;">
+                <div style="font-size:.85rem;color:#8b949e;text-transform:uppercase;margin-bottom:.6rem;">Конверсия визитов</div>
+                <div style="font-size:2.2rem;font-weight:900;color:#60a5fa;">4.2%</div>
+                <div style="font-size:.8rem;color:#34d399;font-weight:700;margin-top:.3rem;">▲ +1.4 пп (Август: 2.8%)</div>
+            </div>
+            <div class="kpi-card reveal" style="border-left:4px solid #fbbf24;padding:1.4rem;">
+                <div style="font-size:.85rem;color:#8b949e;text-transform:uppercase;margin-bottom:.6rem;">CPL (стоимость лида)</div>
+                <div style="font-size:2.2rem;font-weight:900;color:#fbbf24;">47 ₽</div>
+                <div style="font-size:.8rem;color:#f87171;font-weight:700;margin-top:.3rem;">▲ +6.2% (Август: 45 ₽)</div>
+            </div>
+        </div>
+        <p style="font-size:.75rem;color:#8b949e;margin-top:1rem;" class="reveal">CPL с учётом ФОТ: 280 ₽ (Август: 310 ₽, ▼ -9.7%) · Лиды в CRM: 87 (Август: 94, ▼ -7.4%) · Рекламный бюджет: 34 840 ₽ (Август: 28 760 ₽, ▲ +21.1%)</p>
+    </div>
+</div>
+
+<div class="slide slide-4" data-slide="4">
+    <div class="gradient-mesh">
+        <div class="blob" style="width:380px;height:380px;top:-80px;right:-80px;background:#059669;opacity:0.09;"></div>
+        <div class="blob" style="width:260px;height:260px;bottom:-60px;left:-40px;background:#7c3aed;opacity:0.07;"></div>
+    </div>
+    <div class="content" style="padding:clamp(0.8rem,2vw,2rem);">
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">Каналы</p>
+        <h2 style="font-family:'Playfair Display',serif;font-size:clamp(1.3rem,2.5vw,2rem);font-weight:700;margin-bottom:.9rem;" class="reveal">Трафик по каналам · Сентябрь 2026</h2>
+        <div class="reveal" style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:.76rem;">
+                <thead>
+                    <tr style="background:rgba(16,185,129,0.10);border-bottom:1px solid rgba(16,185,129,0.25);">
+                        <th style="text-align:left;padding:7px 10px;color:#8b949e;font-weight:600;white-space:nowrap;">Канал</th>
+                        <th style="text-align:right;padding:7px 8px;color:#34d399;font-weight:600;">Визиты</th>
+                        <th style="text-align:right;padding:7px 8px;color:#8b949e;font-weight:600;white-space:nowrap;">Δ к авг.</th>
+                        <th style="text-align:right;padding:7px 8px;color:#34d399;font-weight:600;">Посетители</th>
+                        <th style="text-align:right;padding:7px 8px;color:#fbbf24;font-weight:600;">Отказы</th>
+                        <th style="text-align:right;padding:7px 8px;color:#8b949e;font-weight:600;">Глубина</th>
+                        <th style="text-align:right;padding:7px 8px;color:#8b949e;font-weight:600;">Время</th>
+                        <th style="text-align:right;padding:7px 8px;color:#4ade80;font-weight:600;">Лиды (мет.)</th>
+                        <th style="text-align:right;padding:7px 8px;color:#c084fc;font-weight:600;">%Conv</th>
+                        <th style="text-align:right;padding:7px 8px;color:#fb923c;font-weight:600;">CPL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <td style="padding:6px 10px;color:#e6edf3;white-space:nowrap;">Переходы из поисковых</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">10 064</td>
+                        <td style="text-align:right;padding:6px 8px;color:#f87171;white-space:nowrap;">▼ -9.5%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">6 221</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fbbf24;">10.12%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;">3.50</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;white-space:nowrap;">3 м 28 с</td>
+                        <td style="text-align:right;padding:6px 8px;color:#4ade80;">227</td>
+                        <td style="text-align:right;padding:6px 8px;color:#c084fc;">2.3%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fb923c;">26</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <td style="padding:6px 10px;color:#e6edf3;white-space:nowrap;">Прямые заходы</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">1 995</td>
+                        <td style="text-align:right;padding:6px 8px;color:#f87171;white-space:nowrap;">▼ -45.4%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">1 620</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fbbf24;">37.49%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;">2.38</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;white-space:nowrap;">2 м 4 с</td>
+                        <td style="text-align:right;padding:6px 8px;color:#4ade80;">30</td>
+                        <td style="text-align:right;padding:6px 8px;color:#c084fc;">1.5%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fb923c;">0</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <td style="padding:6px 10px;color:#e6edf3;white-space:nowrap;">Переходы по рекламе</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">478</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;white-space:nowrap;">▲ +128.7%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">356</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fbbf24;">17.99%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;">3.44</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;white-space:nowrap;">2 м 9 с</td>
+                        <td style="text-align:right;padding:6px 8px;color:#4ade80;">14</td>
+                        <td style="text-align:right;padding:6px 8px;color:#c084fc;">2.9%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fb923c;">814</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <td style="padding:6px 10px;color:#e6edf3;white-space:nowrap;">Переходы по ссылкам на сайтах</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">1 235</td>
+                        <td style="text-align:right;padding:6px 8px;color:#f87171;white-space:nowrap;">▼ -39.2%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">742</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fbbf24;">6.96%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;">3.58</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;white-space:nowrap;">5 м 44 с</td>
+                        <td style="text-align:right;padding:6px 8px;color:#4ade80;">18</td>
+                        <td style="text-align:right;padding:6px 8px;color:#c084fc;">1.5%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fb923c;">0</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <td style="padding:6px 10px;color:#e6edf3;white-space:nowrap;">Внутренние переходы</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">2 322</td>
+                        <td style="text-align:right;padding:6px 8px;color:#f87171;white-space:nowrap;">▼ -44.0%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">2 030</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fbbf24;">49.40%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;">1.79</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;white-space:nowrap;">1 м 34 с</td>
+                        <td style="text-align:right;padding:6px 8px;color:#4ade80;">14</td>
+                        <td style="text-align:right;padding:6px 8px;color:#c084fc;">0.6%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fb923c;">0</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <td style="padding:6px 10px;color:#e6edf3;white-space:nowrap;">Переходы из социальных сетей</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">34</td>
+                        <td style="text-align:right;padding:6px 8px;color:#f87171;white-space:nowrap;">▼ -30.6%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">27</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fbbf24;">20.59%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;">2.03</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;white-space:nowrap;">3 м 8 с</td>
+                        <td style="text-align:right;padding:6px 8px;color:#4ade80;">2</td>
+                        <td style="text-align:right;padding:6px 8px;color:#c084fc;">5.9%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fb923c;">0</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <td style="padding:6px 10px;color:#e6edf3;white-space:nowrap;">E-mail</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">811</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;white-space:nowrap;">▲ +80.6%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">317</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fbbf24;">9.49%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;">3.89</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;white-space:nowrap;">4 м 34 с</td>
+                        <td style="text-align:right;padding:6px 8px;color:#4ade80;">8</td>
+                        <td style="text-align:right;padding:6px 8px;color:#c084fc;">1.0%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fb923c;">1430</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <td style="padding:6px 10px;color:#e6edf3;white-space:nowrap;">Переходы из рекомендательных</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">518</td>
+                        <td style="text-align:right;padding:6px 8px;color:#f87171;white-space:nowrap;">▼ -61.0%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#34d399;">517</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fbbf24;">1.54%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;">2.53</td>
+                        <td style="text-align:right;padding:6px 8px;color:#8b949e;white-space:nowrap;">2 м 31 с</td>
+                        <td style="text-align:right;padding:6px 8px;color:#4ade80;">0</td>
+                        <td style="text-align:right;padding:6px 8px;color:#c084fc;">0.0%</td>
+                        <td style="text-align:right;padding:6px 8px;color:#fb923c;">0</td>
+                    </tr>
+                    <tr style="background:rgba(52,211,153,0.12);border-top:2px solid rgba(52,211,153,0.35);">
+                        <td style="padding:8px 10px;color:#e6edf3;font-weight:800;">ИТОГО</td>
+                        <td style="text-align:right;padding:8px;color:#34d399;font-weight:800;">17 593</td>
+                        <td style="text-align:right;padding:8px;color:#f87171;font-weight:800;white-space:nowrap;">▼ -23.7%</td>
+                        <td style="text-align:right;padding:8px;color:#34d399;font-weight:800;">11 549</td>
+                        <td style="text-align:right;padding:8px;color:#fbbf24;font-weight:800;">18.13%</td>
+                        <td style="text-align:right;padding:8px;color:#e6edf3;font-weight:800;">3.16</td>
+                        <td style="text-align:right;padding:8px;color:#e6edf3;font-weight:800;white-space:nowrap;">3 м 15 с</td>
+                        <td style="text-align:right;padding:8px;color:#4ade80;font-weight:800;">324</td>
+                        <td style="text-align:right;padding:8px;color:#c084fc;font-weight:800;">4.2%</td>
+                        <td style="text-align:right;padding:8px;color:#fb923c;font-weight:800;">47</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p style="font-size:.72rem;color:#8b949e;margin-top:.8rem;" class="reveal">Поиск: Google — 5 384 визита (▼ -7.1% к августу), Яндекс — 4 619 (▼ -12.4%) · Δ — изменение визитов к августу 2026</p>
+    </div>
+</div>
+
+<div class="slide slide-5" data-slide="5">
+    <div class="gradient-mesh">
+        <div class="blob" style="width:380px;height:380px;top:-80px;right:-80px;background:#fbbf24;opacity:0.08;"></div>
+        <div class="blob" style="width:260px;height:260px;bottom:-60px;left:-40px;background:#f87171;opacity:0.06;"></div>
+    </div>
+    <div class="content">
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">Яндекс Карты</p>
+        <h2 style="font-family:'Playfair Display',serif;font-size:clamp(1.5rem,3vw,2.2rem);font-weight:700;margin-bottom:.4rem;" class="reveal">Общая статистика сети · Сентябрь 2026</h2>
+        <div class="reveal"><span class="pending-badge">⏳ Данные за сентябрь ожидаются</span></div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;">
+            <div class="kpi-card pending reveal" style="padding:1.4rem;">
+                <div style="font-size:.95rem;color:#e6edf3;font-weight:600;margin-bottom:1.2rem;min-height:2.4rem;">Переходов в профиль компании</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div class="pending-val" style="font-size:2.2rem;font-weight:900;">—</div>
+                    <div style="font-size:.75rem;color:#8b949e;">Август: 3 876</div>
+                </div>
+            </div>
+            <div class="kpi-card pending reveal" style="padding:1.4rem;">
+                <div style="font-size:.95rem;color:#e6edf3;font-weight:600;margin-bottom:1.2rem;min-height:2.4rem;">Проложено маршрутов</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div class="pending-val" style="font-size:2.2rem;font-weight:900;">—</div>
+                    <div style="font-size:.75rem;color:#8b949e;">Август: 172</div>
+                </div>
+            </div>
+            <div class="kpi-card pending reveal" style="padding:1.4rem;">
+                <div style="font-size:.95rem;color:#e6edf3;font-weight:600;margin-bottom:1.2rem;min-height:2.4rem;">Нажатий «Позвонить»</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div class="pending-val" style="font-size:2.2rem;font-weight:900;">—</div>
+                    <div style="font-size:.75rem;color:#8b949e;">Август: 106</div>
+                </div>
+            </div>
+            <div class="kpi-card pending reveal" style="padding:1.4rem;">
+                <div style="font-size:.95rem;color:#e6edf3;font-weight:600;margin-bottom:1.2rem;min-height:2.4rem;">Переходов на сайт</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div class="pending-val" style="font-size:2.2rem;font-weight:900;">—</div>
+                    <div style="font-size:.75rem;color:#8b949e;">Август: 202</div>
+                </div>
+            </div>
+        </div>
+
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.65rem;color:#8b949e;margin:1.3rem 0 .5rem;" class="reveal">2ГИС · Сентябрь 2026</p>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;">
+            <div class="kpi-card pending reveal" style="padding:1.2rem 1.4rem;">
+                <div style="font-size:.85rem;color:#e6edf3;font-weight:600;margin-bottom:.6rem;">Всего показов</div>
+                <div class="pending-val" style="font-size:2rem;font-weight:900;">—</div>
+                <div style="font-size:.68rem;color:#8b949e;margin-top:.3rem;">Август: 3 635</div>
+            </div>
+            <div class="kpi-card pending reveal" style="padding:1.2rem 1.4rem;">
+                <div style="font-size:.85rem;color:#e6edf3;font-weight:600;margin-bottom:.6rem;">Средняя позиция (взвешенная)</div>
+                <div class="pending-val" style="font-size:2rem;font-weight:900;">—</div>
+                <div style="font-size:.68rem;color:#8b949e;margin-top:.3rem;">Август: 24,44 · рассчитывается с учётом количества показов на каждой позиции</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="slide slide-6" data-slide="6">
+    <div class="gradient-mesh">
+        <div class="blob" style="width:380px;height:380px;top:-80px;right:-80px;background:#60a5fa;opacity:0.09;"></div>
+        <div class="blob" style="width:260px;height:260px;bottom:-60px;left:-40px;background:#c084fc;opacity:0.06;"></div>
+    </div>
+    <div class="content">
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">SEO · Яндекс.Поиск</p>
+        <h2 style="font-family:'Playfair Display',serif;font-size:clamp(1.5rem,3vw,2.2rem);font-weight:700;margin-bottom:.4rem;" class="reveal">Органическая выдача · Сентябрь vs Август 2026</h2>
+        <div class="reveal"><span class="pending-badge" style="margin-bottom:.6rem;">⏳ Данные за сентябрь ожидаются</span></div>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;padding:6px 14px;background:rgba(96,165,250,0.1);border-radius:8px 8px 0 0;">
+            <div style="font-size:.72rem;color:#8b949e;text-transform:uppercase;">Показатель</div>
+            <div style="text-align:center;font-size:.72rem;color:#8b949e;text-transform:uppercase;">АВГУСТ</div>
+            <div style="text-align:center;font-size:.72rem;color:#60a5fa;text-transform:uppercase;">СЕНТЯБРЬ</div>
+            <div style="text-align:center;font-size:.72rem;color:#8b949e;text-transform:uppercase;">Δ</div>
+        </div>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:.78rem;color:#e6edf3;">Показы</div>
+            <div style="text-align:center;font-size:.92rem;font-weight:700;color:#8b949e;">31 000</div>
+            <div class="pending-val" style="text-align:center;font-size:.92rem;font-weight:700;">—</div>
+            <div class="pending-val" style="text-align:center;font-size:.78rem;font-weight:700;">—</div>
+        </div>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:.78rem;color:#e6edf3;">Клики</div>
+            <div style="text-align:center;font-size:.92rem;font-weight:700;color:#8b949e;">1 739</div>
+            <div class="pending-val" style="text-align:center;font-size:.92rem;font-weight:700;">—</div>
+            <div class="pending-val" style="text-align:center;font-size:.78rem;font-weight:700;">—</div>
+        </div>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:.78rem;color:#e6edf3;">CTR</div>
+            <div style="text-align:center;font-size:.92rem;font-weight:700;color:#8b949e;">5.6%</div>
+            <div class="pending-val" style="text-align:center;font-size:.92rem;font-weight:700;">—</div>
+            <div class="pending-val" style="text-align:center;font-size:.78rem;font-weight:700;">—</div>
+        </div>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:.78rem;color:#e6edf3;">Средняя позиция показа</div>
+            <div style="text-align:center;font-size:.92rem;font-weight:700;color:#8b949e;">8.11</div>
+            <div class="pending-val" style="text-align:center;font-size:.92rem;font-weight:700;">—</div>
+            <div class="pending-val" style="text-align:center;font-size:.78rem;font-weight:700;">—</div>
+        </div>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:.78rem;color:#e6edf3;">Средняя позиция клика</div>
+            <div style="text-align:center;font-size:.92rem;font-weight:700;color:#8b949e;">3.17</div>
+            <div class="pending-val" style="text-align:center;font-size:.92rem;font-weight:700;">—</div>
+            <div class="pending-val" style="text-align:center;font-size:.78rem;font-weight:700;">—</div>
+        </div>
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.65rem;color:#8b949e;margin:.7rem 0 .3rem;" class="reveal">Показы на позициях · Сентябрь vs Август 2026</p>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;padding:6px 14px;background:rgba(52,211,153,0.1);border-radius:8px 8px 0 0;">
+            <div style="font-size:.72rem;color:#8b949e;text-transform:uppercase;">Диапазон позиций</div>
+            <div style="text-align:center;font-size:.72rem;color:#8b949e;text-transform:uppercase;">АВГУСТ</div>
+            <div style="text-align:center;font-size:.72rem;color:#34d399;text-transform:uppercase;">СЕНТЯБРЬ</div>
+            <div style="text-align:center;font-size:.72rem;color:#8b949e;text-transform:uppercase;">Δ</div>
+        </div>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:.78rem;color:#e6edf3;">Показы на 1 позиция</div>
+            <div style="text-align:center;font-size:.92rem;font-weight:700;color:#8b949e;">1 578</div>
+            <div class="pending-val" style="text-align:center;font-size:.92rem;font-weight:700;">—</div>
+            <div class="pending-val" style="text-align:center;font-size:.78rem;font-weight:700;">—</div>
+        </div>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:.78rem;color:#e6edf3;">Показы на 2-3 позиции</div>
+            <div style="text-align:center;font-size:.92rem;font-weight:700;color:#8b949e;">5 666</div>
+            <div class="pending-val" style="text-align:center;font-size:.92rem;font-weight:700;">—</div>
+            <div class="pending-val" style="text-align:center;font-size:.78rem;font-weight:700;">—</div>
+        </div>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:.78rem;color:#e6edf3;">Показы на 4-10 позиций</div>
+            <div style="text-align:center;font-size:.92rem;font-weight:700;color:#8b949e;">16 323</div>
+            <div class="pending-val" style="text-align:center;font-size:.92rem;font-weight:700;">—</div>
+            <div class="pending-val" style="text-align:center;font-size:.78rem;font-weight:700;">—</div>
+        </div>
+        <div class="reveal" style="display:grid;grid-template-columns:1fr 100px 100px 110px;gap:8px;align-items:center;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:.78rem;color:#e6edf3;">Показы на 11-50 позиций</div>
+            <div style="text-align:center;font-size:.92rem;font-weight:700;color:#8b949e;">7 433</div>
+            <div class="pending-val" style="text-align:center;font-size:.92rem;font-weight:700;">—</div>
+            <div class="pending-val" style="text-align:center;font-size:.78rem;font-weight:700;">—</div>
+        </div>
+    </div>
+</div>
+
+<div class="slide slide-7" data-slide="7">
+    <div class="gradient-mesh">
+        <div class="blob" style="width:400px;height:400px;top:-90px;right:-90px;background:#818cf8;opacity:0.09;"></div>
+        <div class="blob" style="width:280px;height:280px;bottom:-70px;left:-50px;background:#fbbf24;opacity:0.06;"></div>
+    </div>
+    <div class="content">
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">Реклама · Яндекс</p>
+        <h2 style="font-family:'Playfair Display',serif;font-size:clamp(1.4rem,3vw,2.1rem);font-weight:700;margin-bottom:.3rem;" class="reveal">Воронка рекламы по городам</h2>
+        <p style="font-size:.78rem;color:#8b949e;margin-bottom:.6rem;" class="reveal">Статистика за сентябрь 2026 · Данные на 30.09.2026</p>
+        <div class="reveal"><span class="pending-badge">⏳ Данные за сентябрь ожидаются</span></div>
+        <div style="display:flex;gap:22px;">
+
+        <div class="reveal" style="flex:1;">
+            <div style="font-size:.85rem;color:#818cf8;font-weight:800;text-transform:uppercase;letter-spacing:2px;margin-bottom:.7rem;text-align:center;">Москва</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                <div class="kpi-card pending" style="text-align:center;border-top:3px solid #818cf8;padding:.8rem .5rem;">
+                    <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Просмотров</div>
+                    <div class="pending-val" style="font-size:1.35rem;font-weight:900;">—</div>
+                    <div style="font-size:.6rem;color:#8b949e;margin-top:.2rem;">— ₽ потрачено</div>
+                </div>
+                <div class="kpi-card pending" style="text-align:center;border-top:3px solid #818cf8;padding:.8rem .5rem;">
+                    <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Переходы</div>
+                    <div class="pending-val" style="font-size:1.35rem;font-weight:900;">—</div>
+                    <div style="font-size:.6rem;color:#8b949e;margin-top:.2rem;">— ₽ за переход</div>
+                    <div style="font-size:.58rem;color:#8b949e;margin-top:.15rem;">— % от показов</div>
+                </div>
+                <div class="kpi-card pending" style="text-align:center;border-top:3px solid #818cf8;padding:.8rem .5rem;">
+                    <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Целевых клиентов</div>
+                    <div class="pending-val" style="font-size:1.35rem;font-weight:900;">—</div>
+                    <div style="font-size:.6rem;color:#8b949e;margin-top:.2rem;">— ₽ за клиента</div>
+                    <div style="font-size:.58rem;color:#8b949e;margin-top:.15rem;">— % от переходов</div>
+                </div>
+            </div>
+            <div class="kpi-card pending" style="text-align:center;margin-top:10px;padding:.6rem;border-left:4px solid #818cf8;">
+                <div style="display:flex;justify-content:center;align-items:baseline;gap:10px;">
+                    <span style="font-size:.65rem;color:#8b949e;text-transform:uppercase;">Целевых действий</span>
+                    <span class="pending-val" style="font-size:1.1rem;font-weight:900;">—</span>
+                    <span style="font-size:.62rem;color:#8b949e;">— ₽ за действие</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="reveal" style="flex:1;">
+            <div style="font-size:.85rem;color:#fbbf24;font-weight:800;text-transform:uppercase;letter-spacing:2px;margin-bottom:.7rem;text-align:center;">Санкт-Петербург</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                <div class="kpi-card pending" style="text-align:center;border-top:3px solid #fbbf24;padding:.8rem .5rem;">
+                    <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Просмотров</div>
+                    <div class="pending-val" style="font-size:1.35rem;font-weight:900;">—</div>
+                    <div style="font-size:.6rem;color:#8b949e;margin-top:.2rem;">— ₽ потрачено</div>
+                </div>
+                <div class="kpi-card pending" style="text-align:center;border-top:3px solid #fbbf24;padding:.8rem .5rem;">
+                    <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Переходы</div>
+                    <div class="pending-val" style="font-size:1.35rem;font-weight:900;">—</div>
+                    <div style="font-size:.6rem;color:#8b949e;margin-top:.2rem;">— ₽ за переход</div>
+                    <div style="font-size:.58rem;color:#8b949e;margin-top:.15rem;">— % от показов</div>
+                </div>
+                <div class="kpi-card pending" style="text-align:center;border-top:3px solid #fbbf24;padding:.8rem .5rem;">
+                    <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Целевых клиентов</div>
+                    <div class="pending-val" style="font-size:1.35rem;font-weight:900;">—</div>
+                    <div style="font-size:.6rem;color:#8b949e;margin-top:.2rem;">— ₽ за клиента</div>
+                    <div style="font-size:.58rem;color:#8b949e;margin-top:.15rem;">— % от переходов</div>
+                </div>
+            </div>
+            <div class="kpi-card pending" style="text-align:center;margin-top:10px;padding:.6rem;border-left:4px solid #fbbf24;">
+                <div style="display:flex;justify-content:center;align-items:baseline;gap:10px;">
+                    <span style="font-size:.65rem;color:#8b949e;text-transform:uppercase;">Целевых действий</span>
+                    <span class="pending-val" style="font-size:1.1rem;font-weight:900;">—</span>
+                    <span style="font-size:.62rem;color:#8b949e;">— ₽ за действие</span>
+                </div>
+            </div>
+        </div>
+        </div>
+        <p style="font-size:.72rem;color:#8b949e;margin-top:1rem;" class="reveal">По Метрике в сентябре: 478 визитов с рекламы (▲ +128.7% к августу), 14 заявок, CPL 814 ₽ (Август: 1 330 ₽)</p>
+    </div>
+</div>
+
+<div class="slide slide-8" data-slide="8">
+    <div class="gradient-mesh">
+        <div class="blob" style="width:400px;height:400px;top:-90px;right:-90px;background:#10b981;opacity:0.09;"></div>
+        <div class="blob" style="width:280px;height:280px;bottom:-70px;left:-50px;background:#60a5fa;opacity:0.06;"></div>
+    </div>
+    <div class="content">
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">Спрос в сети</p>
+        <h2 style="font-family:'Playfair Display',serif;font-size:clamp(1.4rem,3vw,2.1rem);font-weight:700;margin-bottom:.3rem;" class="reveal">Спрос по ключевым запросам · 2026</h2>
+        <p style="font-size:.78rem;color:#8b949e;margin-bottom:.6rem;" class="reveal">С майского минимума спрос рос каждый месяц</p>
+        <div class="reveal"><span class="pending-badge">⏳ Данные за сентябрь ожидаются</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+            <div>
+                <div style="font-size:.85rem;color:#34d399;font-weight:800;margin-bottom:.5rem;" class="reveal">«Ткани оптом» (май→авг: +38.3%)</div>
+                <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
+                    <div style="font-size:.72rem;color:#e6edf3;">Май 26</div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
+                        <div class="bar-fill" data-width="72.3" style="width:0%;background:linear-gradient(90deg,#10b981,#34d399);"></div>
+                    </div>
+                    <div style="text-align:right;font-size:.8rem;font-weight:700;color:#34d399;">21 967</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#8b949e;"></div>
+                </div>
+                <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
+                    <div style="font-size:.72rem;color:#e6edf3;">Июн 26</div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
+                        <div class="bar-fill" data-width="80.5" style="width:0%;background:linear-gradient(90deg,#10b981,#34d399);"></div>
+                    </div>
+                    <div style="text-align:right;font-size:.8rem;font-weight:700;color:#34d399;">24 453</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#34d399;">▲ +11.3%</div>
+                </div>
+                <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
+                    <div style="font-size:.72rem;color:#e6edf3;">Июл 26</div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
+                        <div class="bar-fill" data-width="88.1" style="width:0%;background:linear-gradient(90deg,#10b981,#34d399);"></div>
+                    </div>
+                    <div style="text-align:right;font-size:.8rem;font-weight:700;color:#34d399;">26 778</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#34d399;">▲ +9.5%</div>
+                </div>
+                <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
+                    <div style="font-size:.72rem;color:#e6edf3;">Авг 26</div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
+                        <div class="bar-fill" data-width="100.0" style="width:0%;background:linear-gradient(90deg,#10b981,#34d399);"></div>
+                    </div>
+                    <div style="text-align:right;font-size:.8rem;font-weight:700;color:#34d399;">30 386</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#34d399;">▲ +13.5%</div>
+                </div>
+                <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
+                    <div style="font-size:.72rem;color:#e6edf3;">Сен 26</div>
+                    <div class="bar-track-pending" style="border-radius:6px;height:14px;"></div>
+                    <div class="pending-val" style="text-align:right;font-size:.8rem;font-weight:700;">—</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#8b949e;"></div>
+                </div>
+            </div>
+            <div>
+                <div style="font-size:.85rem;color:#60a5fa;font-weight:800;margin-bottom:.5rem;" class="reveal">«Текстиль оптом» (май→авг: +66.7%)</div>
+                <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
+                    <div style="font-size:.72rem;color:#e6edf3;">Май 26</div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
+                        <div class="bar-fill" data-width="60.0" style="width:0%;background:linear-gradient(90deg,#60a5fa,#c084fc);"></div>
+                    </div>
+                    <div style="text-align:right;font-size:.8rem;font-weight:700;color:#60a5fa;">2 573</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#8b949e;"></div>
+                </div>
+                <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
+                    <div style="font-size:.72rem;color:#e6edf3;">Июн 26</div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
+                        <div class="bar-fill" data-width="76.4" style="width:0%;background:linear-gradient(90deg,#60a5fa,#c084fc);"></div>
+                    </div>
+                    <div style="text-align:right;font-size:.8rem;font-weight:700;color:#60a5fa;">3 277</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#34d399;">▲ +27.4%</div>
+                </div>
+                <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
+                    <div style="font-size:.72rem;color:#e6edf3;">Июл 26</div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
+                        <div class="bar-fill" data-width="92.6" style="width:0%;background:linear-gradient(90deg,#60a5fa,#c084fc);"></div>
+                    </div>
+                    <div style="text-align:right;font-size:.8rem;font-weight:700;color:#60a5fa;">3 971</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#34d399;">▲ +21.2%</div>
+                </div>
+                <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
+                    <div style="font-size:.72rem;color:#e6edf3;">Авг 26</div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:6px;height:14px;overflow:hidden;">
+                        <div class="bar-fill" data-width="100.0" style="width:0%;background:linear-gradient(90deg,#60a5fa,#c084fc);"></div>
+                    </div>
+                    <div style="text-align:right;font-size:.8rem;font-weight:700;color:#60a5fa;">4 290</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#34d399;">▲ +8.0%</div>
+                </div>
+                <div class="reveal" style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:10px;align-items:center;padding:5px 4px;">
+                    <div style="font-size:.72rem;color:#e6edf3;">Сен 26</div>
+                    <div class="bar-track-pending" style="border-radius:6px;height:14px;"></div>
+                    <div class="pending-val" style="text-align:right;font-size:.8rem;font-weight:700;">—</div>
+                    <div style="text-align:right;font-size:.75rem;font-weight:700;color:#8b949e;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="slide slide-9" data-slide="9">
+    <div class="gradient-mesh">
+        <div class="blob" style="width:400px;height:400px;top:-90px;right:-90px;background:#0891b2;opacity:0.09;"></div>
+        <div class="blob" style="width:280px;height:280px;bottom:-70px;left:-50px;background:#34d399;opacity:0.06;"></div>
+    </div>
+    <div class="content">
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">Опрос клиентов</p>
+        <h2 style="font-family:'Playfair Display',serif;font-size:clamp(1.4rem,3vw,2.1rem);font-weight:700;margin-bottom:.4rem;" class="reveal">Приоритетные направления поддержки</h2>
+        <div class="reveal"><span class="pending-badge">⏳ Данные за сентябрь ожидаются</span></div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:1rem;">
+            <div class="kpi-card pending reveal" style="text-align:center;border-top:3px solid #0891b2;padding:.7rem .4rem;">
+                <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Респондентов</div>
+                <div class="pending-val" style="font-size:1.5rem;font-weight:900;">—</div>
+            </div>
+            <div class="kpi-card pending reveal" style="text-align:center;border-top:3px solid #34d399;padding:.7rem .4rem;">
+                <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Всего вариантов</div>
+                <div class="pending-val" style="font-size:1.5rem;font-weight:900;">—</div>
+            </div>
+            <div class="kpi-card pending reveal" style="text-align:center;border-top:3px solid #60a5fa;padding:.7rem .4rem;">
+                <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Ср. вариантов/анкету</div>
+                <div class="pending-val" style="font-size:1.5rem;font-weight:900;">—</div>
+            </div>
+            <div class="kpi-card pending reveal" style="text-align:center;border-top:3px solid #fbbf24;padding:.7rem .4rem;">
+                <div style="font-size:.6rem;color:#8b949e;text-transform:uppercase;margin-bottom:.3rem;">Выбрали «Другое»</div>
+                <div class="pending-val" style="font-size:1.5rem;font-weight:900;">—</div>
+            </div>
+        </div>
+        <div class="kpi-card pending reveal" style="padding:2.2rem 1rem;text-align:center;">
+            <div style="font-size:.8rem;color:#8b949e;">Распределение ответов по направлениям поддержки появится после загрузки результатов опроса</div>
+        </div>
+    </div>
+</div>
+
+<div class="slide slide-10" data-slide="10">
+    <div class="gradient-mesh">
+        <div class="blob" style="width:500px;height:500px;top:-100px;right:-100px;background:#10b981;opacity:0.13;"></div>
+        <div class="blob" style="width:300px;height:300px;bottom:-80px;left:-60px;background:#60a5fa;opacity:0.1;"></div>
+    </div>
+    <div class="content">
+        <p style="text-transform:uppercase;letter-spacing:4px;font-size:.7rem;color:#8b949e;margin-bottom:.3rem;" class="reveal">Итоги сентября</p>
+        <h2 style="font-family:'Playfair Display',serif;font-size:clamp(1.3rem,2.6vw,1.9rem);font-weight:700;margin-bottom:.9rem;" class="reveal">Ключевые выводы · Сентябрь 2026</h2>
+        <div style="display:flex;flex-direction:column;gap:.4rem;">
+            <div class="reveal kpi-card" style="border-left:4px solid #34d399;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.05rem;">📈</span>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Заявок с сайта на 57% больше</div>
+                <div style="font-size:.63rem;color:#b1bac4;">324 заявки по Метрике vs 206 в августе · конверсия визитов 4.2% (+1.4 пп)</div></div>
+            </div>
+            <div class="reveal kpi-card" style="border-left:4px solid #c084fc;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.05rem;">📞</span>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Заявок по звонкам больше</div>
+                <div style="font-size:.63rem;color:#b1bac4;">650 vs 552 в августе (+17.8%)</div></div>
+            </div>
+            <div class="reveal kpi-card" style="border-left:4px solid #059669;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.05rem;">✨</span>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Трафик стал качественнее</div>
+                <div style="font-size:.63rem;color:#b1bac4;">Отказы 18.13% (-7.25 пп) · глубина 3.2 стр. (+0.5) · время на сайте 3 м 15 с (+42 с)</div></div>
+            </div>
+            <div class="reveal kpi-card" style="border-left:4px solid #60a5fa;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.05rem;">🔎</span>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Поиск — главный источник заявок</div>
+                <div style="font-size:.63rem;color:#b1bac4;">227 из 324 заявок (70%) · CPL поиска 26 ₽ vs 33 ₽ в августе</div></div>
+            </div>
+            <div class="reveal kpi-card" style="border-left:4px solid #fbbf24;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.05rem;">🎯</span>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Реклама и e-mail отработали эффективнее</div>
+                <div style="font-size:.63rem;color:#b1bac4;">Реклама: визиты ×2.3, заявки 14 vs 4, CPL 814 ₽ vs 1 330 ₽ · E-mail: заявки 8 vs 5, CPL 1 430 ₽ vs 2 288 ₽</div></div>
+            </div>
+            <div class="reveal kpi-card" style="border-left:4px solid #f87171;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.05rem;">📉</span>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Трафик ниже августовского пика</div>
+                <div style="font-size:.63rem;color:#b1bac4;">Визиты -23.7% · посетители -35.7% · основной спад — прямые (-45%), внутренние (-44%) и рекомендательные (-61%) переходы</div></div>
+            </div>
+            <div class="reveal kpi-card" style="border-left:4px solid #f87171;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.05rem;">💰</span>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">CPL немного вырос, с учётом ФОТ — снизился</div>
+                <div style="font-size:.63rem;color:#b1bac4;">CPL 47 ₽ vs 45 ₽ (+6.2%) при бюджете +21% · с ФОТ: 280 ₽ vs 310 ₽ (-9.7%) · лиды в CRM: 87 vs 94</div></div>
+            </div>
+            <div class="reveal kpi-card pending" style="border-left:4px dashed #fbbf24;padding:.46rem 1.05rem;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:1.05rem;">⏳</span>
+                <div><div style="font-weight:700;font-size:.72rem;color:#e6edf3;margin-bottom:.05rem;">Карты, SEO, реклама по городам, спрос, опрос</div>
+                <div style="font-size:.63rem;color:#b1bac4;">Выводы добавим после загрузки данных за сентябрь</div></div>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+<div class="nav-controls">
+    <button class="nav-btn" onclick="changeSlide(-1)">&#8249;</button>
+    <div class="slide-dots" id="dots"></div>
+    <button class="nav-btn" onclick="changeSlide(1)">&#8250;</button>
+    <span class="slide-counter" id="counter">1 / 10</span>
+</div>
+<script>
+let current = 1;
+const total = document.querySelectorAll('.slide').length;
+const dotsContainer = document.getElementById('dots');
+const counter = document.getElementById('counter');
+for (let i = 1; i <= total; i++) { const dot = document.createElement('div'); dot.className = 'dot' + (i === 1 ? ' active' : ''); dot.onclick = () => goToSlide(i); dotsContainer.appendChild(dot); }
+function goToSlide(n) {
+    const prev = document.querySelector('.slide.active');
+    const next = document.querySelector(`.slide[data-slide="${n}"]`);
+    if (prev) prev.classList.remove('active');
+    if (next) { next.classList.add('active'); animateSlide(next); }
+    current = n; updateNav();
+}
+function changeSlide(dir) { let next = current + dir; if (next < 1) next = total; if (next > total) next = 1; goToSlide(next); }
+function updateNav() { document.querySelectorAll('.dot').forEach((d, i) => { d.classList.toggle('active', i + 1 === current); }); counter.textContent = current + ' / ' + total; }
+document.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); changeSlide(1); } if (e.key === 'ArrowLeft') { e.preventDefault(); changeSlide(-1); } });
+let touchStartX = 0;
+document.addEventListener('touchstart', (e) => { touchStartX = e.touches[0].clientX; });
+document.addEventListener('touchend', (e) => { const diff = touchStartX - e.changedTouches[0].clientX; if (Math.abs(diff) > 50) changeSlide(diff > 0 ? 1 : -1); });
+function animateSlide(slide) {
+    slide.querySelectorAll('.reveal').forEach((el, i) => {
+        el.style.transition = 'none'; el.style.opacity = '0'; el.style.transform = 'translateY(20px)';
+        el.offsetHeight;
+        const delay = i * 0.08;
+        el.style.transition = `opacity 0.35s ease ${delay}s, transform 0.35s ease ${delay}s`;
+        el.style.opacity = '1'; el.style.transform = 'translateY(0px)';
+    });
+    slide.querySelectorAll('.bar-fill:not(.bar-init)').forEach((bar,i)=>{
+        bar.classList.add('bar-init');
+        bar.style.width='0%'; bar.offsetHeight;
+        setTimeout(()=>{ bar.style.width = bar.dataset.width + '%'; }, 100 + i*60);
+    });
+}
+document.addEventListener('mousemove', (e) => {
+    const spotlight = document.querySelector('.mouse-spotlight');
+    if (spotlight) { spotlight.style.background = `radial-gradient(600px circle at ${e.clientX}px ${e.clientY}px, rgba(16,185,129,0.06), transparent 40%)`; }
+});
+try { animateSlide(document.querySelector('.slide.active')); } catch(e) {}
+</script>
+</body>
+</html>
