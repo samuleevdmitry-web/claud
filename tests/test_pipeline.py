@@ -409,3 +409,44 @@ def test_refresh_scope_relevant_skips_rejected_tenders(factory):
     adapter.fetch_details = fetch
     run(factory, {"onlinecontract": adapter})
     assert adapter.detailed == ["ok"]
+
+
+# ------------------------------------------------------------- прогон, оборванный остановкой приложения
+
+
+def test_interrupted_run_is_closed_at_startup_and_does_not_block(factory):
+    from app.services.runner import INTERRUPTED, blocking_run, recover_interrupted_runs
+
+    run_id = start_run(factory, "schedule")
+    with factory() as s:
+        s.add(
+            RunSourceStat(
+                run_id=run_id, source_code="eis", status="running", queries_total=94, queries_done=1
+            )
+        )
+        s.commit()
+        assert blocking_run(s) is not None
+    with factory() as s:  # приложение перезапустили во время прогона
+        assert recover_interrupted_runs(s) == 1
+        s.commit()
+    with factory() as s:
+        r = s.get(Run, run_id)
+        assert r.status == "failed" and r.error == INTERRUPTED and r.finished_at
+        assert r.source_stats[0].status == "failed"
+        assert s.scalar(select(Notification).where(Notification.kind == "run_interrupted"))
+        assert blocking_run(s) is None
+    assert start_run(factory, "manual") != run_id
+
+
+def test_old_running_run_does_not_block_new_one(factory):
+    from app.services.runner import blocking_run
+
+    run_id = start_run(factory, "schedule")
+    with factory() as s:
+        s.get(Run, run_id).started_at = datetime.now(UTC) - timedelta(days=9)
+        s.commit()
+        assert blocking_run(s) is None
+    new_id = start_run(factory, "manual")
+    with factory() as s:
+        assert s.get(Run, run_id).status == "failed"
+        assert s.get(Run, new_id).status == "running"

@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import PROJECT_ROOT, get_settings
 from app.db import get_engine, session_scope
 from app.services.keywords import bootstrap_keywords
+from app.services.runner import recover_interrupted_runs
 from app.services.scheduler import get_schedule, shutdown_scheduler, start_scheduler
 from app.sources.tls import ensure_russian_ca
 from app.web.routes_import import router as import_router
@@ -39,6 +40,11 @@ async def lifespan(_app: FastAPI):
     run_migrations()
     with session_scope() as session:
         bootstrap_keywords(session)
+        if interrupted := recover_interrupted_runs(session):
+            log.warning(
+                "Помечено прерванными прогонов: %d (приложение было остановлено во время прогона)",
+                interrupted,
+            )
     if get_settings().scheduler_enabled:
         await asyncio.to_thread(ensure_russian_ca)
         with session_scope() as session:

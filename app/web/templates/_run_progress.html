@@ -2,7 +2,8 @@
 {% if run %}
   <p><b>Прогон №{{ run.id }}</b> ({{ run.started_at|dt }}) —
     {{ {'running': 'идёт', 'success': 'завершён', 'partial': 'завершён с ошибками', 'failed': 'сбой'}.get(run.status, run.status) }}.
-    {% if run.status != 'running' %}Новых {{ run.new_count }} ({{ run.new_relevant }} релевантных, {{ run.new_review }} на проверку), обновлено {{ run.updated_count }}.{% endif %}</p>
+    {% if run.status != 'running' %}Новых {{ run.new_count }} ({{ run.new_relevant }} релевантных, {{ run.new_review }} на проверку), обновлено {{ run.updated_count }}.{% endif %}
+    {% if run.error %}<br><span class="warn">{{ run.error }}</span>{% endif %}</p>
   <table class="small">
     {% for st in run.source_stats %}
     <tr><td>{{ titles[st.source_code].title if st.source_code in titles else st.source_code }}</td>

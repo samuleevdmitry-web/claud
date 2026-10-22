@@ -264,16 +264,53 @@ async def _fetch_and_ingest(factory, adapter, stub, ks, keyword_set_id, result) 
 # --------------------------------------------------------------------------- прогон целиком
 
 
+INTERRUPTED = "прогон прерван: приложение было остановлено (перезапуск, выключение или сон компьютера)"
+
+
+def _close_interrupted(session: Session, run: Run, error: str) -> None:
+    now = utcnow()
+    run.status, run.error, run.finished_at = "failed", error, now
+    for st in run.source_stats:
+        if st.status in ("running", "pending"):
+            st.status, st.finished_at = "failed", now
+            st.errors = [*(st.errors or []), error][-50:]
+    when = aware(run.started_at).astimezone(MSK).strftime("%d.%m %H:%M")
+    session.add(
+        Notification(
+            kind="run_interrupted",
+            level="warning",
+            title=f"Прогон №{run.id} от {when} не завершился",
+            body=error,
+            run_id=run.id,
+        )
+    )
+
+
+def recover_interrupted_runs(session: Session) -> int:
+    """Прогоны идут внутри процесса приложения, поэтому «идущие» при его старте — оборванные.
+    Без этого такой прогон навсегда блокировал бы кнопку «Запустить сейчас» и расписание."""
+    runs = session.scalars(select(Run).where(Run.status == "running")).all()
+    for run in runs:
+        _close_interrupted(session, run, INTERRUPTED)
+    return len(runs)
+
+
+def blocking_run(session: Session) -> Run | None:
+    """Прогон, который мешает начать новый: «идёт» и начат меньше STALE_RUN назад."""
+    active = session.scalar(select(Run).where(Run.status == "running").order_by(Run.id.desc()))
+    if active is not None and utcnow() - aware(active.started_at) < STALE_RUN:
+        return active
+    return None
+
+
 def start_run(factory: sessionmaker[Session], trigger: str) -> int:
     """Создаёт запись прогона; защищает от двух одновременных прогонов."""
     with factory() as session:
-        active = session.scalar(select(Run).where(Run.status == "running").order_by(Run.id.desc()))
+        active = blocking_run(session)
         if active is not None:
-            if utcnow() - aware(active.started_at) < STALE_RUN:
-                raise RunAlreadyActive(f"прогон №{active.id} ещё идёт")
-            active.status = "failed"
-            active.error = "прогон прерван (истёк срок)"
-            active.finished_at = utcnow()
+            raise RunAlreadyActive(f"прогон №{active.id} ещё идёт")
+        for stale in session.scalars(select(Run).where(Run.status == "running")).all():
+            _close_interrupted(session, stale, "прогон прерван (истёк срок)")
         run = Run(trigger=trigger, status="running", started_at=utcnow())
         session.add(run)
         session.commit()

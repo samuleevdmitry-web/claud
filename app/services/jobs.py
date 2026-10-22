@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.db import get_session_factory
 from app.models import Run
-from app.services.runner import RunAlreadyActive, run_all
+from app.services.runner import RunAlreadyActive, blocking_run, run_all
 
 log = logging.getLogger(__name__)
 _tasks: set[asyncio.Task] = set()
@@ -31,8 +31,11 @@ async def _run(trigger: str, only: list[str] | None) -> None:
 
 def launch_run(trigger: str = "manual", only: list[str] | None = None) -> bool:
     """Запускает прогон в текущем цикле событий. False — если прогон уже идёт."""
-    if active_run_id() is not None:
+    if any(not t.done() for t in _tasks):
         return False
+    with get_session_factory()() as session:
+        if blocking_run(session) is not None:  # например, прогон из командной строки
+            return False
     task = asyncio.get_running_loop().create_task(_run(trigger, only))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
