@@ -36,7 +36,7 @@
 | Площадка | Режим | Способ | Статус |
 |---|---|---|---|
 | ЕИС (44-ФЗ, 223-ФЗ) | API | ГосПлан API (`v2test`/`v2.gosplan.info`) | готово, проверено вживую |
-| ЕИС напрямую | API | HTML расширенного поиска + карточка извещения | готово по ответам `probe --round 2` |
+| ЕИС напрямую | API | HTML расширенного поиска + карточка извещения; `Crawl-delay: 60` | готово, 1 запрос в минуту |
 | Online Contract | API | публичный API `api.onlc.ru` | готово, проверено вживую |
 | Росэлторг | API | HTML-выдача `/procedures/search` | готово по ответам `probe` |
 | Фабрикант | API | HTML-выдача `/procedure/search` | готово по ответам `probe` |
@@ -44,10 +44,10 @@
 | Tender.Pro | Chrome | антибот | импорт |
 | ТЭК-Торг | API | страница `/223-fz/procedures?name=…` (выдача в `__NEXT_DATA__`) | готово по ответам `probe --round 4` |
 | ЭТП ГПБ | Chrome | robots.txt: `Disallow: /*?`; RSS отвечает 404 | импорт; 44/223-ФЗ — из ЕИС |
-| Сбербанк-АСТ (УТП) | в работе | `POST {API}/Processing/main`, адрес API — в `/build/apl_config.json` | `probe --round 5` |
+| Сбербанк-АСТ | API | `POST /api/Processing/main` (`/EsOpenUnitedPurchaseList`), как страница поиска | готово по ответам `probe --round 5` |
 | B2B-Center | Chrome | robots.txt запрещает поиск по ключевым словам (`f_keyword=`, `search=`) | импорт |
 | OTC.ru | Chrome | страница-заглушка антибота | импорт |
-| ЭТП НИТ | в работе | nistp.ru (подтверждено пользователем) | `probe --round 5` |
+| ЭТП НИТ | не используется | nistp.ru: торги по банкротству и продажа имущества | закупок у поставщиков нет |
 | Bidzaar | Chrome | капча; позже — API поставщика по токену | импорт |
 | ЭТП УГМК | Chrome | адрес уточняется (сертификат/DNS) | импорт |
 
@@ -121,6 +121,28 @@
   берёт настройки из `/build/apl_config.json` (`API_BASE_URL`). Старый `SearchQuery.aspx` — 404.
 - Проверено задним числом: robots.txt Росэлторга и Фабриканта поиск (`/procedures/search`,
   `/procedure/search`) не закрывает.
+
+## Итоги probe №5 (22.10.2026)
+
+- **ЕИС**: robots.txt разрешает поиск и карточки (`Allow: /*search*`, `/*order*`, `/*notice*`),
+  но задаёт `Crawl-delay: 60`. Адаптер делает не больше одного запроса в минуту; карточку
+  открывает только у закупок, которые по данным выдачи релевантны, «на проверку» или содержат
+  маркер заказчика, а повторно проверяет только релевантные и «на проверку». Остальные
+  сохраняются по данным выдачи (даты в ней без времени — помечены как приблизительные и не
+  заменяют точные даты из ГосПлана). Прогон по 94 запросам — 2–4 часа, первый — дольше.
+  ГосПлан (10 запросов в минуту, полные карточки) имеет смысл держать включённым.
+- **Сбербанк-АСТ**: robots.txt нет (404). Адрес API — `API_BASE_URL` из `/build/apl_config.json`
+  (`https://www.sberbank-ast.ru/api/`). `POST Processing/main` с `windowCode
+  "/EsOpenUnitedPurchaseList"`, `parm "es"` и XML-фильтром (`mainInput`, `pagenum`, `pagesize`)
+  отвечает без входа: Elasticsearch, `PurchaseList[]._source` (`purchCode`, `IntegratorCode` —
+  номер ЕИС для 223-ФЗ, `purchName`, `CustomerFullName`, `CustomerInn`, `RegionName`,
+  `purchAmountRUB`, `PublicDate`, `RequestDate` — московское время, `purchStateName`,
+  `productCodes`, `objectHrefTerm`), новые сверху, `Total` ≤ 10 000. Запрос применяется
+  (в выдаче полотенца, мягкий инвентарь). Тестовый `windowCode "/DateTimeServer"` — `{"data":
+  "17:24:58UTC+3"}`.
+- **ЭТП НИТ (nistp.ru)**: разделы `bankrot/trade_list.php` и `common/bank_trade.php` — торги по
+  банкротству и продажа имущества банков (организатор — арбитражный управляющий, должник).
+  Закупок товаров у поставщиков нет — площадка исключена из мониторинга.
 
 ## Online Contract — публичный API (проверено 02.10.2026)
 

@@ -3,7 +3,8 @@
 mode:
 * "api"     — адаптер в приложении, площадка обходится по расписанию;
 * "manual"  — данные приносит Claude in Chrome или человек через импорт (капча, антибот);
-* "planned" — адаптер ещё не написан (нужны реальные ответы площадки с российского IP).
+* "planned" — адаптер ещё не написан (нужны реальные ответы площадки с российского IP);
+* "excluded" — площадка проверена и не подходит (например, на ней нет закупок у поставщиков).
 """
 
 from __future__ import annotations
@@ -56,6 +57,12 @@ def _tektorg() -> SourceAdapter:
     return TektorgAdapter()
 
 
+def _sberbank_ast() -> SourceAdapter:
+    from app.sources.sberbank_ast import SberbankAstAdapter
+
+    return SberbankAstAdapter()
+
+
 def _fabrikant() -> SourceAdapter:
     from app.sources.fabrikant import FabrikantAdapter
 
@@ -76,7 +83,7 @@ SOURCES: list[SourceInfo] = [
         "ЕИС напрямую (zakupki.gov.ru)",
         "https://zakupki.gov.ru",
         "api",
-        "Расширенный поиск zakupki.gov.ru, этап «Подача заявок»; сертификат Минцифры скачивается сам",
+        "Расширенный поиск, этап «Подача заявок»; по robots.txt — 1 запрос в минуту, прогон идёт 2–4 часа",
         _eis,
     ),
     SourceInfo(
@@ -136,8 +143,9 @@ SOURCES: list[SourceInfo] = [
         "sberbank_ast",
         "Сбербанк-АСТ (УТП)",
         "https://www.sberbank-ast.ru",
-        "planned",
-        "Поиск — POST {API}/Processing/main; адрес API уточняется (probe --round 5). 44-ФЗ/223-ФЗ — из ЕИС",
+        "api",
+        "Единый поиск закупок (44-ФЗ, 223-ФЗ, коммерческие), первые 5 страниц по 20 на запрос",
+        _sberbank_ast,
     ),
     SourceInfo(
         "etpgpb",
@@ -173,8 +181,8 @@ SOURCES: list[SourceInfo] = [
         "etp_nit",
         "ЭТП «Новые информационные сервисы» (НИТ)",
         "https://nistp.ru",
-        "planned",
-        "Площадка в основном для торгов по банкротству и продаже имущества; разведка — probe --round 5",
+        "excluded",
+        "Торги по банкротству и продажа имущества — закупок у поставщиков нет, мониторинг не нужен",
     ),
 ]
 

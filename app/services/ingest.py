@@ -79,8 +79,10 @@ def _apply_fields(tender: Tender, d: TenderDetails) -> None:
     tender.procedure_type = d.procedure_type or tender.procedure_type
     tender.nmck = d.nmck if d.nmck is not None else tender.nmck
     tender.currency = d.currency or tender.currency
-    tender.published_at = d.published_at or tender.published_at
-    tender.application_deadline = d.application_deadline or tender.application_deadline
+    for name in ("published_at", "application_deadline"):
+        value = getattr(d, name)
+        if value is not None and (name not in d.approximate or getattr(tender, name) is None):
+            setattr(tender, name, value)
     tender.status = d.status or tender.status
     if d.okpd2_codes:
         tender.okpd2_codes = list(dict.fromkeys(d.okpd2_codes))
@@ -96,7 +98,8 @@ def _apply_fields(tender: Tender, d: TenderDetails) -> None:
 def _changes(tender: Tender, d: TenderDetails, link: TenderSource | None) -> list[str]:
     changes = []
     if (
-        d.application_deadline
+        "application_deadline" not in d.approximate
+        and d.application_deadline
         and tender.application_deadline
         and d.application_deadline != _aware(tender.application_deadline)
     ):

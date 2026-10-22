@@ -34,7 +34,7 @@
     <tr><th>Код</th><th>Площадка</th><th>Как проверяется</th></tr>
     {% for s in sources %}
     <tr><td><code>{{ s.code }}</code></td><td>{{ s.title }}</td>
-      <td>{{ {'api': 'автоматически', 'manual': 'Claude in Chrome / вручную', 'planned': 'адаптер в работе'}[s.mode] }}</td></tr>
+      <td>{{ {'api': 'автоматически', 'manual': 'Claude in Chrome / вручную', 'planned': 'адаптер в работе', 'excluded': 'не используется'}[s.mode] }}</td></tr>
     {% endfor %}
   </table>
   <p>Пример. Обязательны только <code>source</code>, <code>external_id</code> и <code>title</code>;

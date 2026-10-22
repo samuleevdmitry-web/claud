@@ -346,3 +346,66 @@ def test_incomplete_import_does_not_mark_source_checked(factory, ks_version):
         stat = import_payload(s, payload, ks, vid)
         assert stat.status == "failed"
         assert s.get(SourceSetting, "tektorg").last_success_at is None
+
+
+# ------------------------------------------------------------- приблизительные поля и выборочные карточки
+
+
+def test_approximate_deadline_does_not_override_exact_one(factory, ks_version):
+    vid, ks = ks_version
+    with factory() as s:
+        t = ingest(
+            s, details(source_code="eis_gosplan", external_id="fz44:1", eis_number="0123"), ks, vid
+        ).tender
+        rough = details(
+            source_code="eis",
+            external_id="0123",
+            eis_number="0123",
+            application_deadline=FUTURE.replace(hour=20, minute=59),
+            approximate={"application_deadline", "published_at"},
+        )
+        res = ingest(s, rough, ks, vid)
+        assert res.tender is t and res.outcome == "unchanged"
+        assert t.application_deadline == FUTURE  # точный срок из первого источника сохранён
+        assert len(t.sources) == 2
+
+
+class QuickAdapter(FakeAdapter):
+    """Как ЕИС: данные выдачи доступны без запроса карточки."""
+
+    refresh_scope = "relevant"
+
+    def quick_details(self, stub):
+        return next((d for d in self.items if d.external_id == stub.external_id), None)
+
+
+def test_cards_are_opened_only_for_promising_tenders(factory):
+    items = [
+        details(external_id="towels"),  # релевантна по названию
+        details(external_id="paper", title="Поставка бумаги офисной", customer_name="ООО «Ромашка»"),
+        details(external_id="marker", title="Поставка товаров", customer_name="Санаторий «Дюны»"),
+    ]
+    adapter = QuickAdapter(items)
+    run(factory, {"onlinecontract": adapter})
+    assert sorted(adapter.detailed) == ["marker", "towels"]
+
+
+def test_refresh_scope_relevant_skips_rejected_tenders(factory):
+    items = [
+        details(external_id="ok"),
+        details(
+            external_id="bad", title="Поставка постельного белья", customer_name="ГБУЗ «Областная больница»"
+        ),
+    ]
+    run(factory, {"onlinecontract": QuickAdapter(items)})
+    with factory() as s:
+        assert {t.relevance for t in s.scalars(select(Tender))} == {"relevant", "rejected"}
+    adapter = QuickAdapter([])
+
+    async def fetch(stub):
+        adapter.detailed.append(stub.external_id)
+        return items[0]
+
+    adapter.fetch_details = fetch
+    run(factory, {"onlinecontract": adapter})
+    assert adapter.detailed == ["ok"]

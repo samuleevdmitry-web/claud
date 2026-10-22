@@ -184,6 +184,8 @@ def source_states(session: Session) -> list[SourceState]:
         state = SourceState(info, setting)
         if info.mode == "planned":
             state.level, state.warning = "muted", "адаптер ещё не подключён"
+        elif info.mode == "excluded":
+            state.level, state.warning = "muted", "не используется"
         elif setting is not None and not setting.enabled:
             state.level, state.warning = "muted", "выключена в настройках"
         else:

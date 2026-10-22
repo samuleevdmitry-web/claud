@@ -21,6 +21,8 @@ from app.sources.util import MSK, is_future, parse_dt, to_decimal, to_float
 BASE = "https://zakupki.gov.ru"
 SEARCH = "/epz/order/extendedsearch/results.html"
 MAX_PAGES = 10
+# robots.txt ЕИС: «Crawl-delay: 60» — не чаще одного запроса в минуту.
+CRAWL_DELAY = 60
 _DATE_RE = re.compile(r"\d{2}\.\d{2}\.\d{4}")
 _DEADLINE_RE = re.compile(r"(\d{2}\.\d{2}\.\d{4})(?:\s+(\d{2}:\d{2}))?(?:\s*\(МСК\s*([+-]\s*\d+)?\))?")
 _CODE_RE = re.compile(r"\b\d{2}\.\d{2}(?:\.\d{1,2}(?:\.\d{3})?)?(?:-\d{8})?\b")
@@ -107,6 +109,8 @@ def parse_search(html: str) -> list[TenderDetails]:
                 status=stage or None,
                 is_open=stage.lower() in _OPEN_STAGES if stage else is_future(deadline),
                 revision=dates.get("Обновлено") or dates.get("Размещено"),
+                # В выдаче даты без времени: срок подачи — «конец дня», публикация — «начало дня».
+                approximate={"application_deadline", "published_at"},
             )
         )
     return out
@@ -204,6 +208,7 @@ def parse_card(html: str, base: TenderDetails) -> TenderDetails:
     d.region = _first(values, "Регион") or base.region
     d.delivery_place = place or _first(values, "Место нахождения", "Почтовый адрес")
     d.application_deadline = deadline or base.application_deadline
+    d.approximate = set(base.approximate) - ({"application_deadline"} if deadline else set())
     d.is_open = is_future(d.application_deadline) if base.is_open is not False else False
     d.positions = positions or base.positions
     d.okpd2_codes = codes or base.okpd2_codes
@@ -220,9 +225,14 @@ class EisAdapter:
     code = "eis"
     title = "ЕИС напрямую"
     supports_codes = False
+    # При паузе в минуту карточки открываются только у перспективных закупок (см. runner),
+    # а повторно проверяются только релевантные и «на проверку».
+    refresh_scope = "relevant"
 
     def __init__(self, client: PoliteClient | None = None, max_pages: int = MAX_PAGES):
-        self.client = client or PoliteClient(self.code, base_url=BASE)
+        self.client = client or PoliteClient(
+            self.code, base_url=BASE, delay_min=CRAWL_DELAY, delay_max=CRAWL_DELAY + 5
+        )
         self.max_pages = max_pages
         self._cache: dict[str, TenderDetails] = {}
 
@@ -271,6 +281,10 @@ class EisAdapter:
                 )
             if not items or not has_next_page(r.text):
                 break
+
+    def quick_details(self, stub: TenderStub) -> TenderDetails | None:
+        """Данные из выдачи без запроса карточки (None — закупки не было в этой выдаче)."""
+        return self._cache.get(stub.external_id)
 
     async def fetch_details(self, stub: TenderStub) -> TenderDetails:
         base = self._cache.get(stub.external_id) or TenderDetails(

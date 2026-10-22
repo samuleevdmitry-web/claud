@@ -11,11 +11,12 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.classifier import Relevance, classify
 from app.config import get_settings
 from app.keywords.loader import KeywordSet
 from app.keywords.queries import build_queries, search_codes
 from app.models import Notification, Run, RunSourceStat, SourceSetting, Tender, TenderSource, utcnow
-from app.services.ingest import ingest
+from app.services.ingest import details_to_text, ingest
 from app.services.keywords import get_active_keyword_set
 from app.services.notify import send_external
 from app.sources.base import SourceAdapter, SourceError, TenderStub
@@ -24,7 +25,8 @@ from app.sources.util import MSK, aware
 
 log = logging.getLogger(__name__)
 
-STALE_RUN = timedelta(hours=6)
+# ЕИС с паузой в минуту (Crawl-delay) идёт несколько часов, особенно при первом запуске.
+STALE_RUN = timedelta(hours=12)
 
 
 class RunAlreadyActive(RuntimeError):
@@ -190,13 +192,16 @@ async def _process_stubs(factory, adapter, stubs, ks, keyword_set_id, result, st
 
 async def _refresh_open(factory, adapter, code, seen: set[str], ks, keyword_set_id, result, stat_id) -> None:
     """Обновляет ранее найденные тендеры с открытым приёмом заявок, не попавшие в поиск."""
+    stmt = (
+        select(TenderSource, Tender)
+        .join(Tender, Tender.id == TenderSource.tender_id)
+        .where(TenderSource.source_code == code)
+        .where((Tender.application_deadline.is_(None)) | (Tender.application_deadline > utcnow()))
+    )
+    if getattr(adapter, "refresh_scope", "all") == "relevant":
+        stmt = stmt.where(Tender.relevance.in_([str(Relevance.RELEVANT), str(Relevance.REVIEW)]))
     with factory() as session:
-        rows = session.execute(
-            select(TenderSource, Tender)
-            .join(Tender, Tender.id == TenderSource.tender_id)
-            .where(TenderSource.source_code == code)
-            .where((Tender.application_deadline.is_(None)) | (Tender.application_deadline > utcnow()))
-        ).all()
+        rows = session.execute(stmt).all()
         stubs = [
             TenderStub(
                 source_code=code,
@@ -214,10 +219,24 @@ async def _refresh_open(factory, adapter, code, seen: set[str], ks, keyword_set_
         _update_stat(factory, stat_id, new=result.new, updated=result.updated, errors=result.errors)
 
 
+def worth_card(ks: KeywordSet, quick) -> bool:
+    """Стоит ли открывать карточку: по данным выдачи закупка релевантна, «на проверку» или в ней
+    есть маркер заказчика (товар может быть только в позициях)."""
+    res = classify(ks, details_to_text(quick))
+    if res.relevance in (Relevance.RELEVANT, Relevance.REVIEW):
+        return True
+    return any(m.kind == "marker" and not m.suppressed for m in res.matches)
+
+
 async def _fetch_and_ingest(factory, adapter, stub, ks, keyword_set_id, result) -> None:
     result.details_attempted += 1
+    quick_details = getattr(adapter, "quick_details", None)
+    quick = quick_details(stub) if quick_details else None
     try:
-        details = await adapter.fetch_details(stub)
+        if quick is not None and not worth_card(ks, quick):
+            details = quick  # карточку не открываем — хватает данных выдачи
+        else:
+            details = await adapter.fetch_details(stub)
     except SourceError as exc:
         if exc.status in ("blocked", "captcha"):
             raise

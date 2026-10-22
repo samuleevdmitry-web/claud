@@ -551,3 +551,76 @@ def test_tektorg_page_without_data_is_an_error():
 
     with pytest.raises(SourceError):
         parse_search("<html><body>нет данных</body></html>")
+
+
+def test_eis_search_dates_are_approximate_until_card():
+    from app.sources.eis import EisAdapter, parse_card, parse_search
+
+    items = parse_search((FIX / "eis/search_polotenca.html").read_text(encoding="utf-8"))
+    base = next(d for d in items if d.external_id == "0860200000826008057")
+    assert base.approximate == {"application_deadline", "published_at"}
+    d = parse_card((FIX / "eis/card44_ea.html").read_text(encoding="utf-8"), base)
+    assert d.approximate == {"published_at"}  # в карточке точное время окончания подачи
+    # robots.txt ЕИС: Crawl-delay 60
+    adapter = EisAdapter()
+    assert adapter.client.delay_min >= 60
+    asyncio.run(adapter.aclose())
+
+
+# --------------------------------------------------------------------------- Сбербанк-АСТ
+
+
+def test_sberbank_parse_search_fixture():
+    from app.sources.sberbank_ast import parse_search
+
+    items, total = parse_search(load("sberbank_ast/search_polotenca.json"))
+    assert len(items) == 20 and total == 10000
+    first = items[0]  # 223-ФЗ: номер ЕИС — IntegratorCode
+    assert first.external_id == "SBR003-260782140600001.1"
+    assert first.eis_number == "32616496930" and first.law == "223-ФЗ"
+    assert first.url == "https://utp.sberbank-ast.ru/Trade/NBT/PurchaseView/14/0/0/4265811"
+    assert first.customer_inn == "7627002095" and first.region == "Ярославская область"
+    assert first.nmck == Decimal("153425.41")
+    assert first.application_deadline.isoformat() == "2026-10-30T04:00:00+00:00"  # 07:00 МСК
+    assert "13.92.24.190" in first.okpd2_codes
+    fz44 = next(d for d in items if d.external_id == "0859200001126012743")
+    assert fz44.eis_number == "0859200001126012743" and fz44.law == "44-ФЗ"
+    assert fz44.title == "Поставка мягкого инвентаря"
+    failed = next(d for d in items if d.external_id == "SBR003-260611945600005.1")
+    assert failed.is_open is False  # «Не состоялся(-ась)»
+    no_deadline = next(d for d in items if d.external_id == "0356200000126000039")
+    assert no_deadline.application_deadline is None and no_deadline.is_open is False
+
+
+def test_sberbank_search_posts_filter_and_stops_at_old_items():
+    from app.sources.sberbank_ast import SberbankAstAdapter
+
+    data = load("sberbank_ast/search_polotenca.json")
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=data)
+
+    adapter = SberbankAstAdapter(client=client_for(handler, "https://www.sberbank-ast.ru"))
+    stubs = asyncio.run(
+        collect(adapter.search("полотенца & <халаты>", date(2026, 10, 21), date(2026, 10, 22)))
+    )
+    assert len(bodies) == 1  # на первой странице уже есть закупки старше окна
+    body = bodies[0]
+    assert body["windowCode"] == "/EsOpenUnitedPurchaseList" and body["parm"] == "es"
+    assert "<mainInput>полотенца &amp; &lt;халаты&gt;</mainInput>" in body["filterBody"]
+    assert "<pagenum>0</pagenum>" in body["filterBody"]
+    ids = {s.external_id for s in stubs}
+    assert "0146200002926000007" in ids  # 22.10, приём заявок
+    assert "SBR003-260611945600005.1" not in ids  # не состоялась
+    assert "0372200070326000025" not in ids  # опубликована 20.10 — раньше окна
+    d = asyncio.run(adapter.fetch_details(stubs[0]))
+    assert d.title == stubs[0].title
+
+
+def test_sberbank_unexpected_answer_is_an_error():
+    from app.sources.sberbank_ast import parse_search
+
+    with pytest.raises(SourceError):
+        parse_search({"error": "нет доступа"})
