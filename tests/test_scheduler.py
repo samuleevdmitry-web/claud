@@ -169,7 +169,7 @@ def test_run_sends_external_summary(monkeypatch, keywords_file):
         "onlinecontract",
         "1",
         "u",
-        "Закупка тапочек одноразовых",
+        "Закупка тапочек одноразовых для отеля",
         application_deadline=datetime.now(UTC) + timedelta(days=5),
     )
 

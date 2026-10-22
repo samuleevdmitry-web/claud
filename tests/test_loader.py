@@ -14,10 +14,10 @@ def test_real_file_every_mask_parses(ks, keywords_file):
 
 def test_real_file_counts(ks):
     s = ks.summary()
-    assert s["products"] == 87
-    assert s["markers"] == 30
-    assert s["minus_words"] == 23
-    assert s["queries"] == 23
+    assert s["products"] == 77
+    assert s["markers"] == 18
+    assert s["minus_words"] == 30
+    assert s["queries"] == 17
     assert {p.type for p in ks.products} == set(KeyType)
     assert {n.strength for n in ks.minus_words} == set(Strength)
 
@@ -37,7 +37,7 @@ def test_real_file_codes(ks):
 def test_real_file_plain_queries(ks):
     plain = [q.query for q in ks.queries if q.is_plain]
     assert "гостиничный текстиль" in plain
-    assert len(plain) == 17
+    assert len(plain) == 12
 
 
 def test_missing_required_sheet(tmp_path):

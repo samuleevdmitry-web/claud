@@ -102,17 +102,32 @@ def activate_keyword_file(
     return version
 
 
+# Версии, пришедшие из файла в корне проекта (а не загруженные через страницу «Ключевые слова»).
+FROM_PROJECT = ("первый запуск", "файл проекта обновлён")
+
+
 def bootstrap_keywords(session: Session, path: Path | None = None) -> KeywordSetVersion | None:
-    """Импортирует файл из корня проекта, если в БД ещё нет ни одной версии."""
-    if session.scalar(select(KeywordSetVersion.id).limit(1)) is not None:
-        return None
+    """Импортирует файл из корня проекта при первом запуске, а также если файл в проекте
+    изменился и действующая версия тоже взята из проекта. Файл, загруженный через интерфейс,
+    не перезаписывается."""
     path = path or get_settings().keywords_file
+    has_versions = session.scalar(select(KeywordSetVersion.id).limit(1)) is not None
     if not path.exists():
-        log.warning("Файл ключевых слов %s не найден — классификация недоступна", path)
+        if not has_versions:
+            log.warning("Файл ключевых слов %s не найден — классификация недоступна", path)
         return None
-    return activate_keyword_file(
-        session, path.read_bytes(), path.name, uploaded_by="первый запуск", allow_errors=True
-    )
+    content = path.read_bytes()
+    if not has_versions:
+        return activate_keyword_file(
+            session, content, path.name, uploaded_by=FROM_PROJECT[0], allow_errors=True
+        )
+    active = session.scalar(select(KeywordSetVersion).where(KeywordSetVersion.is_active.is_(True)))
+    if active is None or active.uploaded_by not in FROM_PROJECT:
+        return None
+    if active.sha256 == hashlib.sha256(content).hexdigest():
+        return None
+    log.info("Файл ключевых слов в проекте изменился — активирую новую версию и пересчитываю тендеры")
+    return activate_keyword_file(session, content, path.name, uploaded_by=FROM_PROJECT[1], allow_errors=True)
 
 
 def tender_to_text(tender: Tender) -> TenderText:

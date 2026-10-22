@@ -30,8 +30,33 @@ def _tender(title, customer="") -> Tender:
 def test_bootstrap_imports_root_file_once(session, keywords_file):
     version = bootstrap_keywords(session, keywords_file)
     assert version is not None and version.is_active
-    assert version.summary["products"] == 87
+    assert version.summary["products"] == 77
     assert bootstrap_keywords(session, keywords_file) is None
+
+
+def test_bootstrap_picks_up_changed_project_file_but_not_over_manual_upload(
+    session, small_workbook, tmp_path
+):
+    root = tmp_path / "root.xlsx"
+    root.write_bytes(small_workbook.read_bytes())
+    first = bootstrap_keywords(session, root)
+    changed = make_workbook(
+        tmp_path / "changed.xlsx",
+        {
+            "Товарные ключи": [PRODUCTS_HEADER, ["К", "полотенце", "полотенц*", "Нужен маркер", 1, ""]],
+            "Маркеры заказчика": [MARKERS_HEADER, ["Тип", "отель", "отел*", 1, ""]],
+            "Минус-слова": [MINUS_HEADER, ["М", "больница", "больниц*", "Сильный", ""]],
+        },
+    )
+    root.write_bytes(changed.read_bytes())
+    second = bootstrap_keywords(session, root)  # файл проекта изменился — новая версия
+    assert second is not None and second.id != first.id and second.is_active
+    assert bootstrap_keywords(session, root) is None  # тот же файл — ничего не делаем
+
+    manual = activate_keyword_file(session, small_workbook.read_bytes(), "мой.xlsx", uploaded_by="admin")
+    root.write_bytes(changed.read_bytes())  # файл проекта отличается от загруженного вручную
+    assert bootstrap_keywords(session, root) is None  # загруженный вручную файл не перезаписываем
+    assert manual.is_active
 
 
 def test_activation_reclassifies_and_new_file_changes_results(session, small_workbook, tmp_path):

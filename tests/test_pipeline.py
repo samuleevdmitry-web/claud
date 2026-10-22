@@ -47,7 +47,7 @@ def details(**kw) -> TenderDetails:
         external_id="1",
         url="https://x/1",
         title="Поставка полотенец махровых",
-        customer_name="Санаторий «Дюны»",
+        customer_name="Гостиница «Дюны»",
         application_deadline=FUTURE,
         published_at=datetime(2026, 10, 1, tzinfo=UTC),
         revision="r1",
@@ -66,7 +66,11 @@ def test_queries_from_keyword_file(ks):
     assert "простыня" in texts and "простынь" in texts
     assert "сатин" not in texts  # уточняющие ключи сами по себе не ищутся
     assert "плед" not in texts  # «Нужен маркер» с приоритетом 3
-    assert "мягкий инвентарь санаторий" in texts  # готовый запрос
+    assert "мягкий инвентарь для гостиницы" in texts  # готовый запрос
+    assert not [t for t in texts if "санатори" in t or "пансионат" in t]  # ищем только отели
+    assert not {"зубной набор", "гостиничная косметика", "amenities"} & set(
+        texts
+    )  # без гигиенических наборов
     assert len(texts) == len(set(texts))
     codes = search_codes(ks)
     assert "13.92.12" in codes and "13.92.12.160" not in codes
@@ -383,7 +387,7 @@ def test_cards_are_opened_only_for_promising_tenders(factory):
     items = [
         details(external_id="towels"),  # релевантна по названию
         details(external_id="paper", title="Поставка бумаги офисной", customer_name="ООО «Ромашка»"),
-        details(external_id="marker", title="Поставка товаров", customer_name="Санаторий «Дюны»"),
+        details(external_id="marker", title="Поставка товаров", customer_name="Гостиница «Дюны»"),
     ]
     adapter = QuickAdapter(items)
     run(factory, {"onlinecontract": adapter})

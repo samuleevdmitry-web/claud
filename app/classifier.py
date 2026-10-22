@@ -11,7 +11,9 @@
 * None — нет ни одного товарного ключа и кода: тендер не сохраняется.
 
 Минус-слово, целиком лежащее внутри найденного товарного ключа или маркера (например,
-«кроват*» внутри «дорожк* на кроват*»), не учитывается и помечается как suppressed.
+«кроват*» внутри «дорожк* на кроват*»), не учитывается и помечается как suppressed. Так же
+не учитываются минус-слова из названия заказчика, если там же стоит маркер: «ФГБУ «Гостиничный
+комплекс…»» — гостиница, хотя «ФГБУ» и «учреждение» — минус-слова.
 """
 
 from __future__ import annotations
@@ -110,6 +112,7 @@ class MatchRecord:
     priority: int | None = None
     strength: str = ""
     suppressed: bool = False
+    suppress_reason: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -208,7 +211,22 @@ def _find_matches(ks: KeywordSet, tender: TenderText) -> list[MatchRecord]:
         )
     masks = {k.id: k.mask for k in [*ks.products, *ks.markers]}
     _suppress_nested_minus(matches, masks)
+    _suppress_minus_of_marked_customer(matches)
     return matches
+
+
+def _suppress_minus_of_marked_customer(matches: list[MatchRecord]) -> None:
+    """Маркер в названии заказчика (гостиница, отель) важнее минус-слов оттуда же (ФГБУ, учреждение).
+
+    Те же минус-слова в других полях (название закупки часто повторяет имя заказчика: «…для нужд
+    ФГБУ «Гостиничный комплекс…»») тоже не учитываются; остальные минус-слова — учитываются."""
+    if not any(m.kind == "marker" and m.field == Field.CUSTOMER.value for m in matches):
+        return
+    customer_minus = {m.key_id for m in matches if m.kind == "minus" and m.field == Field.CUSTOMER.value}
+    for m in matches:
+        if m.kind == "minus" and m.key_id in customer_minus and not m.suppressed:
+            m.suppressed = True
+            m.suppress_reason = "заказчик — гостиница или отель (маркер в названии заказчика)"
 
 
 def _mask_words(mask: Mask) -> list[WordPattern]:
@@ -248,6 +266,7 @@ def _suppress_nested_minus(matches: list[MatchRecord], masks: dict[str, Mask]) -
             words = _mask_words(masks[c.key_id]) if c.key_id in masks else []
             if tokens and all(any(w.regex.fullmatch(tok) for w in words) for tok in tokens):
                 m.suppressed = True
+                m.suppress_reason = "внутри товарного ключа или маркера"
                 break
 
 

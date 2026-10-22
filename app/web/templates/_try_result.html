@@ -20,7 +20,7 @@
   <tr class="{{ 'muted' if m.suppressed }}">
     <td>{{ {'product': 'товарный ключ', 'marker': 'маркер', 'minus': 'минус-слово', 'code': 'код', 'code_excluded': 'код-исключение'}[m.kind] }}
         {% if m.strength %}({{ 'сильное' if m.strength == 'strong' else 'среднее' }}){% endif %}
-        {% if m.suppressed %}— не учитывается (внутри товарного ключа или маркера){% endif %}</td>
+        {% if m.suppressed %}— не учитывается ({{ m.suppress_reason or 'внутри товарного ключа или маркера' }}){% endif %}</td>
     <td>{{ m.label }}</td><td><code>{{ m.mask }}</code></td>
     <td>{{ field_labels[m.field] }}</td>
     <td>{{ m.context }}</td>

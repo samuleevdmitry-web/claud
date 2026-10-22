@@ -88,7 +88,7 @@
     <tr class="{{ 'muted' if m.suppressed }}">
       <td>{{ {'product': 'товарный ключ', 'marker': 'маркер', 'minus': 'минус-слово', 'code': 'код', 'code_excluded': 'код-исключение'}[m.kind] }}
         {% if m.strength %}({{ 'сильное' if m.strength == 'strong' else 'среднее' }}){% endif %}
-        {% if m.suppressed %}— не учитывается{% endif %}</td>
+        {% if m.suppressed %}— не учитывается{% if m.suppress_reason %} ({{ m.suppress_reason }}){% endif %}{% endif %}</td>
       <td>{{ m.label }}</td><td><code>{{ m.mask }}</code></td>
       <td>{{ field_labels[m.field] }}{% if m.position_index is not none %} №{{ m.position_index + 1 }}{% endif %}</td>
       <td>{{ m.context }}</td>

@@ -45,7 +45,7 @@ def test_try_classification(client):
     r = client.post(
         "/keywords/try",
         auth=AUTH,
-        data={"title": "Закупка тапочек одноразовых", "customer": "", "positions": ""},
+        data={"title": "Закупка тапочек одноразовых", "customer": "ООО «Отель Белый Сад»", "positions": ""},
     )
     assert r.status_code == 200
     assert "Релевантный" in r.text
@@ -129,7 +129,7 @@ def _seed(client):
                 "https://e/1",
                 "Поставка полотенец махровых",
                 eis_number="1",
-                customer_name="ФГБУ «Санаторий «Дюны»",
+                customer_name="ФГБУ «Гостиница «Дюны»",
                 region="Москва",
                 application_deadline=later,
                 positions=[Position("Полотенце махровое 50х90")],

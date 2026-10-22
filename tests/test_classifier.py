@@ -8,16 +8,30 @@ def rel(ks, title, customer="", **kw):
 
 
 # --------------------------------------------------------------------------- обязательные кейсы из ТЗ
+# С 22.10.2026 ищем только отели и гостиницы: санатории, пансионаты, базы отдыха — отклоняются,
+# закупки без признаков заказчика — «на проверку». Кейсы ТЗ с санаториями заменены отелями.
 
 
-def test_soft_inventory_for_sanatorium_is_relevant(ks):
+def test_soft_inventory_for_departmental_hotel_is_relevant(ks):
+    # «ФГБУ» и «учреждение» — минус-слова, но маркер в названии заказчика важнее
+    assert (
+        rel(
+            ks,
+            "Поставка мягкого инвентаря для нужд ФГБУ «Гостиничный комплекс «Президент-Отель»",
+            "ФГБУ «Гостиничный комплекс «Президент-Отель» Управления делами Президента РФ",
+        )
+        == Relevance.RELEVANT
+    )
+
+
+def test_soft_inventory_for_sanatorium_is_rejected(ks):
     assert (
         rel(
             ks,
             "Поставка мягкого инвентаря для нужд ФГБУ «Санаторий «Сосновый бор»",
             "ФГБУ «Санаторий «Сосновый бор» Управления делами Президента РФ",
         )
-        == Relevance.RELEVANT
+        == Relevance.REJECTED
     )
 
 
@@ -29,25 +43,36 @@ def test_towels_without_marker_go_to_review(ks):
     assert rel(ks, "Поставка полотенец", "ООО «Альфа-Снаб»") == Relevance.REVIEW
 
 
-def test_disposable_slippers_are_relevant(ks):
-    assert rel(ks, "Закупка тапочек одноразовых") == Relevance.RELEVANT
+def test_disposable_slippers_need_hotel_marker(ks):
+    assert rel(ks, "Закупка тапочек одноразовых") == Relevance.REVIEW
+    assert rel(ks, "Закупка тапочек одноразовых", "ООО «Отель Белый Сад»") == Relevance.RELEVANT
 
 
 def test_toppers_for_hotel_complex_are_relevant(ks):
     assert rel(ks, "Поставка топперов и наматрасников для гостиничного комплекса") == Relevance.RELEVANT
 
 
-def test_rent_of_soft_inventory_for_sanatorium_goes_to_review(ks):
-    result = classify(ks, TenderText("Аренда мягкого инвентаря", customer_name="АО «Санаторий «Дюны»"))
+def test_rent_of_soft_inventory_for_hotel_goes_to_review(ks):
+    result = classify(ks, TenderText("Аренда мягкого инвентаря", customer_name="АО «Отель «Дюны»"))
     assert result.relevance == Relevance.REVIEW
     assert any(m.kind == "minus" and m.fragment == "Аренда" for m in result.matches)
+
+
+def test_institutions_without_hotel_marker_are_rejected(ks):
+    assert rel(ks, "Поставка полотенец махровых", "МБОУ СОШ № 5") == Relevance.REJECTED
+    assert rel(ks, "Поставка мягкого инвентаря", "Общежитие ГБОУ ВО «Университет»") == Relevance.REJECTED
+    assert rel(ks, "Поставка подушек", "ГБУ «Пансионат «Волна»") == Relevance.REJECTED
+
+
+def test_hygiene_kits_are_not_searched(ks):
+    assert rel(ks, "Поставка одноразовых гигиенических наборов", "ООО «Гостиница Москва»") is None
 
 
 # --------------------------------------------------------------------------- дополнительные правила
 
 
 def test_no_product_keys_returns_none(ks):
-    result = classify(ks, TenderText("Поставка продуктов питания", customer_name="Санаторий «Дюны»"))
+    result = classify(ks, TenderText("Поставка продуктов питания", customer_name="Гостиница «Дюны»"))
     assert result.relevance is None
 
 
@@ -57,7 +82,7 @@ def test_needs_marker_key_with_marker_in_delivery_place(ks):
             ks,
             "Поставка подушек",
             "ООО «Ромашка»",
-            delivery_place="Краснодарский край, г. Сочи, пансионат «Волна»",
+            delivery_place="Краснодарский край, г. Сочи, отель «Волна»",
         )
         == Relevance.RELEVANT
     )
@@ -76,7 +101,7 @@ def test_medium_minus_downgrades_relevant_to_review(ks):
 
 
 def test_strong_minus_in_title_with_marker_goes_to_review(ks):
-    assert rel(ks, "Поставка постельного белья медицинского назначения для санатория") == Relevance.REVIEW
+    assert rel(ks, "Поставка постельного белья медицинского назначения для гостиницы") == Relevance.REVIEW
 
 
 def test_self_key_with_strong_minus_and_no_marker_is_rejected(ks):
@@ -99,7 +124,7 @@ def test_okpd_code_without_marker_goes_to_review(ks):
 
 
 def test_excluded_code_does_not_count(ks):
-    tender = TenderText("Поставка товаров", customer_name="Санаторий «Дюны»", codes=["13.92.12.160"])
+    tender = TenderText("Поставка товаров", customer_name="Гостиница «Дюны»", codes=["13.92.12.160"])
     result = classify(ks, tender)
     assert result.relevance is None
     assert [m.kind for m in result.matches if m.field == "codes"] == ["code_excluded"]
@@ -157,8 +182,8 @@ def test_score_orders_rich_hotel_tender_above_plain_one(ks):
 
 
 def test_customer_marker_adds_bonus(ks):
-    in_customer = classify(ks, TenderText("Поставка подушек", customer_name="Санаторий «Дюны»"))
-    in_title = classify(ks, TenderText("Поставка подушек для санатория", customer_name="ООО «Ромашка»"))
+    in_customer = classify(ks, TenderText("Поставка подушек", customer_name="Гостиница «Дюны»"))
+    in_title = classify(ks, TenderText("Поставка подушек в гостиницу «Дюны»", customer_name="ООО «Ромашка»"))
     assert in_customer.score > in_title.score
 
 
@@ -168,9 +193,22 @@ def test_minus_word_in_phrase_gap_is_not_suppressed(ks):
         ks,
         TenderText(
             "Поставка комплекта детского постельного белья с вышивкой",
-            customer_name="БУ «Социально-реабилитационный центр»",
+            customer_name="ООО «Ромашка»",
         ),
     )
     minus = [m for m in result.matches if m.kind == "minus" and m.fragment.lower() == "детского"]
     assert minus and not minus[0].suppressed
+    assert result.relevance == Relevance.REVIEW
+
+
+def test_customer_marker_does_not_hide_other_minus_words(ks):
+    result = classify(
+        ks,
+        TenderText(
+            "Поставка постельного белья медицинского назначения", customer_name="ФГБУ «Гостиница «Дюны»"
+        ),
+    )
+    suppressed = {m.fragment for m in result.matches if m.kind == "minus" and m.suppressed}
+    active = {m.fragment for m in result.matches if m.kind == "minus" and not m.suppressed}
+    assert "ФГБУ" in suppressed and "медицинского" in active
     assert result.relevance == Relevance.REVIEW
