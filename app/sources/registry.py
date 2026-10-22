@@ -50,6 +50,12 @@ def _eis() -> SourceAdapter:
     return EisAdapter()
 
 
+def _tektorg() -> SourceAdapter:
+    from app.sources.tektorg import TektorgAdapter
+
+    return TektorgAdapter()
+
+
 def _fabrikant() -> SourceAdapter:
     from app.sources.fabrikant import FabrikantAdapter
 
@@ -115,8 +121,9 @@ SOURCES: list[SourceInfo] = [
         "tektorg",
         "ТЭК-Торг",
         "https://www.tektorg.ru",
-        "manual",
-        "Выдача подгружается скриптом; адаптер — после разведки №3",
+        "api",
+        "Раздел «Закупки» (223-ФЗ и коммерческие): страница поиска ?name=, разрешённая robots.txt",
+        _tektorg,
     ),
     SourceInfo(
         "bidzaar",
@@ -128,23 +135,24 @@ SOURCES: list[SourceInfo] = [
     SourceInfo(
         "sberbank_ast",
         "Сбербанк-АСТ (УТП)",
-        "https://utp.sberbank-ast.ru",
+        "https://www.sberbank-ast.ru",
         "planned",
-        "Список закупок перенаправляет на главную — нужна повторная разведка",
+        "Поиск — POST {API}/Processing/main; адрес API уточняется (probe --round 5). 44-ФЗ/223-ФЗ — из ЕИС",
     ),
     SourceInfo(
         "etpgpb",
         "ЭТП ГПБ",
         "https://etpgpb.ru",
-        "planned",
-        "Страница поиска открылась, но без учёта запроса — нужна повторная разведка",
+        "manual",
+        "robots.txt запрещает роботам адреса с параметрами (в т.ч. поиск), RSS отключён — Claude in Chrome; "
+        "закупки 44-ФЗ/223-ФЗ этой площадки приходят из ЕИС",
     ),
     SourceInfo(
         "b2b_center",
         "B2B-Center",
         "https://www.b2b-center.ru",
-        "planned",
-        "Страница поиска открылась, но без учёта запроса — нужна повторная разведка",
+        "manual",
+        "robots.txt запрещает роботам поиск по ключевым словам (f_keyword=, search=) — Claude in Chrome",
     ),
     SourceInfo(
         "otc",
@@ -163,10 +171,10 @@ SOURCES: list[SourceInfo] = [
     ),
     SourceInfo(
         "etp_nit",
-        "ЭТП «Новые информационные технологии»",
-        "",
+        "ЭТП «Новые информационные сервисы» (НИТ)",
+        "https://nistp.ru",
         "planned",
-        "Адрес площадки не найден — уточняется",
+        "Площадка в основном для торгов по банкротству и продаже имущества; разведка — probe --round 5",
     ),
 ]
 

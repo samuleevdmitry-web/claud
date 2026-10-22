@@ -26,7 +26,7 @@
 
 ---
 
-## Итог: как подключена каждая площадка (02.10.2026)
+## Итог: как подключена каждая площадка (22.10.2026)
 
 Приложение работает на компьютере пользователя с российским IP. Режимы: **API** — адаптер
 в приложении, обход по расписанию; **Chrome** — сбор через Claude in Chrome и страницу
@@ -42,12 +42,12 @@
 | Фабрикант | API | HTML-выдача `/procedure/search` | готово по ответам `probe` |
 | РТС-тендер | Chrome | антибот (Anti-DDoS) | импорт |
 | Tender.Pro | Chrome | антибот | импорт |
-| ТЭК-Торг | Chrome → в работе | `POST /api/getProcedures` (`params.name`) | `probe --round 4` |
-| ЭТП ГПБ | в работе | официальный RSS `procedures.rss` + фильтры поиска | `probe --round 4` |
-| Сбербанк-АСТ (УТП) | в работе | `POST {API}/Processing/main`, `/EsOpenUnitedPurchaseList` | `probe --round 4` |
-| B2B-Center | в работе | `GET /site/api/v1/market-search/` (JSON) | `probe --round 4` |
+| ТЭК-Торг | API | страница `/223-fz/procedures?name=…` (выдача в `__NEXT_DATA__`) | готово по ответам `probe --round 4` |
+| ЭТП ГПБ | Chrome | robots.txt: `Disallow: /*?`; RSS отвечает 404 | импорт; 44/223-ФЗ — из ЕИС |
+| Сбербанк-АСТ (УТП) | в работе | `POST {API}/Processing/main`, адрес API — в `/build/apl_config.json` | `probe --round 5` |
+| B2B-Center | Chrome | robots.txt запрещает поиск по ключевым словам (`f_keyword=`, `search=`) | импорт |
 | OTC.ru | Chrome | страница-заглушка антибота | импорт |
-| ЭТП НИТ | в работе | адрес уточняется (nistp.ru?) | — |
+| ЭТП НИТ | в работе | nistp.ru (подтверждено пользователем) | `probe --round 5` |
 | Bidzaar | Chrome | капча; позже — API поставщика по токену | импорт |
 | ЭТП УГМК | Chrome | адрес уточняется (сертификат/DNS) | импорт |
 
@@ -98,6 +98,29 @@
 - **Сбербанк-АСТ**: `/UnitedPurchaseList.html` вызывает `apiRequest("/EsOpenUnitedPurchaseList",
   "MONITOR", "default", "", "es", <XML-фильтр>)` → `POST {API_BASE_URL}Processing/main`;
   `API_BASE_URL` — в `/build/variable.json`.
+
+## Итоги probe №4 (22.10.2026)
+
+Правило для всех адаптеров: если robots.txt площадки для всех роботов (`User-agent: *`) закрывает
+адреса поиска, автоматический сбор не делается — даже если у сайта есть внутренний API, который
+формально в robots.txt не упомянут. Такие площадки собираются через Claude in Chrome.
+
+- **ТЭК-Торг**: robots.txt закрывает адреса с «?», но явно разрешает `*?name*`, `*?page*`,
+  `*?okpd*`. Страница `/223-fz/procedures?name=полотенца&sort=datePublished_desc` отдаёт выдачу
+  прямо в `__NEXT_DATA__` (`listingProcedures`: 15 на страницу, `total`, `totalPages`; поля
+  `id`, `registryNumber`, `title`, `statusName`, `organizerName`, `inn`, `dates.datePublished`,
+  `dates.dateEndRegistration`, `sumPrice`, `okpd2[].code`). Поиск морфологический. Внутренний
+  `POST /api/getProcedures` отвечает тем же, но адаптер его не использует.
+- **B2B-Center**: `/site/api/v1/market-search/?query=…` отдаёт JSON, но robots.txt для всех
+  роботов запрещает `*f_keyword=`, `*search=` и фильтры `/market/*?*…` — поиск по словам
+  закрыт для роботов. Адаптер не делается.
+- **ЭТП ГПБ**: robots.txt для всех роботов — `Disallow: /*?`; `procedures.rss` с фильтрами — 404.
+  Адаптер не делается; закупки 44-ФЗ/223-ФЗ площадки есть в ЕИС (поле «Наименование
+  электронной площадки» в карточке).
+- **Сбербанк-АСТ**: robots.txt нет (404). В `/build/variable.json` адреса API нет: приложение
+  берёт настройки из `/build/apl_config.json` (`API_BASE_URL`). Старый `SearchQuery.aspx` — 404.
+- Проверено задним числом: robots.txt Росэлторга и Фабриканта поиск (`/procedures/search`,
+  `/procedure/search`) не закрывает.
 
 ## Online Contract — публичный API (проверено 02.10.2026)
 

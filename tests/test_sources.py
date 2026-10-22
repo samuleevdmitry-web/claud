@@ -20,6 +20,17 @@ def load(path: str):
     return json.loads((FIX / path).read_text(encoding="utf-8"))
 
 
+@pytest.fixture(autouse=True)
+def frozen_now(monkeypatch):
+    """Фикстуры сняты 02.10.2026 (Росэлторг, Фабрикант, ЕИС) и 22.10.2026 (ТЭК-Торг): «сейчас» —
+    3 октября, иначе открытые на момент съёмки закупки со временем стали бы закрытыми."""
+    from datetime import UTC, datetime
+
+    import app.sources.util as util
+
+    monkeypatch.setattr(util, "utcnow", lambda: datetime(2026, 10, 3, 9, 0, tzinfo=UTC))
+
+
 async def _no_sleep(_):
     return None
 
@@ -492,3 +503,51 @@ def test_eis_parse_card44_positions_and_region():
     assert p.name.startswith("Полотенце бумажное") and p.code == "17.22.11.130-00000005"
     assert (p.qty, p.unit, p.price) == (1800.0, "Упаковка", 170.85)
     assert d.okpd2_codes == ["17.22.11.130", "17.22.11.130-00000005"]
+
+
+# --------------------------------------------------------------------------- ТЭК-Торг
+
+
+def test_tektorg_parse_search_fixture():
+    from app.sources.tektorg import parse_search
+
+    items, total_pages = parse_search((FIX / "tektorg/search_polotenca.html").read_text(encoding="utf-8"))
+    assert len(items) == 15 and total_pages == 10
+    first = items[0]
+    assert first.external_id == "20077067"
+    assert first.url == "https://www.tektorg.ru/223-fz/procedures/20077067"
+    assert first.title == "Туалетная бумага и бумажные полотенца"
+    assert first.status == "Приём заявок" and first.is_open is True
+    assert first.nmck == Decimal("572283.72")
+    assert first.customer_inn == "6663039677"
+    assert first.okpd2_codes == ["17.22.11.110"]
+    assert first.application_deadline.isoformat() == "2026-10-30T06:00:00+00:00"
+    fz223 = next(d for d in items if d.eis_number)
+    assert fz223.eis_number == "32616347508" and fz223.law == "223-ФЗ"
+    assert all(d.is_open is False for d in items if d.status == "Архив")
+
+
+def test_tektorg_search_uses_allowed_url_and_stops_at_old_items():
+    from app.sources.tektorg import TektorgAdapter
+
+    html = (FIX / "tektorg/search_polotenca.html").read_text(encoding="utf-8")
+    urls = []
+
+    def handler(request):
+        urls.append(str(request.url))
+        return httpx.Response(200, text=html)
+
+    adapter = TektorgAdapter(client=client_for(handler, "https://www.tektorg.ru"))
+    stubs = asyncio.run(collect(adapter.search("полотенца", date(2026, 10, 1), date(2026, 10, 22))))
+    # robots.txt разрешает только «?name…»: name — первый параметр
+    assert len(urls) == 1 and "/223-fz/procedures?name=" in urls[0]
+    assert [s.external_id for s in stubs] == ["20077067"]  # остальные старше окна или закрыты
+    d = asyncio.run(adapter.fetch_details(stubs[0]))
+    assert d.title == "Туалетная бумага и бумажные полотенца"
+
+
+def test_tektorg_page_without_data_is_an_error():
+    from app.sources.tektorg import parse_search
+
+    with pytest.raises(SourceError):
+        parse_search("<html><body>нет данных</body></html>")

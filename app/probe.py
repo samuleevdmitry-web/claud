@@ -284,6 +284,39 @@ ROUND4: dict[str, list[tuple]] = {
     ],
 }
 
+# Пятый заход: Сбербанк-АСТ (настройки приложения — в /build/apl_config.json), ЭТП НИТ
+# (nistp.ru) и robots.txt ЕИС. «+links:<слова>» — сохранить до 8 ссылок сайта, в адресе или тексте
+# которых есть одно из слов (через «|»). «ctx» — взять значение из JSON-ответа для следующих адресов.
+ROUND5: dict[str, list[tuple]] = {
+    "eis": [
+        ("robots", "https://zakupki.gov.ru/robots.txt"),
+    ],
+    "sberbank_ast": [
+        (
+            "apl_config",
+            "https://www.sberbank-ast.ru/build/apl_config.json",
+            {"ctx": {"sber_api": "API_BASE_URL"}},
+        ),
+        (
+            "api_time",
+            "{sber_api}Processing/main",
+            {
+                "method": "POST",
+                "json": {"windowCode": "/DateTimeServer", "actionType": "TEMPLATE", "actionCode": "default"},
+            },
+        ),
+        ROUND4["sberbank_ast"][3],
+        ("united_page", "https://www.sberbank-ast.ru/UnitedPurchaseList.html"),
+    ],
+    "etp_nit": [
+        ("robots", "https://nistp.ru/robots.txt"),
+        (
+            "home+links:торг|trade|lot|лот|search|поиск|закуп|zakup|procedure|auction|аукцион",
+            "https://nistp.ru/",
+        ),
+    ],
+}
+
 _SCRIPT_RE = re.compile(rb"<script[^>]+src=[\"']([^\"']+)[\"']", re.I)
 MAX_SCRIPTS = 8
 MAX_SCRIPT_BYTES = 6_000_000
@@ -343,6 +376,38 @@ async def _save_imports(client: httpx.AsyncClient, first: httpx.Response, folder
     return saved
 
 
+_LINK_RE = re.compile(rb"""<a[^>]+href=["']([^"'#]+)["'][^>]*>(.*?)</a>""", re.I | re.S)
+MAX_LINKS = 8
+
+
+async def _save_links(
+    client: httpx.AsyncClient, page: httpx.Response, folder: Path, name: str, words: str
+) -> int:
+    """Страницы сайта по ссылкам с главной (разделы торгов, поиск) — чтобы найти адрес выдачи."""
+    keys = [w.lower() for w in words.split("|") if w]
+    saved = 0
+    seen: set[str] = set()
+    for href, text in _LINK_RE.findall(page.content):
+        url = page.url.join(href.decode("utf-8", "replace"))
+        label = (href + b" " + re.sub(rb"<[^>]+>", b" ", text)).decode("utf-8", "replace").lower()
+        if url.host != page.url.host or str(url) in seen or not any(k in label for k in keys):
+            continue
+        seen.add(str(url))
+        try:
+            r = await client.get(url)
+        except httpx.HTTPError:
+            continue
+        saved += 1
+        (folder / f"{name}.link{saved}.{_ext(r.headers.get('content-type', ''), r.content)}").write_bytes(
+            r.content
+        )
+        (folder / f"{name}.link{saved}.url").write_text(f"{url}\n{r.status_code}\n", encoding="utf-8")
+        if saved >= MAX_LINKS:
+            break
+        await asyncio.sleep(random.uniform(2, 4))
+    return saved
+
+
 async def probe(sources: list[str] | None = None, out_root: Path | None = None, round_: int = 1) -> Path:
     settings = get_settings()
     stamp = datetime.now().strftime("%Y%m%d_%H%M") + (f"_r{round_}" if round_ > 1 else "")
@@ -361,7 +426,7 @@ async def probe(sources: list[str] | None = None, out_root: Path | None = None, 
         headers=headers, timeout=40, follow_redirects=True, verify=ssl_context()
     ) as client:
         ctx: dict[str, str] = {}
-        for code, urls in {1: PROBES, 2: ROUND2, 3: ROUND3, 4: ROUND4}[round_].items():
+        for code, urls in {1: PROBES, 2: ROUND2, 3: ROUND3, 4: ROUND4, 5: ROUND5}[round_].items():
             if sources and code not in sources:
                 continue
             (out / code).mkdir(exist_ok=True)
@@ -374,24 +439,33 @@ async def probe(sources: list[str] | None = None, out_root: Path | None = None, 
                     url = url.format(**ctx)
                 entry: dict = {"name": name, "url": url, "method": opts.get("method", "GET")}
                 name, _, mode = name.partition("+")
-                js_only = mode.partition(":")[2]
+                js_only = mode.partition(":")[2] if mode.startswith("js") else ""
                 try:
                     r = await client.request(
                         opts.get("method", "GET"), url, json=opts.get("json"), data=opts.get("data")
                     )
                     if name == "variables" and r.status_code == 200:
+                        opts = {**opts, "ctx": {"sber_api": "API_BASE_URL"}}
+                    if opts.get("ctx") and r.status_code == 200:
                         try:
-                            base = r.json().get("API_BASE_URL", "")
+                            data = r.json()
                         except ValueError:
-                            base = ""
-                        if base:
-                            ctx["sber_api"] = base if base.endswith("/") else base + "/"
+                            data = {}
+                        for key, field in opts["ctx"].items():
+                            value = data.get(field) if isinstance(data, dict) else None
+                            if isinstance(value, str) and value:
+                                ctx[key] = value if value.endswith("/") else value + "/"
+                                entry[key] = ctx[key]
                     ext = _ext(r.headers.get("content-type", ""), r.content)
                     (out / code / f"{name}.{ext}").write_bytes(r.content)
                     if mode.startswith("js") and r.status_code == 200:
                         entry["scripts"] = await _save_scripts(client, r, out / code, name, js_only)
                     if mode == "deep" and r.status_code == 200:
                         entry["imports"] = await _save_imports(client, r, out / code, name)
+                    if mode.startswith("links:") and r.status_code == 200:
+                        entry["links"] = await _save_links(
+                            client, r, out / code, name, mode.partition(":")[2]
+                        )
                     title = re.search(rb"<title[^>]*>(.*?)</title>", r.content[:20000], re.S | re.I)
                     entry |= {
                         "status": r.status_code,
