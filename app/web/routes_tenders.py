@@ -159,6 +159,7 @@ def tender_status(tender_id: int, user_status: str = Form(...), db: Session = De
     if tender is None or user_status not in UserStatus.ALL:
         raise HTTPException(400, "Неверный статус")
     tender.user_status = user_status
+    tender.user_status_at = utcnow()
     tender.is_new = False
     return HTMLResponse('<span class="saved">сохранено</span>')
 
@@ -230,6 +231,7 @@ def tender_notes(tender_id: int, notes: str = Form(""), db: Session = Depends(ge
     if tender is None:
         raise HTTPException(404)
     tender.notes = notes[:10000]
+    tender.notes_at = utcnow()
     return HTMLResponse('<span class="saved">заметки сохранены</span>')
 
 

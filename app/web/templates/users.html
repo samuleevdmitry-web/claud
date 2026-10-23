@@ -18,6 +18,22 @@
 </section>
 
 <section class="card">
+  <h2>Сайт для менеджеров</h2>
+  {% if portal.configured %}
+    <p>Адрес: <a href="{{ portal.url }}" target="_blank" rel="noopener">{{ portal.url }}</a>.
+      Менеджеры входят туда под теми же логинами и паролями. Обмен — после каждого прогона и каждые несколько минут,
+      пока работает этот компьютер.</p>
+    <p>Последний обмен: <b>{{ portal.last_sync|dt if portal.last_sync else 'ещё не было' }}</b>{% if portal.stats %} — {{ portal.stats }}{% endif %}.</p>
+    {% if portal.error %}<div class="flash flash-error">Последняя ошибка обмена: {{ portal.error }}</div>{% endif %}
+    <form method="post" action="/users/portal-sync" class="inline"><button type="submit">Обменяться сейчас</button></form>
+    <form method="post" action="/users/portal-ping" class="inline"><button type="submit" class="secondary">Проверить связь</button></form>
+  {% else %}
+    <p class="muted">Не настроен. Чтобы менеджеры работали с тендерами через интернет, выложите папку <code>portal/</code> на поддомен
+      и укажите в <code>.env</code> <code>PORTAL_URL</code> и <code>PORTAL_TOKEN</code> — пошагово в <code>docs/portal.md</code>.</p>
+  {% endif %}
+</section>
+
+<section class="card">
   <h2>Добавить менеджера</h2>
   <form method="post" action="/users" class="fix-form">
     <label>Логин <input name="login" required pattern="[A-Za-z0-9._@-]+" title="латиница, цифры, . _ - @"></label>

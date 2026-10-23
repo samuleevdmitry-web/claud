@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.models import User
+from app.services import portal
 from app.services.users import UserError, create_manager, generate_password, set_password
 from app.web.auth import require_admin
 from app.web.templating import templates
@@ -30,6 +31,7 @@ def _page(request: Request, db: Session, message: str = "", error: str = "", sta
             "smtp_ready": bool(s.smtp_host),
             "telegram_managers": bool(s.telegram_bot_token and s.telegram_managers_chat_id),
             "base_url": s.app_base_url,
+            "portal": portal.status(db),
         },
         status_code=status_code,
     )
@@ -64,6 +66,52 @@ def add_user(
         request,
         db,
         message=f"Менеджер «{user.login}» добавлен. Пароль: {password} — передайте его менеджеру.",
+    )
+
+
+@router.post("/portal-sync", response_class=HTMLResponse)
+async def portal_sync_now(request: Request, db: Session = Depends(get_db)):
+    """Обмен с сайтом менеджеров сейчас (отметки менеджеров → сюда, тендеры и менеджеры → туда)."""
+    import asyncio
+
+    from app.db import get_session_factory
+
+    if not portal.configured():
+        return _page(
+            request,
+            db,
+            error="Сайт менеджеров не настроен: задайте PORTAL_URL и PORTAL_TOKEN в .env",
+            status_code=400,
+        )
+    result = await asyncio.to_thread(portal.sync, get_session_factory())
+    db.expire_all()
+    if result.errors:
+        return _page(request, db, error="Обмен не удался: " + "; ".join(result.errors), status_code=502)
+    return _page(
+        request,
+        db,
+        message=f"Обмен выполнен: на сайте тендеров {result.pushed}, менеджеров {result.managers}; "
+        f"отметок с сайта {result.pulled}, применено {result.applied}.",
+    )
+
+
+@router.post("/portal-ping", response_class=HTMLResponse)
+async def portal_ping(request: Request, db: Session = Depends(get_db)):
+    import asyncio
+
+    if not portal.configured():
+        return _page(
+            request,
+            db,
+            error="Сайт менеджеров не настроен: задайте PORTAL_URL и PORTAL_TOKEN в .env",
+            status_code=400,
+        )
+    try:
+        info = await asyncio.to_thread(portal.ping)
+    except portal.PortalError as exc:
+        return _page(request, db, error=f"Связи с сайтом нет: {exc}", status_code=502)
+    return _page(
+        request, db, message=f"Связь с сайтом есть (PHP {info.get('php')}, база {info.get('driver')})."
     )
 
 

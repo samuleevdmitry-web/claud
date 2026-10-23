@@ -96,6 +96,9 @@ class Tender(Base):
 
     user_status: Mapped[str] = mapped_column(String(30), default=UserStatus.NEW)
     notes: Mapped[str] = mapped_column(Text, default="")
+    # Когда менялись статус и заметки: при обмене с сайтом менеджеров побеждает более поздняя правка.
+    user_status_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Оценка пользователя: «yes» — подходит, «no» — не подходит. Важнее автоматической
     # релевантности при раскладке по вкладкам и служит для поиска ошибок в ключах.
     verdict: Mapped[str | None] = mapped_column(String(10), index=True)

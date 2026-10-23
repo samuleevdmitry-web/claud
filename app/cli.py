@@ -97,6 +97,14 @@ def run_cmd(args: argparse.Namespace) -> int:
             )
             for err in st.errors[-5:]:
                 print(f"    ! {err}")
+    from app.services import portal
+
+    if portal.configured():
+        res = portal.sync(factory)
+        print(
+            "Сайт менеджеров:",
+            "; ".join(res.errors) or f"отправлено тендеров {res.pushed}, отметок получено {res.pulled}",
+        )
     return 0 if run.status == "success" else 1
 
 

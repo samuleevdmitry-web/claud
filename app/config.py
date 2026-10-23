@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     secret_key: str = ""
     # Адрес приложения для ссылок в письмах менеджерам, например http://192.168.1.10:8000.
     app_base_url: str = ""
+    # Сайт менеджеров на хостинге (папка portal/): адрес, ключ обмена и как часто обмениваться.
+    portal_url: str = ""
+    portal_token: str = ""
+    portal_sync_minutes: int = 10
 
     # Файл ключевых слов, который импортируется при первом запуске, если в БД ещё нет версий.
     keywords_file: Path = PROJECT_ROOT / "Velmorium_ключевые_слова_тендеры.xlsx"

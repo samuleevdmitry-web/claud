@@ -1,0 +1,15 @@
+# Сайт менеджеров Velmorium
+DirectoryIndex index.php
+Options -Indexes
+<FilesMatch "^(config|config\.example|lib)\.php$">
+    Require all denied
+</FilesMatch>
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "same-origin"
+</IfModule>
+# Только HTTPS (раскомментируйте, когда на поддомене включён SSL-сертификат):
+# RewriteEngine On
+# RewriteCond %{HTTPS} off
+# RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]

@@ -119,6 +119,9 @@ def new_tenders_notification(session, since, run_id: int | None = None):
         return None
     relevant = sum(t.relevance == "relevant" for t in tenders)
     title = f"Новые тендеры: {relevant} релевантных, {len(tenders) - relevant} на проверку"
+    from app.services.portal import configured as portal_configured
+    from app.services.portal import portal_link
+
     base = get_settings().app_base_url.rstrip("/")
     lines = []
     for t in tenders[:30]:
@@ -126,7 +129,9 @@ def new_tenders_notification(session, since, run_id: int | None = None):
         when = deadline.astimezone(MSK).strftime("%d.%m %H:%M") if deadline else "—"
         mark = "★" if t.relevance == "relevant" else "?"
         line = f"{mark} {t.title}\n   {t.customer_name or '—'}; срок {when}; НМЦК {_money(t.nmck)}"
-        if base:
+        if portal_configured():
+            line += f"\n   {portal_link(t.id)}"
+        elif base:
             line += f"\n   {base}/tenders/{t.id}"
         lines.append(line)
     if len(tenders) > 30:

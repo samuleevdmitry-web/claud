@@ -25,8 +25,22 @@ async def _run(trigger: str, only: list[str] | None) -> None:
         await run_all(get_session_factory(), trigger=trigger, only=only)
     except RunAlreadyActive as exc:
         log.info("Прогон не запущен: %s", exc)
+        return
     except Exception:  # noqa: BLE001
         log.exception("Сбой прогона")
+    await sync_portal()
+
+
+async def sync_portal() -> None:
+    """Обмен с сайтом менеджеров (если настроен) — в отдельном потоке, чтобы не держать веб-сервер."""
+    from app.services import portal
+
+    if not portal.configured():
+        return
+    try:
+        await asyncio.to_thread(portal.sync, get_session_factory())
+    except Exception:  # noqa: BLE001
+        log.exception("Сбой обмена с сайтом менеджеров")
 
 
 def launch_run(trigger: str = "manual", only: list[str] | None = None) -> bool:

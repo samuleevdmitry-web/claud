@@ -110,7 +110,39 @@ def start_scheduler(schedule: Schedule) -> AsyncIOScheduler:
     scheduler.start()
     _scheduler = scheduler
     apply_schedule(schedule)
+    apply_portal_sync()
     return scheduler
+
+
+PORTAL_JOB_ID = "portal_sync"
+
+
+async def scheduled_portal_sync() -> None:
+    """Задание планировщика: обмен с сайтом менеджеров (функция на уровне модуля — ссылка хранится в БД)."""
+    from app.services.jobs import sync_portal
+
+    await sync_portal()
+
+
+def apply_portal_sync() -> None:
+    """Обмен с сайтом менеджеров каждые PORTAL_SYNC_MINUTES минут, если сайт настроен."""
+    from app.services.portal import configured
+
+    if _scheduler is None:
+        return
+    if not configured():
+        if _scheduler.get_job(PORTAL_JOB_ID):
+            _scheduler.remove_job(PORTAL_JOB_ID)
+        return
+    minutes = max(2, get_settings().portal_sync_minutes)
+    _scheduler.add_job(
+        scheduled_portal_sync,
+        IntervalTrigger(minutes=minutes),
+        id=PORTAL_JOB_ID,
+        name="Обмен с сайтом менеджеров",
+        replace_existing=True,
+        next_run_time=datetime.now(ZoneInfo(get_settings().timezone)),
+    )
 
 
 def apply_schedule(schedule: Schedule) -> None:
