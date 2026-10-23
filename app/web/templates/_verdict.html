@@ -1,0 +1,10 @@
+{# Кнопки «Подходит / Не подходит»; повторное нажатие снимает оценку. #}
+<span class="verdict" id="verdict-{{ t.id }}">
+  <button type="button" class="yes{% if t.verdict == 'yes' %} on{% endif %}" title="Подходит"
+    hx-post="/tenders/{{ t.id }}/verdict" hx-vals='{"verdict": "{{ '' if t.verdict == 'yes' else 'yes' }}"}'
+    hx-target="#verdict-{{ t.id }}" hx-swap="outerHTML">✓ Да</button>
+  <button type="button" class="no{% if t.verdict == 'no' %} on{% endif %}" title="Не подходит"
+    hx-post="/tenders/{{ t.id }}/verdict" hx-vals='{"verdict": "{{ '' if t.verdict == 'no' else 'no' }}"}'
+    hx-target="#verdict-{{ t.id }}" hx-swap="outerHTML">✗ Нет</button>
+  {% if mismatch %}<a class="mismatch" href="/tenders/{{ t.id }}#fix">автоматика ошиблась — поправить ключи</a>{% endif %}
+</span>

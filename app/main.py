@@ -16,6 +16,7 @@ from app.services.keywords import bootstrap_keywords
 from app.services.runner import recover_interrupted_runs
 from app.services.scheduler import get_schedule, shutdown_scheduler, start_scheduler
 from app.sources.tls import ensure_russian_ca
+from app.web.routes_feedback import router as feedback_router
 from app.web.routes_import import router as import_router
 from app.web.routes_keywords import router as keywords_router
 from app.web.routes_tenders import router as tenders_router
@@ -60,6 +61,7 @@ app = FastAPI(title="Velmorium — мониторинг тендеров", lifes
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
 app.include_router(keywords_router)
 app.include_router(import_router)
+app.include_router(feedback_router)
 app.include_router(tenders_router)
 
 

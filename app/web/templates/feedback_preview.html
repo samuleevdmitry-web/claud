@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Правка ключей{% endblock %}
+{% block content %}
+<p><a href="{{ back }}">← назад</a></p>
+<h1>Правка: {{ edit.describe() }}</h1>
+<section class="card card-accent">
+  <p>Маска: <code>{{ edit.mask }}</code></p>
+  <p>Тендеров пересчитано: {{ impact.total }}. Изменится статус у <b>{{ impact.transitions.values()|sum }}</b>.</p>
+  <p>Ошибок по вашим оценкам: было {{ impact.errors_before }}, станет
+    <span class="{{ 'impact-good' if impact.errors_after < impact.errors_before else ('impact-bad' if impact.errors_after > impact.errors_before else '') }}">{{ impact.errors_after }}</span>
+    {% if impact.fixed %} — исправится {{ impact.fixed|length }}{% endif %}{% if impact.broken %}, <span class="impact-bad">появится новых {{ impact.broken|length }}</span>{% endif %}.</p>
+  {% if impact.transitions %}
+  <ul>{% for (old, new), n in impact.transitions.most_common() %}
+    <li>{{ relevance_labels[old] }} → {{ relevance_labels[new] }}: {{ n }}</li>{% endfor %}</ul>
+  {% endif %}
+  <form method="post" action="/feedback/apply" class="inline">
+    <input type="hidden" name="token" value="{{ token }}">
+    <input type="hidden" name="description" value="{{ edit.describe() }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    <button type="submit">Применить правку</button>
+  </form>
+  <a href="{{ back }}">Отменить</a>
+  <p class="muted small">Применение создаёт новую версию файла ключей (её можно скачать на странице «Ключевые слова»)
+    и пересчитывает все тендеры. Ваши оценки «подходит / не подходит» сохраняются.</p>
+</section>
+
+{% if impact.broken %}
+<section class="card">
+  <h2 class="impact-bad">Станут ошибками ({{ impact.broken|length }})</h2>
+  <ul>{% for t in impact.broken[:30] %}<li><a href="/tenders/{{ t.id }}">{{ t.title }}</a> — {{ t.customer_name }} ({{ verdict_labels[t.verdict] }})</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if impact.changed %}
+<section class="card">
+  <h2>Что изменится{% if impact.changed|length >= 40 %} (первые 40){% endif %}</h2>
+  <table class="small">
+    <tr><th>Закупка</th><th>Заказчик</th><th>Было → станет</th><th>Ваша оценка</th></tr>
+    {% for t, old, new in impact.changed %}
+    <tr><td><a href="/tenders/{{ t.id }}">{{ t.title }}</a></td><td>{{ t.customer_name }}</td>
+      <td><span class="pill pill-{{ old }}">{{ relevance_labels[old] }}</span> → <span class="pill pill-{{ new }}">{{ relevance_labels[new] }}</span></td>
+      <td>{{ verdict_labels.get(t.verdict, '—') if t.verdict else '—' }}</td></tr>
+    {% endfor %}
+  </table>
+</section>
+{% else %}
+<section class="card muted">Ни у одного сохранённого тендера статус не изменится.</section>
+{% endif %}
+{% endblock %}

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from app.classifier import FIELD_LABELS, RELEVANCE_LABELS, Field, PositionText, TenderText, classify
@@ -92,6 +93,20 @@ def keywords_page(request: Request, db: Session = Depends(get_db)):
         request,
         "keywords.html",
         {"version": version, "ks": ks, "rows": _rows(ks) if ks else None, "preview": None},
+    )
+
+
+@router.get("/download")
+def download_active(db: Session = Depends(get_db)):
+    """Действующая версия файла ключей (с правками, сделанными в приложении)."""
+    active = get_active_keyword_set(db)
+    if not active:
+        return RedirectResponse("/keywords", status_code=303)
+    version = active[0]
+    return Response(
+        version.content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(version.filename)}"},
     )
 
 

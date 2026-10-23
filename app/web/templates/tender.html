@@ -2,9 +2,21 @@
 {% block title %}{{ t.title[:60] }}{% endblock %}
 {% block content %}
 <p><a href="{{ back }}">← к списку</a></p>
+{% if request.query_params.get('applied') %}<div class="flash">Правка ключей применена, все тендеры пересчитаны.</div>{% endif %}
+{% if t.deleted_at %}
+  <div class="flash flash-error">Тендер удалён {{ t.deleted_at|dt }} — его нет в списках, и при следующих прогонах он не вернётся.
+    <form method="post" action="/tenders/{{ t.id }}/restore" class="inline"><button type="submit" class="secondary small-btn">Восстановить</button></form></div>
+{% endif %}
 <h1 class="tender-title">{{ highlight(t.title, matches, 'title') }}</h1>
 <p>
-  <span class="pill pill-{{ t.relevance }}">{{ relevance_labels[t.relevance] }}</span>
+  <b>Подходит?</b> {% include "_verdict.html" %}
+  {% if not t.deleted_at %}
+  <form method="post" action="/tenders/{{ t.id }}/delete" class="inline" onsubmit="return confirm('Удалить тендер? Его можно будет восстановить из вкладки «Удалённые».')">
+    <button type="submit" class="danger small-btn">Удалить</button></form>
+  {% endif %}
+</p>
+<p>
+  <span class="pill pill-{{ t.relevance }}" title="автоматическая оценка">{{ relevance_labels[t.relevance] }}</span>
   <span class="muted">score {{ t.score }}</span>
   {% if t.is_new %}<span class="pill pill-new">новый</span>{% endif %}
   {% if t.is_updated %}<span class="pill pill-updated">обновлён</span>{% endif %}
@@ -76,6 +88,43 @@
 <section class="card">
   <h2>Извещение / ТЗ</h2>
   <div class="notice">{{ highlight(t.notice_text, matches, 'notice') }}</div>
+</section>
+{% endif %}
+
+{% if mismatch %}
+<section class="card card-accent" id="fix">
+  <h2>Автоматика ошиблась — что поправить в ключах</h2>
+  <p class="muted">Вы отметили «{{ verdict_labels[t.verdict] }}», а автоматика — «{{ relevance_labels[t.relevance] }}».
+    Любая правка сначала покажет, как изменятся все сохранённые тендеры, и только потом применится.</p>
+  {% for edit, label in fixes %}
+    <form method="post" action="/feedback/preview" class="inline">
+      {% include "_edit_fields.html" %}
+      <input type="hidden" name="back" value="/tenders/{{ t.id }}">
+      <button type="submit" class="secondary small-btn">{{ label }}</button>
+    </form>
+  {% endfor %}
+  {% if t.verdict == 'no' %}
+    <h3>Добавить минус-слово</h3>
+    <p class="muted small">Слово, по которому видно, что заказчик — не гостиница (например, «лицей», «реабилитационный»).</p>
+    {% set add_action, add_value = 'add_minus', 'Сильный' %}
+  {% else %}
+    <h3>Добавить маркер заказчика</h3>
+    <p class="muted small">Слово из названия заказчика, по которому видно, что это гостиница или отель.</p>
+    {% set add_action, add_value = 'add_marker', '1' %}
+  {% endif %}
+  {% if words %}<div class="chips">{% for w in words %}<button type="button" class="chip" onclick="var f=document.getElementById('add-form');f.phrase.value='{{ w.word }}';f.mask.value='{{ w.mask }}'">{{ w.word }}</button>{% endfor %}</div>{% endif %}
+  <form method="post" action="/feedback/preview" class="fix-form" id="add-form">
+    <input type="hidden" name="action" value="{{ add_action }}">
+    <input type="hidden" name="back" value="/tenders/{{ t.id }}">
+    <label>Слово или фраза <input name="phrase" required></label>
+    <label>Маска (* — любое окончание; пусто — подберём) <input name="mask"></label>
+    {% if add_action == 'add_minus' %}
+      <label>Сила <select name="value"><option>Сильный</option><option>Средний</option></select></label>
+    {% else %}
+      <input type="hidden" name="value" value="1">
+    {% endif %}
+    <button type="submit">Показать, что изменится</button>
+  </form>
 </section>
 {% endif %}
 

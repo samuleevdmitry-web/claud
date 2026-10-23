@@ -23,6 +23,8 @@
         {% if h.source_alerts %}<span class="badge badge-error" title="Не проверены">{{ h.source_alerts|length }}</span>{% endif %}</a>
       <a href="/notifications" class="{% if path.startswith('/notifications') %}active{% endif %}">Уведомления
         {% if h.unread %}<span class="badge">{{ h.unread }}</span>{% endif %}</a>
+      <a href="/feedback" class="{% if path.startswith('/feedback') %}active{% endif %}">Проверка
+        {% if h.mismatches %}<span class="badge badge-error" title="Оценка расходится с автоматикой">{{ h.mismatches }}</span>{% endif %}</a>
       <a href="/keywords" class="{% if path.startswith('/keywords') %}active{% endif %}">Ключевые слова</a>
       <a href="/import" class="{% if path.startswith('/import') %}active{% endif %}">Импорт</a>
     </nav>

@@ -20,6 +20,15 @@ TABS = {
     "review": "На проверку",
     "rejected": "Отклонённые",
     "all": "Все",
+    "trash": "Удалённые",
+}
+VERDICT_YES, VERDICT_NO = "yes", "no"
+VERDICT_LABELS = {VERDICT_YES: "подходит", VERDICT_NO: "не подходит"}
+VERDICT_FILTERS = {
+    "none": "без оценки",
+    "yes": "подходит",
+    "no": "не подходит",
+    "mismatch": "оценка расходится с автоматической",
 }
 SORTS = {"deadline": "по сроку подачи", "score": "по score", "published": "по дате публикации"}
 URGENT_DAYS = 3
@@ -37,6 +46,7 @@ class TenderFilters:
     deadline_to: str = ""
     category: str = ""
     user_status: str = ""
+    verdict: str = ""
     q: str = ""
     sort: str = "deadline"
     page: int = 1
@@ -64,12 +74,39 @@ def _date(value: str) -> datetime | None:
         return None
 
 
+def effective_relevance():
+    """Оценка пользователя важнее автоматики: «подходит» — в релевантные, «не подходит» — в отклонённые."""
+    return case(
+        (Tender.verdict == VERDICT_YES, "relevant"),
+        (Tender.verdict == VERDICT_NO, "rejected"),
+        else_=Tender.relevance,
+    )
+
+
+def mismatch_condition():
+    """Автоматика ошиблась: подходящий тендер не попал в релевантные или неподходящий — попал."""
+    return or_(
+        (Tender.verdict == VERDICT_YES) & (Tender.relevance != "relevant"),
+        (Tender.verdict == VERDICT_NO) & (Tender.relevance == "relevant"),
+    )
+
+
 def build_query(f: TenderFilters) -> Select:
     stmt = select(Tender)
+    if f.tab == "trash":
+        stmt = stmt.where(Tender.deleted_at.is_not(None))
+    else:
+        stmt = stmt.where(Tender.deleted_at.is_(None))
     if f.tab == "new":
-        stmt = stmt.where(Tender.is_new.is_(True), Tender.relevance.in_(["relevant", "review"]))
+        stmt = stmt.where(Tender.is_new.is_(True), effective_relevance().in_(["relevant", "review"]))
     elif f.tab in ("relevant", "review", "rejected"):
-        stmt = stmt.where(Tender.relevance == f.tab)
+        stmt = stmt.where(effective_relevance() == f.tab)
+    if f.verdict == "none":
+        stmt = stmt.where(Tender.verdict.is_(None))
+    elif f.verdict in (VERDICT_YES, VERDICT_NO):
+        stmt = stmt.where(Tender.verdict == f.verdict)
+    elif f.verdict == "mismatch":
+        stmt = stmt.where(mismatch_condition())
     if f.source:
         stmt = stmt.where(Tender.sources.any(TenderSource.source_code == f.source))
     if f.law:
@@ -156,6 +193,7 @@ def filter_options(session: Session) -> dict:
         "regions": regions,
         "categories": sorted(categories),
         "user_statuses": UserStatus.ALL,
+        "verdicts": VERDICT_FILTERS,
         "sources": SOURCES,
     }
 
@@ -215,16 +253,22 @@ class HeaderInfo:
     unread: int = 0
     source_alerts: list[SourceState] = field(default_factory=list)
     planned: int = 0
+    mismatches: int = 0
+
+
+def _new_counts(session: Session) -> dict[str, int]:
+    eff = effective_relevance()
+    return dict(
+        session.execute(
+            select(eff, func.count())
+            .where(Tender.deleted_at.is_(None), Tender.is_new.is_(True), eff.in_(["relevant", "review"]))
+            .group_by(eff)
+        ).all()
+    )
 
 
 def header_info(session: Session) -> HeaderInfo:
-    counts = dict(
-        session.execute(
-            select(Tender.relevance, func.count())
-            .where(Tender.is_new.is_(True), Tender.relevance.in_(["relevant", "review"]))
-            .group_by(Tender.relevance)
-        ).all()
-    )
+    counts = _new_counts(session)
     unread = session.scalar(select(func.count()).where(Notification.is_read.is_(False))) or 0
     states = source_states(session)
     return HeaderInfo(
@@ -233,21 +277,66 @@ def header_info(session: Session) -> HeaderInfo:
         unread=unread,
         source_alerts=[s for s in states if s.level == "error"],
         planned=sum(1 for s in states if s.info.mode == "planned"),
+        mismatches=session.scalar(
+            select(func.count()).where(Tender.deleted_at.is_(None), mismatch_condition())
+        )
+        or 0,
     )
 
 
 def tab_counts(session: Session) -> dict[str, int]:
-    rows = dict(session.execute(select(Tender.relevance, func.count()).group_by(Tender.relevance)).all())
-    new = session.scalar(
-        select(func.count()).where(Tender.is_new.is_(True), Tender.relevance.in_(["relevant", "review"]))
+    eff = effective_relevance()
+    rows = dict(
+        session.execute(select(eff, func.count()).where(Tender.deleted_at.is_(None)).group_by(eff)).all()
     )
+    trash = session.scalar(select(func.count()).where(Tender.deleted_at.is_not(None)))
     return {
-        "new": new or 0,
+        "new": sum(_new_counts(session).values()),
         "relevant": rows.get("relevant", 0),
         "review": rows.get("review", 0),
         "rejected": rows.get("rejected", 0),
-        "all": sum(rows.values()),
+        "all": sum(v for k, v in rows.items() if k),
+        "trash": trash or 0,
     }
+
+
+def filtered_ids(session: Session, f: TenderFilters) -> list[int]:
+    return list(session.scalars(build_query(f).with_only_columns(Tender.id).order_by(None)))
+
+
+def set_verdict(session: Session, tender_id: int, verdict: str | None) -> Tender | None:
+    """Оценка «подходит/не подходит» (None — снять). Оценённый тендер считается просмотренным."""
+    tender = session.get(Tender, tender_id)
+    if tender is None:
+        return None
+    if verdict not in (None, VERDICT_YES, VERDICT_NO):
+        raise ValueError(f"неизвестная оценка {verdict!r}")
+    tender.verdict = verdict
+    tender.verdict_at = utcnow() if verdict else None
+    if verdict:
+        tender.is_new = False
+        tender.is_updated = False
+    return tender
+
+
+def delete_tenders(session: Session, ids: list[int]) -> int:
+    """В корзину: тендеры пропадают из списков и не возвращаются при следующих прогонах."""
+    now = utcnow()
+    count = 0
+    for t in session.scalars(select(Tender).where(Tender.id.in_(ids), Tender.deleted_at.is_(None))):
+        t.deleted_at = now
+        t.is_new = False
+        t.is_updated = False
+        count += 1
+    return count
+
+
+def restore_tenders(session: Session, ids: list[int]) -> int:
+    count = 0
+    for t in session.scalars(select(Tender).where(Tender.id.in_(ids), Tender.deleted_at.is_not(None))):
+        t.deleted_at = None
+        count += 1
+    return count
 
 
 def mark_seen(session: Session, f: TenderFilters | None = None, tender_id: int | None = None) -> int:

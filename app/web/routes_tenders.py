@@ -12,18 +12,25 @@ from app.classifier import FIELD_LABELS, RELEVANCE_LABELS, Field
 from app.db import get_db
 from app.models import Notification, Run, RunSourceStat, Tender, UserStatus
 from app.services.export import export_xlsx
+from app.services.feedback import is_error, tender_fixes, word_suggestions
 from app.services.jobs import active_run_id, launch_run
+from app.services.keywords import get_active_keyword_set
 from app.services.runner import get_source_setting
 from app.services.scheduler import Schedule, apply_schedule, get_schedule, next_run_time, save_schedule
 from app.services.tenders import (
     SORTS,
     TABS,
+    VERDICT_LABELS,
     TenderFilters,
+    delete_tenders,
     filter_options,
+    filtered_ids,
     is_expired,
     is_urgent,
     list_tenders,
     mark_seen,
+    restore_tenders,
+    set_verdict,
     source_states,
     tab_counts,
 )
@@ -53,6 +60,7 @@ def _filters(request: Request, default_tab: str = "relevant") -> TenderFilters:
         deadline_to=q.get("deadline_to", ""),
         category=q.get("category", ""),
         user_status=q.get("user_status", ""),
+        verdict=q.get("verdict", ""),
         q=q.get("q", "").strip(),
         sort=sort if sort in SORTS else "deadline",
         page=page,
@@ -76,6 +84,8 @@ def tender_list(request: Request, db: Session = Depends(get_db)):
             "sorts": SORTS,
             "options": filter_options(db),
             "relevance_labels": RELEVANCE_LABELS,
+            "verdict_labels": VERDICT_LABELS,
+            "is_mismatch": lambda t: is_error(t.verdict, t.relevance),
             "is_urgent": is_urgent,
             "is_expired": is_expired,
             "source_titles": BY_CODE,
@@ -107,12 +117,18 @@ def tender_card(tender_id: int, request: Request, db: Session = Depends(get_db))
     if tender is None:
         raise HTTPException(404, "Тендер не найден")
     matches = tender.matches or []
+    active = get_active_keyword_set(db)
+    mismatch = is_error(tender.verdict, tender.relevance)
     return templates.TemplateResponse(
         request,
         "tender.html",
         {
             "t": tender,
             "matches": matches,
+            "verdict_labels": VERDICT_LABELS,
+            "mismatch": mismatch,
+            "fixes": tender_fixes(tender, active[1]) if active and mismatch else [],
+            "words": word_suggestions(tender) if mismatch else [],
             "relevance_labels": RELEVANCE_LABELS,
             "field_labels": FIELD_LABELS,
             "Field": Field,
@@ -141,6 +157,65 @@ def tender_status(tender_id: int, user_status: str = Form(...), db: Session = De
     tender.user_status = user_status
     tender.is_new = False
     return HTMLResponse('<span class="saved">сохранено</span>')
+
+
+@router.post("/tenders/{tender_id}/verdict", response_class=HTMLResponse)
+def tender_verdict(tender_id: int, request: Request, verdict: str = Form(""), db: Session = Depends(get_db)):
+    value = verdict if verdict in VERDICT_LABELS else None
+    tender = set_verdict(db, tender_id, value)
+    if tender is None:
+        raise HTTPException(404, "Тендер не найден")
+    if request.headers.get("hx-request"):
+        return templates.TemplateResponse(
+            request,
+            "_verdict.html",
+            {
+                "t": tender,
+                "verdict_labels": VERDICT_LABELS,
+                "mismatch": is_error(tender.verdict, tender.relevance),
+            },
+        )
+    return RedirectResponse(f"/tenders/{tender_id}", status_code=303)
+
+
+@router.post("/tenders/{tender_id}/delete")
+def tender_delete(tender_id: int, db: Session = Depends(get_db)):
+    if not delete_tenders(db, [tender_id]) and db.get(Tender, tender_id) is None:
+        raise HTTPException(404, "Тендер не найден")
+    return RedirectResponse(f"/tenders/{tender_id}?deleted=1", status_code=303)
+
+
+@router.post("/tenders/{tender_id}/restore")
+def tender_restore(tender_id: int, db: Session = Depends(get_db)):
+    restore_tenders(db, [tender_id])
+    return RedirectResponse(f"/tenders/{tender_id}", status_code=303)
+
+
+BULK_ACTIONS = ("delete", "restore", "yes", "no", "clear", "seen")
+
+
+@router.post("/tenders/bulk")
+async def tenders_bulk(request: Request, db: Session = Depends(get_db)):
+    """Действие над отмеченными тендерами или (scope=filter) над всеми по текущим фильтрам."""
+    form = await request.form()
+    action = str(form.get("action", ""))
+    if action not in BULK_ACTIONS:
+        raise HTTPException(400, "Неизвестное действие")
+    if form.get("scope") == "filter":
+        ids = filtered_ids(db, _filters(request, "all"))
+    else:
+        ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    if action == "delete":
+        done = delete_tenders(db, ids)
+    elif action == "restore":
+        done = restore_tenders(db, ids)
+    elif action == "seen":
+        done = sum(mark_seen(db, tender_id=i) for i in ids)
+    else:
+        done = sum(set_verdict(db, i, None if action == "clear" else action) is not None for i in ids)
+    query = request.url.query
+    sep = "&" if query else ""
+    return RedirectResponse(f"/?{query}{sep}done={done}&did={action}", status_code=303)
 
 
 @router.post("/tenders/{tender_id}/notes", response_class=HTMLResponse)

@@ -96,6 +96,12 @@ class Tender(Base):
 
     user_status: Mapped[str] = mapped_column(String(30), default=UserStatus.NEW)
     notes: Mapped[str] = mapped_column(Text, default="")
+    # Оценка пользователя: «yes» — подходит, «no» — не подходит. Важнее автоматической
+    # релевантности при раскладке по вкладкам и служит для поиска ошибок в ключах.
+    verdict: Mapped[str | None] = mapped_column(String(10), index=True)
+    verdict_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Удалённый тендер скрыт из списков; повторно найденный на площадке — остаётся удалённым.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
     sources: Mapped[list[TenderSource]] = relationship(
         back_populates="tender", cascade="all, delete-orphan", lazy="selectin"

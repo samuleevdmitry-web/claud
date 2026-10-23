@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Проверка{% endblock %}
+{% block content %}
+<h1>Проверка: где ошиблась автоматика</h1>
+{% if request.query_params.get('applied') %}<div class="flash">Правка применена: файл ключей обновлён, все тендеры пересчитаны.</div>{% endif %}
+{% if edit_error %}<div class="flash flash-error">{{ edit_error }}</div>{% endif %}
+
+<section class="card">
+  <p>После каждого прогона отмечайте у тендеров <b>✓ Да</b> (подходит) или <b>✗ Нет</b> (не подходит) — на вкладках
+    <a href="/?tab=new">«Новые»</a>, <a href="/?tab=relevant">«Релевантные»</a>, <a href="/?tab=review">«На проверку»</a>
+    и <a href="/?tab=rejected">«Отклонённые»</a>. Здесь собраны случаи, где оценка разошлась с автоматикой, и записи
+    файла ключей, которые к этому привели. Любая правка сначала показывает, что изменится, и только потом применяется.</p>
+  {% if report %}
+  <p>Оценено тендеров: <b>{{ report.rated }}</b> (подходят: {{ report.yes }}, не подходят: {{ report.no }}).
+    Ошибок автоматики: <b>{{ report.false_positive|length + report.missed|length }}</b> —
+    лишних релевантных {{ report.false_positive|length }}, пропущенных {{ report.missed|length }}.
+    Оценено из «На проверку»: {{ report.decided_review }}.</p>
+  {% else %}
+  <p class="flash flash-error">Нет действующего файла ключей.</p>
+  {% endif %}
+</section>
+
+{% if report %}
+{% if report.suspicious %}
+<section class="card">
+  <h2>Записи, которые ошибаются</h2>
+  <table class="small">
+    <tr><th>Запись</th><th>Маска</th><th>Подходит / не подходит</th><th>Ошибок</th><th>Что сделать</th></tr>
+    {% for s in report.suspicious %}
+    <tr>
+      <td>{{ kind_labels[s.kind] }}{% if s.detail %} ({{ s.detail }}){% endif %}: <b>{{ s.label }}</b></td>
+      <td><code>{{ s.mask }}</code></td>
+      <td>{{ s.yes }} / {{ s.no }}</td>
+      <td>{% for tid in s.wrong[:8] %}<a href="/tenders/{{ tid }}">#{{ tid }}</a> {% endfor %}{% if s.wrong|length > 8 %}… всего {{ s.wrong|length }}{% endif %}</td>
+      <td>{% for edit, label in s.fixes %}
+        <form method="post" action="/feedback/preview" class="inline">{% include "_edit_fields.html" %}
+          <button type="submit" class="secondary small-btn">{{ label }}</button></form>
+      {% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted small">Маркер или самодостаточный ключ «ошибается», если из-за него неподходящий тендер стал релевантным;
+    минус-слово — если из-за него подходящий тендер не попал в релевантные.</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Добавить минус-слово</h2>
+  <p class="muted small">Тендеры с ним без гостиничного маркера уйдут в «Отклонённые» (сильное) или «На проверку» (среднее).
+    Слова ниже часто встречаются у тендеров «не подходит», которые автоматика не отклонила, и не встречаются у подходящих.</p>
+  {% if report.minus_candidates %}<div class="chips">{% for w in report.minus_candidates %}<button type="button" class="chip" title="в {{ w.count }} тендерах" onclick="var f=document.getElementById('minus-form');f.phrase.value='{{ w.word }}';f.mask.value='{{ w.mask }}'">{{ w.word }} · {{ w.count }}</button>{% endfor %}</div>{% endif %}
+  <form method="post" action="/feedback/preview" class="fix-form" id="minus-form">
+    <input type="hidden" name="action" value="add_minus">
+    <label>Слово или фраза <input name="phrase" required value="{{ edit.phrase if edit and edit.action == 'add_minus' else '' }}"></label>
+    <label>Маска (пусто — подберём) <input name="mask" value="{{ edit.mask if edit and edit.action == 'add_minus' else '' }}"></label>
+    <label>Сила <select name="value">{% for s in strengths %}<option>{{ s }}</option>{% endfor %}</select></label>
+    <button type="submit">Показать, что изменится</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Добавить маркер заказчика</h2>
+  <p class="muted small">Слово, по которому видно, что заказчик — гостиница или отель. Слова ниже взяты из названий заказчиков
+    подходящих тендеров, у которых автоматика не нашла маркер.</p>
+  {% if report.marker_candidates %}<div class="chips">{% for w in report.marker_candidates %}<button type="button" class="chip" title="в {{ w.count }} тендерах" onclick="var f=document.getElementById('marker-form');f.phrase.value='{{ w.word }}';f.mask.value='{{ w.mask }}'">{{ w.word }} · {{ w.count }}</button>{% endfor %}</div>{% endif %}
+  <form method="post" action="/feedback/preview" class="fix-form" id="marker-form">
+    <input type="hidden" name="action" value="add_marker">
+    <label>Слово или фраза <input name="phrase" required value="{{ edit.phrase if edit and edit.action == 'add_marker' else '' }}"></label>
+    <label>Маска (пусто — подберём) <input name="mask" value="{{ edit.mask if edit and edit.action == 'add_marker' else '' }}"></label>
+    <label>Приоритет <select name="value"><option>1</option><option>2</option><option>3</option></select></label>
+    <button type="submit">Показать, что изменится</button>
+  </form>
+</section>
+
+{% for title, items in [('Лишние: не подходят, но автоматика отметила «Релевантный»', report.false_positive), ('Пропущенные: подходят, но автоматика не отметила «Релевантный»', report.missed)] %}
+{% if items %}
+<section class="card">
+  <h2>{{ title }} ({{ items|length }})</h2>
+  <table class="small">
+    <tr><th>Закупка</th><th>Заказчик</th><th>Автоматика</th><th>Почему</th></tr>
+    {% for t in items[:50] %}
+    <tr><td><a href="/tenders/{{ t.id }}#fix">{{ t.title }}</a></td><td>{{ t.customer_name }}</td>
+      <td><span class="pill pill-{{ t.relevance }}">{{ relevance_labels[t.relevance] }}</span></td>
+      <td>{{ (t.classification_reasons or [])|join('; ') }}</td></tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endblock %}

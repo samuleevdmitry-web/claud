@@ -147,6 +147,25 @@ def ingest(session: Session, d: TenderDetails, ks: KeywordSet, keyword_set_id: i
     link = next(
         (s for s in tender.sources if s.source_code == d.source_code and s.external_id == d.external_id), None
     )
+    if tender.deleted_at is not None:
+        # Удалённый пользователем тендер снова нашёлся — остаётся в корзине, без пометок «новый/обновлён».
+        tender.last_seen_at = now
+        if link is None:
+            tender.sources.append(
+                TenderSource(
+                    source_code=d.source_code,
+                    external_id=d.external_id,
+                    url=d.url,
+                    revision=d.revision,
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+            )
+        else:
+            link.last_seen_at = now
+            link.revision = d.revision or link.revision
+        session.flush()
+        return IngestResult("unchanged", tender, result)
     changes = _changes(tender, d, link)
     _apply_fields(tender, d)
     apply_classification(tender, classify(ks, _tender_text(tender)), keyword_set_id)

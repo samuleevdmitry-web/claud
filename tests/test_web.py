@@ -238,3 +238,81 @@ def test_schedule_form(client):
     assert 'value="07:15"' in page and 'value="24"' in page
     r = client.post("/schedule", auth=AUTH, data={"interval_hours": "24", "start_time": "утром"})
     assert "ЧЧ:ММ" in r.text
+
+
+# --------------------------------------------------------------------------- оценка, удаление, проверка
+
+
+def test_verdict_buttons_and_card_fix_section(client):
+    t1, t2 = _seed(client)  # t1 — гостиница (релевантный), t2 — ООО «Ромашка» (на проверку)
+    r = client.post(
+        f"/tenders/{t1}/verdict", data={"verdict": "no"}, auth=AUTH, headers={"HX-Request": "true"}
+    )
+    assert r.status_code == 200 and 'class="no on"' in r.text and "автоматика ошиблась" in r.text
+    assert client.get("/?tab=rejected", auth=AUTH).text.count("Поставка полотенец махровых") == 1
+    card = client.get(f"/tenders/{t1}", auth=AUTH).text
+    assert 'id="fix"' in card and "удалить маркер" in card
+    assert "Проверка" in card and 'title="Оценка расходится с автоматикой">1<' in card
+
+    r = client.post(
+        f"/tenders/{t2}/verdict", data={"verdict": "yes"}, auth=AUTH, headers={"HX-Request": "true"}
+    )
+    assert 'class="yes on"' in r.text
+    r = client.post(f"/tenders/{t2}/verdict", data={"verdict": ""}, auth=AUTH, headers={"HX-Request": "true"})
+    assert " on" not in r.text  # повторное нажатие снимает оценку
+
+
+def test_delete_restore_and_bulk(client):
+    t1, t2 = _seed(client)
+    r = client.post(f"/tenders/{t1}/delete", auth=AUTH, follow_redirects=False)
+    assert r.status_code == 303
+    assert "Восстановить" in client.get(f"/tenders/{t1}", auth=AUTH).text
+    r = client.get("/?tab=trash", auth=AUTH)
+    assert "Поставка полотенец махровых" in r.text and "Найдено: 1" in r.text
+    client.post(f"/tenders/{t1}/restore", auth=AUTH)
+    assert "Найдено: 2" in client.get("/?tab=all", auth=AUTH).text
+
+    r = client.post("/tenders/bulk?tab=all", data={"action": "delete", "ids": [str(t1), str(t2)]}, auth=AUTH)
+    assert "Удалено: 2" in r.text and "Найдено: 0" in r.text
+    r = client.post("/tenders/bulk?tab=trash", data={"action": "restore", "scope": "filter"}, auth=AUTH)
+    assert "Восстановлено: 2" in r.text
+    r = client.post("/tenders/bulk?tab=all&q=подуш", data={"action": "delete", "scope": "filter"}, auth=AUTH)
+    assert "Удалено: 1" in r.text
+    r = client.post("/tenders/bulk?tab=all", data={"action": "yes", "ids": [str(t1)]}, auth=AUTH)
+    assert "Отмечено «подходит»: 1" in r.text
+    assert client.post("/tenders/bulk", data={"action": "drop"}, auth=AUTH).status_code == 400
+
+
+def test_feedback_preview_apply_and_download(client):
+    t1, _ = _seed(client)
+    client.post(f"/tenders/{t1}/verdict", data={"verdict": "no"}, auth=AUTH)
+    r = client.get("/feedback", auth=AUTH)
+    assert r.status_code == 200 and "Лишние" in r.text and "гостиниц* | гостиничн*" in r.text
+
+    form = {"action": "remove", "kind": "marker", "mask": "гостиниц* | гостиничн*", "phrase": "гостиница"}
+    r = client.post("/feedback/preview", data=form, auth=AUTH)
+    assert r.status_code == 200
+    assert (
+        "удалить маркер" in r.text
+        and "Релевантный → Отклонён: 1" in r.text
+        and '<span class="impact-good">0</span>' in r.text  # ошибка по оценке исправится
+    )
+    token = r.text.split('name="token" value="')[1].split('"')[0]
+    r = client.post(
+        "/feedback/apply", data={"token": token, "description": "удалить маркер «гостиница»"}, auth=AUTH
+    )
+    assert "Правка применена" in r.text
+    card = client.get(f"/tenders/{t1}", auth=AUTH).text
+    assert "pill pill-rejected" in card  # пересчитан с новой версией: без маркера «ФГБУ» отклоняет
+    r = client.get("/keywords", auth=AUTH)
+    assert "удалить маркер «гостиница»" in r.text and "Скачать действующий файл" in r.text
+    r = client.get("/keywords/download", auth=AUTH)
+    assert r.status_code == 200 and r.content[:2] == b"PK"
+
+    r = client.post("/feedback/preview", data=form, auth=AUTH)  # маркера уже нет
+    assert r.status_code == 400 and "не найдено" in r.text
+
+    r = client.post(
+        "/feedback/preview", data={"action": "add_minus", "phrase": "Лицей", "value": "Сильный"}, auth=AUTH
+    )
+    assert r.status_code == 200 and "<code>лице*</code>" in r.text

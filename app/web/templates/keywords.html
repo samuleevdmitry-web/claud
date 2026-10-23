@@ -16,6 +16,7 @@
       минус-слов: {{ version.summary.minus_words }}, кодов: {{ version.summary.codes }}
       (исключений: {{ version.summary.excluded_codes }}), готовых запросов: {{ version.summary.queries }}.
       Ошибок: {{ version.summary.errors }}, предупреждений: {{ version.summary.warnings }}.</p>
+    <p><a href="/keywords/download">Скачать действующий файл</a> (со всеми правками, сделанными на странице «Проверка»)</p>
     <form hx-post="/keywords/reclassify" hx-target="#reclassify-result" hx-swap="innerHTML">
       <button type="submit">Пересчитать релевантность</button>
       <span id="reclassify-result"></span>

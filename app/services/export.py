@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.classifier import RELEVANCE_LABELS, Relevance
 from app.config import get_settings
-from app.services.tenders import TenderFilters, build_query
+from app.services.tenders import VERDICT_LABELS, TenderFilters, build_query
 from app.sources.registry import BY_CODE
 from app.sources.util import aware
 
@@ -35,6 +35,7 @@ COLUMNS = [
     ("Найденные ключи", 45),
     ("Маркеры", 30),
     ("Минус-слова", 30),
+    ("Оценка", 12),
     ("Мой статус", 15),
     ("Заметки", 30),
     ("Площадки", 25),
@@ -93,6 +94,7 @@ def export_xlsx(session: Session, f: TenderFilters) -> bytes:
                 labels["product"],
                 labels["marker"],
                 labels["minus"],
+                VERDICT_LABELS.get(t.verdict or "", ""),
                 t.user_status,
                 t.notes,
                 ", ".join(

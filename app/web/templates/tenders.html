@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ tabs[f.tab] }}{% endblock %}
 {% block content %}
+{% set did = request.query_params.get('did') %}
+{% if did %}
+  <div class="flash">{{ {'delete': 'Удалено', 'restore': 'Восстановлено', 'yes': 'Отмечено «подходит»', 'no': 'Отмечено «не подходит»', 'clear': 'Оценка снята', 'seen': 'Отмечено просмотренными'}.get(did, 'Готово') }}: {{ request.query_params.get('done', 0) }}.</div>
+{% endif %}
 <div class="tabs">
   {% for key, label in tabs.items() %}
     <a href="/?{{ f.query_string(tab=key, page=1) }}" class="tab {% if f.tab == key %}active{% endif %}">{{ label }}
@@ -29,6 +33,10 @@
     <select name="category"><option value="">все</option>
       {% for c in options.categories %}<option {% if f.category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
     </select></label>
+  <label>Оценка
+    <select name="verdict"><option value="">все</option>
+      {% for k, v in options.verdicts.items() %}<option value="{{ k }}" {% if f.verdict == k %}selected{% endif %}>{{ v }}</option>{% endfor %}
+    </select></label>
   <label>Мой статус
     <select name="user_status"><option value="">все</option>
       {% for s in options.user_statuses %}<option {% if f.user_status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
@@ -37,7 +45,7 @@
     <select name="sort">{% for k, v in sorts.items() %}<option value="{{ k }}" {% if f.sort == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
   <div class="filter-actions">
     <button type="submit">Показать</button>
-    <a href="/?tab={{ f.tab }}">Сбросить</a>
+    <a href="/?tab={{ f.tab }}" title="Очистить поля фильтра (закупки не удаляются)">Сбросить фильтры</a>
     <a href="/export.xlsx?{{ f.query_string(page=1) }}">Экспорт в Excel</a>
   </div>
 </form>
@@ -48,17 +56,42 @@
     <form method="post" action="/tenders/seen-all?{{ f.query_string(page=1) }}" class="inline">
       <button type="submit" class="secondary">Отметить все просмотренными</button></form>
   {% endif %}
+  {% if page.total %}
+    <form method="post" action="/tenders/bulk?{{ f.query_string(page=1) }}" class="inline"
+      onsubmit="return confirm('{{ 'Восстановить' if f.tab == 'trash' else 'Удалить' }} все {{ page.total }} тендеров по текущим фильтрам?')">
+      <input type="hidden" name="scope" value="filter">
+      {% if f.tab == 'trash' %}
+        <button type="submit" name="action" value="restore" class="secondary">Восстановить все ({{ page.total }})</button>
+      {% else %}
+        <button type="submit" name="action" value="delete" class="danger">Удалить все по фильтру ({{ page.total }})</button>
+      {% endif %}
+    </form>
+  {% endif %}
 </div>
 
 {% if page.items %}
+<form method="post" action="/tenders/bulk?{{ f.query_string() }}" id="bulk">
+<div class="bulk-bar">
+  <label class="small"><input type="checkbox" style="width:auto" onclick="document.querySelectorAll('input[name=ids]').forEach(c => c.checked = this.checked)"> выбрать все на странице</label>
+  <span class="muted small">С отмеченными:</span>
+  {% if f.tab == 'trash' %}
+    <button type="submit" name="action" value="restore" class="secondary small-btn">Восстановить</button>
+  {% else %}
+    <button type="submit" name="action" value="yes" class="secondary small-btn">✓ Подходят</button>
+    <button type="submit" name="action" value="no" class="secondary small-btn">✗ Не подходят</button>
+    <button type="submit" name="action" value="seen" class="secondary small-btn">Просмотрены</button>
+    <button type="submit" name="action" value="delete" class="danger small-btn" onclick="return confirm('Удалить отмеченные тендеры?')">Удалить</button>
+  {% endif %}
+</div>
 <div class="card table-card">
 <table class="tenders">
-  <tr><th>Срок подачи</th><th>Статус</th><th>Закупка</th><th>Заказчик / регион</th><th>НМЦК</th><th>Площадки</th><th></th></tr>
+  <tr><th></th><th>Срок подачи</th><th>Статус</th><th>Закупка</th><th>Заказчик / регион</th><th>НМЦК</th><th>Площадки</th><th>Подходит?</th></tr>
   {% for t in page.items %}
   {% set urgent = is_urgent(t) %}
-  <tr class="{% if urgent %}urgent{% elif is_expired(t) %}expired{% endif %}">
+  <tr class="{% if t.deleted_at %}row-deleted{% elif urgent %}urgent{% elif is_expired(t) %}expired{% endif %}">
+    <td><input type="checkbox" name="ids" value="{{ t.id }}" style="width:auto"></td>
     <td class="nowrap">{{ t.application_deadline|dt }}{% if urgent %}<div class="small warn">меньше 3 дней</div>{% endif %}</td>
-    <td><span class="pill pill-{{ t.relevance }}">{{ relevance_labels[t.relevance] }}</span>
+    <td><span class="pill pill-{{ t.relevance }}" title="автоматическая оценка">{{ relevance_labels[t.relevance] }}</span>
       <div class="small muted">score {{ t.score }}</div>
       {% if t.is_new %}<span class="pill pill-new">новый</span>{% endif %}
       {% if t.is_updated %}<span class="pill pill-updated">обновлён</span>{% endif %}</td>
@@ -68,11 +101,13 @@
     <td>{{ t.customer_name }}<div class="small muted">{{ t.region or '' }}</div></td>
     <td class="nowrap">{{ t.nmck|money }}</td>
     <td class="small">{% for s in t.sources %}<a href="{{ s.url }}" target="_blank" rel="noopener">{{ source_titles[s.source_code].title if s.source_code in source_titles else s.source_code }}</a><br>{% endfor %}</td>
-    <td>{% if t.is_new or t.is_updated %}<button class="secondary small-btn" hx-post="/tenders/{{ t.id }}/seen" hx-swap="outerHTML">Просмотрен</button>{% endif %}</td>
+    <td>{% if not t.deleted_at %}{% with mismatch = is_mismatch(t) %}{% include "_verdict.html" %}{% endwith %}{% endif %}
+      {% if t.is_new or t.is_updated %}<div><button type="button" class="secondary small-btn" hx-post="/tenders/{{ t.id }}/seen" hx-swap="outerHTML">Просмотрен</button></div>{% endif %}</td>
   </tr>
   {% endfor %}
 </table>
 </div>
+</form>
 {% if page.pages > 1 %}
 <div class="pager">
   {% if page.page > 1 %}<a href="/?{{ f.query_string(page=page.page - 1) }}">← назад</a>{% endif %}
@@ -81,6 +116,6 @@
 </div>
 {% endif %}
 {% else %}
-  <div class="card muted">Тендеров нет. {% if f.tab == 'new' %}Новые появятся после следующего прогона.{% endif %}</div>
+  <div class="card muted">Тендеров нет. {% if f.tab == 'new' %}Новые появятся после следующего прогона.{% elif f.tab == 'trash' %}Корзина пуста.{% endif %}</div>
 {% endif %}
 {% endblock %}

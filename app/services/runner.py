@@ -19,6 +19,7 @@ from app.models import Notification, Run, RunSourceStat, SourceSetting, Tender, 
 from app.services.ingest import details_to_text, ingest
 from app.services.keywords import get_active_keyword_set
 from app.services.notify import send_external
+from app.services.tenders import effective_relevance
 from app.sources.base import SourceAdapter, SourceError, TenderStub
 from app.sources.registry import SourceInfo, adapter_sources, get_source
 from app.sources.util import MSK, aware
@@ -196,10 +197,11 @@ async def _refresh_open(factory, adapter, code, seen: set[str], ks, keyword_set_
         select(TenderSource, Tender)
         .join(Tender, Tender.id == TenderSource.tender_id)
         .where(TenderSource.source_code == code)
+        .where(Tender.deleted_at.is_(None))
         .where((Tender.application_deadline.is_(None)) | (Tender.application_deadline > utcnow()))
     )
     if getattr(adapter, "refresh_scope", "all") == "relevant":
-        stmt = stmt.where(Tender.relevance.in_([str(Relevance.RELEVANT), str(Relevance.REVIEW)]))
+        stmt = stmt.where(effective_relevance().in_([str(Relevance.RELEVANT), str(Relevance.REVIEW)]))
     with factory() as session:
         rows = session.execute(stmt).all()
         stubs = [
