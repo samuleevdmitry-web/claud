@@ -190,6 +190,21 @@ def test_admin_manages_users(client):  # noqa: F811
     assert _login(client, "petrov", "newpassword").status_code == 401
     client.post(f"/users/{uid}/delete", auth=AUTH)
     assert "Менеджеров пока нет" in client.get("/users", auth=AUTH).text
+    # повторное нажатие «Удалить» — не ошибка
+    r = client.post(f"/users/{uid}/delete", auth=AUTH)
+    assert r.status_code == 200 and "Пользователь уже удалён" in r.text
+
+
+def test_errors_in_browser_are_pages(client):  # noqa: F811
+    html = {"Accept": "text/html,application/xhtml+xml"}
+    r = client.get("/tenders/99999", auth=AUTH, headers=html)
+    assert r.status_code == 404 and "<h1>Тендер не найден</h1>" in r.text and "К тендерам" in r.text
+    r = client.get("/no-such-page", auth=AUTH, headers=html)
+    assert r.status_code == 404 and "Страница не найдена" in r.text
+    r = client.get("/tenders/99999", auth=AUTH)  # не браузер — ответ как раньше
+    assert r.status_code == 404 and r.json() == {"detail": "Тендер не найден"}
+    r = client.get("/", headers=html, follow_redirects=False)  # без входа — по-прежнему на /login
+    assert r.status_code == 303 and r.headers["location"].startswith("/login")
 
 
 def test_manager_added_while_site_is_down(client, monkeypatch):  # noqa: F811

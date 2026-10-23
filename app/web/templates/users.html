@@ -48,7 +48,7 @@
   <h2>Менеджеры ({{ users|length }})</h2>
   {% if users %}
   <table class="small">
-    <tr><th>Логин</th><th>Имя, e-mail, письма, доступ</th><th>Последний вход</th><th>Новый пароль</th><th></th></tr>
+    <tr><th>Логин</th><th>Имя, e-mail, письма, доступ</th><th>Последний вход</th><th>Сменить пароль</th><th></th></tr>
     {% for u in users %}
     <tr class="{% if not u.is_active %}row-deleted{% endif %}">
       <td><b>{{ u.login }}</b></td>
@@ -67,6 +67,8 @@
     </tr>
     {% endfor %}
   </table>
+  <p class="muted small">Пароли хранятся только в зашифрованном виде, поэтому текущий пароль посмотреть нельзя: он
+    показывается один раз — в сообщении сразу после добавления или смены. Если менеджер его забыл, задайте новый.</p>
   {% else %}<p class="muted">Менеджеров пока нет.</p>{% endif %}
 </section>
 {% endblock %}

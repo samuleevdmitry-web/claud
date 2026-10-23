@@ -7,8 +7,10 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import PROJECT_ROOT, get_settings
 from app.db import get_engine, session_scope
@@ -22,6 +24,7 @@ from app.web.routes_import import router as import_router
 from app.web.routes_keywords import router as keywords_router
 from app.web.routes_tenders import router as tenders_router
 from app.web.routes_users import router as users_router
+from app.web.templating import templates
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +77,24 @@ app.include_router(import_router)
 app.include_router(feedback_router)
 app.include_router(users_router)
 app.include_router(tenders_router)
+
+_ERRORS = {400: "Неверный запрос", 403: "Нет доступа", 404: "Страница не найдена"}
+
+
+@app.exception_handler(StarletteHTTPException)
+async def friendly_errors(request: Request, exc: StarletteHTTPException):
+    """В браузере — страница с понятным текстом вместо JSON; HTMX и API получают ответ как раньше."""
+    browser = "text/html" in request.headers.get("accept", "") and "hx-request" not in request.headers
+    if exc.status_code not in _ERRORS or not browser:
+        return await http_exception_handler(request, exc)
+    message = exc.detail if exc.detail not in ("Not Found", "Forbidden", "Bad Request") else None
+    return templates.TemplateResponse(
+        request,
+        "error.html",
+        {"message": message or _ERRORS[exc.status_code]},
+        status_code=exc.status_code,
+        headers=exc.headers,
+    )
 
 
 @app.get("/health")

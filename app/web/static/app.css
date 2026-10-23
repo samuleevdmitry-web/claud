@@ -127,3 +127,4 @@ button.danger { background: var(--rejected); }
 .userbox form { margin: 0; }
 .userbox button { background: transparent; border: 1px solid rgba(255,255,255,.6); padding: 3px 10px; font-size: 13px; }
 .fix-form label.small { flex-direction: row; gap: 4px; align-items: center; color: var(--text); }
+form.is-sending button { opacity: .6; cursor: progress; }

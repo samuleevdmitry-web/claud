@@ -82,8 +82,8 @@ def add_user(
     return _page(
         request,
         db,
-        message=f"Менеджер «{user.login}» добавлен. Пароль: {password} — передайте его менеджеру."
-        + _to_portal(db),
+        message=f"Менеджер «{user.login}» добавлен. Пароль: {password} — передайте его менеджеру, "
+        "потом посмотреть его будет нельзя." + _to_portal(db),
     )
 
 
@@ -167,6 +167,11 @@ def update_user(
 
 @router.post("/{user_id}/delete")
 def delete_user(user_id: int, db: Session = Depends(get_db)):
-    db.delete(_user(db, user_id))
+    user = db.get(User, user_id)
+    if user is None:  # второе нажатие, пока первое ещё выполнялось
+        return RedirectResponse(
+            f"/users?{urlencode({'message': 'Пользователь уже удалён.'})}", status_code=303
+        )
+    db.delete(user)
     message = "Пользователь удалён." + _to_portal(db)
     return RedirectResponse(f"/users?{urlencode({'message': message})}", status_code=303)
