@@ -2,12 +2,17 @@
 {% block title %}Уведомления{% endblock %}
 {% block content %}
 <h1>Уведомления</h1>
+{% if can_admin(request) %}
 <form method="post" action="/notifications/read-all" class="inline"><button class="secondary">Отметить все прочитанными</button></form>
+{% else %}
+<p class="muted">Здесь появляются сообщения о новых тендерах после каждого прогона. Все новые — во вкладке
+  <a href="/?tab=new">«Новые»</a>.</p>
+{% endif %}
 <section class="card">
   {% for n in items %}
-  <div class="notification level-{{ n.level }} {% if not n.is_read %}unread{% endif %}">
+  <div class="notification level-{{ n.level }} {% if n.id in unread %}unread{% endif %}">
     <div class="small muted">{{ n.created_at|dt }}</div>
-    <div><b>{{ n.title }}</b></div>
+    <div><b>{{ n.title }}</b>{% if n.kind == new_kind %} · <a href="/?tab=new">открыть новые</a>{% endif %}</div>
     {% if n.body %}<div class="small pre">{{ n.body }}</div>{% endif %}
   </div>
   {% else %}

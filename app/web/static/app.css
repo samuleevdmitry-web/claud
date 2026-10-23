@@ -122,3 +122,8 @@ button.danger { background: var(--rejected); }
 .impact-good { color: var(--relevant); font-weight: 600; }
 .impact-bad { color: var(--rejected); font-weight: 600; }
 .row-deleted td { opacity: .6; }
+.login-card { max-width: 380px; margin: 60px auto; }
+.userbox { margin-left: auto; display: flex; gap: 10px; align-items: center; font-size: 14px; }
+.userbox form { margin: 0; }
+.userbox button { background: transparent; border: 1px solid rgba(255,255,255,.6); padding: 3px 10px; font-size: 13px; }
+.fix-form label.small { flex-direction: row; gap: 4px; align-items: center; color: var(--text); }

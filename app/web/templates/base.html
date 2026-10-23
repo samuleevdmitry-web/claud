@@ -9,8 +9,10 @@
   <script src="/static/htmx.min.js"></script>
 </head>
 <body>
-  {% set h = header() %}
+  {% set h = header(request) %}
   {% set path = request.url.path %}
+  {% set me = request.state.user if request.state.user is defined else none %}
+  {% set is_admin = me is none or me.is_admin %}
   <header class="topbar">
     <a class="brand" href="/">Velmorium · тендеры</a>
     <nav>
@@ -19,15 +21,24 @@
           <span class="badge badge-relevant" title="Новые релевантные">{{ h.new_relevant }}</span>
           <span class="badge badge-review" title="Новые на проверку">{{ h.new_review }}</span>
         {% endif %}</a>
+      {% if is_admin %}
       <a href="/sources" class="{% if path.startswith('/sources') or path.startswith('/runs') %}active{% endif %}">Площадки
         {% if h.source_alerts %}<span class="badge badge-error" title="Не проверены">{{ h.source_alerts|length }}</span>{% endif %}</a>
+      {% endif %}
       <a href="/notifications" class="{% if path.startswith('/notifications') %}active{% endif %}">Уведомления
         {% if h.unread %}<span class="badge">{{ h.unread }}</span>{% endif %}</a>
+      {% if is_admin %}
       <a href="/feedback" class="{% if path.startswith('/feedback') %}active{% endif %}">Проверка
         {% if h.mismatches %}<span class="badge badge-error" title="Оценка расходится с автоматикой">{{ h.mismatches }}</span>{% endif %}</a>
       <a href="/keywords" class="{% if path.startswith('/keywords') %}active{% endif %}">Ключевые слова</a>
       <a href="/import" class="{% if path.startswith('/import') %}active{% endif %}">Импорт</a>
+      <a href="/users" class="{% if path.startswith('/users') %}active{% endif %}">Пользователи</a>
+      {% endif %}
     </nav>
+    {% if me and me.login != 'dev' %}
+    <div class="userbox">{{ me.display }}
+      <form method="post" action="/logout"><button type="submit">Выйти</button></form></div>
+    {% endif %}
   </header>
   {% if h.source_alerts %}
   <div class="alertbar">

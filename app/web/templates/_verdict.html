@@ -6,5 +6,5 @@
   <button type="button" class="no{% if t.verdict == 'no' %} on{% endif %}" title="Не подходит"
     hx-post="/tenders/{{ t.id }}/verdict" hx-vals='{"verdict": "{{ '' if t.verdict == 'no' else 'no' }}"}'
     hx-target="#verdict-{{ t.id }}" hx-swap="outerHTML">✗ Нет</button>
-  {% if mismatch %}<a class="mismatch" href="/tenders/{{ t.id }}#fix">автоматика ошиблась — поправить ключи</a>{% endif %}
+  {% if mismatch and can_admin(request) %}<a class="mismatch" href="/tenders/{{ t.id }}#fix">автоматика ошиблась — поправить ключи</a>{% endif %}
 </span>

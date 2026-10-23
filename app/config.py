@@ -14,9 +14,14 @@ class Settings(BaseSettings):
     # БД: PostgreSQL в Docker, SQLite для локальной разработки.
     database_url: str = f"sqlite:///{PROJECT_ROOT / 'data' / 'app.db'}"
 
-    # Доступ к приложению: HTTP Basic. Пустой пароль — доступ без пароля (только для разработки).
+    # Администратор приложения. Пустой пароль — доступ без пароля (только для разработки).
+    # Менеджеры заводятся в интерфейсе (страница «Пользователи»).
     app_username: str = "velmorium"
     app_password: str = ""
+    # Ключ подписи cookie входа. Пусто — генерируется и хранится в data/secret_key.
+    secret_key: str = ""
+    # Адрес приложения для ссылок в письмах менеджерам, например http://192.168.1.10:8000.
+    app_base_url: str = ""
 
     # Файл ключевых слов, который импортируется при первом запуске, если в БД ещё нет версий.
     keywords_file: Path = PROJECT_ROOT / "Velmorium_ключевые_слова_тендеры.xlsx"
@@ -45,6 +50,8 @@ class Settings(BaseSettings):
     # Уведомления (опционально).
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    # Отдельный чат (группа менеджеров) — только сообщения о новых тендерах.
+    telegram_managers_chat_id: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

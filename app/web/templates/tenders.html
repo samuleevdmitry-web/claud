@@ -6,7 +6,7 @@
   <div class="flash">{{ {'delete': 'Удалено', 'restore': 'Восстановлено', 'yes': 'Отмечено «подходит»', 'no': 'Отмечено «не подходит»', 'clear': 'Оценка снята', 'seen': 'Отмечено просмотренными'}.get(did, 'Готово') }}: {{ request.query_params.get('done', 0) }}.</div>
 {% endif %}
 <div class="tabs">
-  {% for key, label in tabs.items() %}
+  {% for key, label in tabs.items() if key != 'trash' or can_admin(request) %}
     <a href="/?{{ f.query_string(tab=key, page=1) }}" class="tab {% if f.tab == key %}active{% endif %}">{{ label }}
       <span class="count">{{ counts[key] }}</span></a>
   {% endfor %}
@@ -56,7 +56,7 @@
     <form method="post" action="/tenders/seen-all?{{ f.query_string(page=1) }}" class="inline">
       <button type="submit" class="secondary">Отметить все просмотренными</button></form>
   {% endif %}
-  {% if page.total %}
+  {% if page.total and can_admin(request) %}
     <form method="post" action="/tenders/bulk?{{ f.query_string(page=1) }}" class="inline"
       onsubmit="return confirm('{{ 'Восстановить' if f.tab == 'trash' else 'Удалить' }} все {{ page.total }} тендеров по текущим фильтрам?')">
       <input type="hidden" name="scope" value="filter">
@@ -80,7 +80,7 @@
     <button type="submit" name="action" value="yes" class="secondary small-btn">✓ Подходят</button>
     <button type="submit" name="action" value="no" class="secondary small-btn">✗ Не подходят</button>
     <button type="submit" name="action" value="seen" class="secondary small-btn">Просмотрены</button>
-    <button type="submit" name="action" value="delete" class="danger small-btn" onclick="return confirm('Удалить отмеченные тендеры?')">Удалить</button>
+    {% if can_admin(request) %}<button type="submit" name="action" value="delete" class="danger small-btn" onclick="return confirm('Удалить отмеченные тендеры?')">Удалить</button>{% endif %}
   {% endif %}
 </div>
 <div class="card table-card">

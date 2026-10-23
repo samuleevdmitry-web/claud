@@ -16,10 +16,12 @@ from app.services.keywords import bootstrap_keywords
 from app.services.runner import recover_interrupted_runs
 from app.services.scheduler import get_schedule, shutdown_scheduler, start_scheduler
 from app.sources.tls import ensure_russian_ca
+from app.web.routes_auth import router as auth_router
 from app.web.routes_feedback import router as feedback_router
 from app.web.routes_import import router as import_router
 from app.web.routes_keywords import router as keywords_router
 from app.web.routes_tenders import router as tenders_router
+from app.web.routes_users import router as users_router
 
 log = logging.getLogger(__name__)
 
@@ -59,9 +61,11 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Velmorium — мониторинг тендеров", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
+app.include_router(auth_router)
 app.include_router(keywords_router)
 app.include_router(import_router)
 app.include_router(feedback_router)
+app.include_router(users_router)
 app.include_router(tenders_router)
 
 

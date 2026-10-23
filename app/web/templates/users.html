@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Пользователи{% endblock %}
+{% block content %}
+<h1>Пользователи</h1>
+{% if message %}<div class="flash">{{ message }}</div>{% endif %}
+{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+
+<section class="card">
+  <p>Менеджеры видят только <b>Тендеры</b> (списки, карточки, оценка «подходит / не подходит», свой статус, заметки,
+    экспорт в Excel) и <b>Уведомления</b> о новых тендерах. Площадки, проверку и правку ключей, импорт, удаление
+    тендеров и пользователей видит только администратор (логин и пароль из файла <code>.env</code>).</p>
+  <p>Письма о новых тендерах: {% if smtp_ready %}<span class="ok">почта настроена</span> — уходят менеджерам с указанным
+    e-mail и включёнными письмами.{% else %}<span class="warn">почта не настроена</span> — заполните <code>SMTP_*</code>
+    в <code>.env</code>, иначе менеджеры увидят новые тендеры только в приложении.{% endif %}
+    {% if telegram_managers %}Сообщения также уходят в Telegram-группу менеджеров.{% endif %}
+    {% if not base_url %}<br><span class="muted small">Чтобы в письмах были ссылки на тендеры, укажите в <code>.env</code>
+    <code>APP_BASE_URL</code> — адрес, по которому менеджеры открывают приложение.</span>{% endif %}</p>
+</section>
+
+<section class="card">
+  <h2>Добавить менеджера</h2>
+  <form method="post" action="/users" class="fix-form">
+    <label>Логин <input name="login" required pattern="[A-Za-z0-9._@-]+" title="латиница, цифры, . _ - @"></label>
+    <label>Имя <input name="name"></label>
+    <label>E-mail для писем <input name="email" type="email"></label>
+    <label>Пароль (не короче 8) <input name="password" value="{{ suggested_password }}" required minlength="8"></label>
+    <button type="submit">Добавить</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Менеджеры ({{ users|length }})</h2>
+  {% if users %}
+  <table class="small">
+    <tr><th>Логин</th><th>Имя, e-mail, письма, доступ</th><th>Последний вход</th><th>Новый пароль</th><th></th></tr>
+    {% for u in users %}
+    <tr class="{% if not u.is_active %}row-deleted{% endif %}">
+      <td><b>{{ u.login }}</b></td>
+      <td><form method="post" action="/users/{{ u.id }}/update" class="fix-form">
+        <input name="name" value="{{ u.name }}" placeholder="имя">
+        <input name="email" type="email" value="{{ u.email }}" placeholder="e-mail">
+        <label class="small"><input type="checkbox" name="notify_email" value="true" style="width:auto" {% if u.notify_email %}checked{% endif %}> письма о новых</label>
+        <label class="small"><input type="checkbox" name="is_active" value="true" style="width:auto" {% if u.is_active %}checked{% endif %}> доступ открыт</label>
+        <button type="submit" class="secondary small-btn">Сохранить</button></form></td>
+      <td class="nowrap">{{ u.last_login_at|dt }}</td>
+      <td><form method="post" action="/users/{{ u.id }}/password" class="fix-form">
+        <input name="password" value="{{ suggested_password }}" minlength="8" required>
+        <button type="submit" class="secondary small-btn">Сменить</button></form></td>
+      <td><form method="post" action="/users/{{ u.id }}/delete" onsubmit="return confirm('Удалить пользователя {{ u.login }}?')">
+        <button type="submit" class="danger small-btn">Удалить</button></form></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">Менеджеров пока нет.</p>{% endif %}
+</section>
+{% endblock %}

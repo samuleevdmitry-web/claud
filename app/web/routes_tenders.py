@@ -10,11 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.classifier import FIELD_LABELS, RELEVANCE_LABELS, Field
 from app.db import get_db
-from app.models import Notification, Run, RunSourceStat, Tender, UserStatus
+from app.models import Notification, Run, RunSourceStat, Tender, User, UserStatus, utcnow
 from app.services.export import export_xlsx
 from app.services.feedback import is_error, tender_fixes, word_suggestions
 from app.services.jobs import active_run_id, launch_run
 from app.services.keywords import get_active_keyword_set
+from app.services.notify import NEW_TENDERS
 from app.services.runner import get_source_setting
 from app.services.scheduler import Schedule, apply_schedule, get_schedule, next_run_time, save_schedule
 from app.services.tenders import (
@@ -35,6 +36,7 @@ from app.services.tenders import (
     tab_counts,
 )
 from app.sources.registry import BY_CODE, get_source
+from app.sources.util import aware
 from app.web.auth import require_auth
 from app.web.templating import templates
 
@@ -72,6 +74,8 @@ def tender_list(request: Request, db: Session = Depends(get_db)):
     counts = tab_counts(db)
     default_tab = "new" if counts["new"] else "relevant"
     f = _filters(request, default_tab)
+    if f.tab == "trash" and not request.state.user.is_admin:
+        f.tab = default_tab
     page = list_tenders(db, f)
     return templates.TemplateResponse(
         request,
@@ -114,7 +118,7 @@ def seen_all(request: Request, db: Session = Depends(get_db)):
 @router.get("/tenders/{tender_id}", response_class=HTMLResponse)
 def tender_card(tender_id: int, request: Request, db: Session = Depends(get_db)):
     tender = db.get(Tender, tender_id)
-    if tender is None:
+    if tender is None or (tender.deleted_at is not None and not request.state.user.is_admin):
         raise HTTPException(404, "Тендер не найден")
     matches = tender.matches or []
     active = get_active_keyword_set(db)
@@ -201,6 +205,8 @@ async def tenders_bulk(request: Request, db: Session = Depends(get_db)):
     action = str(form.get("action", ""))
     if action not in BULK_ACTIONS:
         raise HTTPException(400, "Неизвестное действие")
+    if action in ("delete", "restore") and not request.state.user.is_admin:
+        raise HTTPException(403, "Удалять тендеры может только администратор")
     if form.get("scope") == "filter":
         ids = filtered_ids(db, _filters(request, "all"))
     else:
@@ -307,11 +313,26 @@ def runs_page(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/notifications", response_class=HTMLResponse)
 def notifications_page(request: Request, db: Session = Depends(get_db)):
-    items = db.scalars(select(Notification).order_by(Notification.id.desc()).limit(100)).all()
-    return templates.TemplateResponse(request, "notifications.html", {"items": items})
+    me = request.state.user
+    stmt = select(Notification).order_by(Notification.id.desc()).limit(100)
+    if me.is_admin:
+        items = db.scalars(stmt).all()
+        unread = {n.id for n in items if not n.is_read}
+    else:
+        # Менеджеру — только «Новые тендеры»; непрочитанные — с момента его прошлого визита.
+        user = db.scalar(select(User).where(User.login == me.login))
+        items = db.scalars(stmt.where(Notification.kind == NEW_TENDERS)).all()
+        seen = aware(user.notifications_seen_at) if user else None
+        unread = {n.id for n in items if seen is None or aware(n.created_at) > seen}
+        if user is not None:
+            user.notifications_seen_at = utcnow()
+    return templates.TemplateResponse(
+        request, "notifications.html", {"items": items, "unread": unread, "new_kind": NEW_TENDERS}
+    )
 
 
 @router.post("/notifications/read-all")
-def notifications_read_all(db: Session = Depends(get_db)):
-    db.execute(update(Notification).where(Notification.is_read.is_(False)).values(is_read=True))
+def notifications_read_all(request: Request, db: Session = Depends(get_db)):
+    if request.state.user.is_admin:
+        db.execute(update(Notification).where(Notification.is_read.is_(False)).values(is_read=True))
     return RedirectResponse("/notifications", status_code=303)

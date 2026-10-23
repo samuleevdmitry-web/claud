@@ -267,8 +267,15 @@ def _new_counts(session: Session) -> dict[str, int]:
     )
 
 
-def header_info(session: Session) -> HeaderInfo:
+def header_info(session: Session, user=None) -> HeaderInfo:
     counts = _new_counts(session)
+    if user is not None and not user.is_admin:
+        # Менеджер: только новые тендеры и свои непрочитанные уведомления о них.
+        return HeaderInfo(
+            new_relevant=counts.get("relevant", 0),
+            new_review=counts.get("review", 0),
+            unread=unread_for_manager(session, user),
+        )
     unread = session.scalar(select(func.count()).where(Notification.is_read.is_(False))) or 0
     states = source_states(session)
     return HeaderInfo(
@@ -282,6 +289,17 @@ def header_info(session: Session) -> HeaderInfo:
         )
         or 0,
     )
+
+
+def unread_for_manager(session: Session, user) -> int:
+    from app.models import User
+    from app.services.notify import NEW_TENDERS
+
+    seen = session.scalar(select(User.notifications_seen_at).where(User.login == user.login))
+    stmt = select(func.count()).where(Notification.kind == NEW_TENDERS)
+    if seen is not None:
+        stmt = stmt.where(Notification.created_at > seen)
+    return session.scalar(stmt) or 0
 
 
 def tab_counts(session: Session) -> dict[str, int]:

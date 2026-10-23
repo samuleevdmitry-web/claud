@@ -186,3 +186,76 @@ def test_run_sends_external_summary(monkeypatch, keywords_file):
     monkeypatch.setattr("app.services.runner.send_external", lambda messages: sent.append(messages))
     asyncio.run(run_all(factory, adapters={"onlinecontract": Adapter()}, queries=["тапочки"]))
     assert sent and "найдено 1 новых (1 релевантных" in sent[0][0][0]
+
+
+def test_run_creates_new_tenders_notification_for_managers(monkeypatch, keywords_file):
+    from sqlalchemy import select
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.models import Notification
+    from app.services.keywords import activate_keyword_file
+    from app.services.notify import NEW_TENDERS, EmailNotifier, TelegramNotifier, manager_notifiers
+    from app.services.runner import run_all
+    from app.services.users import create_manager
+    from app.sources.base import TenderDetails, TenderStub
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine, expire_on_commit=False)
+    with factory() as s:
+        activate_keyword_file(s, keywords_file.read_bytes(), keywords_file.name)
+        create_manager(s, "ivanov", "password1", "Иванов", "ivanov@example.com")
+        quiet = create_manager(s, "petrov", "password1", "Петров", "petrov@example.com")
+        quiet.notify_email = False
+        create_manager(s, "sidorov", "password1", "Сидоров", "")  # без e-mail
+        s.commit()
+
+    d = TenderDetails(
+        "onlinecontract",
+        "1",
+        "u",
+        "Поставка халатов для отеля «Волна»",
+        customer_name="ООО «Волна»",
+        application_deadline=datetime.now(UTC) + timedelta(days=5),
+    )
+
+    class Adapter:
+        code, title, supports_codes = "onlinecontract", "x", False
+
+        async def search(self, *a):
+            yield TenderStub("onlinecontract", "1", "u", d.title, application_deadline=d.application_deadline)
+
+        async def fetch_details(self, stub):
+            return d
+
+    monkeypatch.setenv("SMTP_HOST", "smtp.test")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_MANAGERS_CHAT_ID", "-100")
+    monkeypatch.setenv("APP_BASE_URL", "http://192.168.1.10:8000/")
+    get_settings.cache_clear()
+    to_managers = []
+    monkeypatch.setattr("app.services.runner.send_external", lambda messages: None)
+    monkeypatch.setattr(
+        "app.services.runner.send_to_managers",
+        lambda session, note: to_managers.append((note.title, note.body)),
+    )
+    try:
+        asyncio.run(run_all(factory, adapters={"onlinecontract": Adapter()}, queries=["халаты"]))
+        with factory() as s:
+            note = s.scalar(select(Notification).where(Notification.kind == NEW_TENDERS))
+            assert note.title == "Новые тендеры: 1 релевантных, 0 на проверку"
+            assert "Поставка халатов для отеля «Волна»" in note.body
+            assert "http://192.168.1.10:8000/tenders/1" in note.body
+            assert to_managers == [(note.title, note.body)]
+            channels = manager_notifiers(s)
+            email = next(n for n in channels if isinstance(n, EmailNotifier))
+            assert email.recipients == ["ivanov@example.com"]  # Петров отключил письма, у Сидорова нет e-mail
+            assert any(isinstance(n, TelegramNotifier) and n.chat_id == "-100" for n in channels)
+    finally:
+        get_settings.cache_clear()
+
+    # Прогон без новых тендеров — уведомления «Новые тендеры» нет
+    asyncio.run(run_all(factory, adapters={"onlinecontract": Adapter()}, queries=["халаты"]))
+    with factory() as s:
+        assert len(s.scalars(select(Notification).where(Notification.kind == NEW_TENDERS)).all()) == 1

@@ -18,7 +18,7 @@ from app.keywords.queries import build_queries, search_codes
 from app.models import Notification, Run, RunSourceStat, SourceSetting, Tender, TenderSource, utcnow
 from app.services.ingest import details_to_text, ingest
 from app.services.keywords import get_active_keyword_set
-from app.services.notify import send_external
+from app.services.notify import new_tenders_notification, send_external, send_to_managers
 from app.services.tenders import effective_relevance
 from app.sources.base import SourceAdapter, SourceError, TenderStub
 from app.sources.registry import SourceInfo, adapter_sources, get_source
@@ -391,7 +391,10 @@ def _finish_run(factory, run_id: int, results: list[SourceRunResult], error: str
                 Notification(kind="source_failure", level="error", run_id=run_id, title=title, body=details)
             )
             messages.append((title, details))
+        note = new_tenders_notification(session, aware(run.started_at), run_id)
         session.commit()
+        if note is not None:
+            send_to_managers(session, note)
     if run.new_relevant or run.new_review or bad or error:
         send_external(messages)
 

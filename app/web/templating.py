@@ -20,13 +20,14 @@ def _local_dt(value: datetime | None, fmt: str = "%d.%m.%Y %H:%M") -> str:
     return value.astimezone(ZoneInfo(get_settings().timezone)).strftime(fmt)
 
 
-def _header():
+def _header(request=None):
     """Счётчики новых тендеров, непрочитанные уведомления и тревоги по площадкам для шапки."""
     from app.db import get_session_factory
     from app.services.tenders import header_info
 
+    user = getattr(getattr(request, "state", None), "user", None)
     with get_session_factory()() as session:
-        return header_info(session)
+        return header_info(session, user)
 
 
 def _money(value) -> str:
@@ -37,5 +38,14 @@ def _money(value) -> str:
 
 templates.env.filters["dt"] = _local_dt
 templates.env.filters["money"] = _money
+
+
+def _can_admin(request) -> bool:
+    """Администратор или режим разработки (без пароля)."""
+    user = getattr(getattr(request, "state", None), "user", None)
+    return user is None or user.is_admin
+
+
 templates.env.globals["header"] = _header
+templates.env.globals["can_admin"] = _can_admin
 templates.env.globals["highlight"] = highlight

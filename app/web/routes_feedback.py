@@ -19,6 +19,7 @@ from app.services.keywords import (
     parse_keyword_file,
 )
 from app.services.tenders import VERDICT_LABELS
+from app.services.users import CurrentUser
 from app.web.auth import require_auth
 from app.web.routes_keywords import UPLOAD_DIR
 from app.web.templating import templates
@@ -91,7 +92,7 @@ def feedback_apply(
     description: str = Form(""),
     back: str = Form("/feedback"),
     db: Session = Depends(get_db),
-    user: str = Depends(require_auth),
+    user: CurrentUser = Depends(require_auth),
 ):
     if len(token) != 64 or not all(c in "0123456789abcdef" for c in token):
         return RedirectResponse("/feedback", status_code=303)
@@ -99,7 +100,7 @@ def feedback_apply(
     active = get_active_keyword_set(db)
     if not path.exists() or not active:
         return RedirectResponse("/feedback", status_code=303)
-    who = f"{user}: {description}" if user else description
+    who = f"{user.login}: {description}"
     try:
         activate_keyword_file(db, path.read_bytes(), active[0].filename, uploaded_by=who[:100])
     except KeywordFileRejected:

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.keywords.loader import KeywordSet
 from app.models import Notification, Run, RunSourceStat, utcnow
 from app.services.ingest import ingest
+from app.services.notify import new_tenders_notification, send_to_managers
 from app.services.runner import get_source_setting
 from app.sources.base import Position, TenderDetails
 from app.sources.registry import get_source
@@ -157,5 +158,7 @@ def import_payload(
             body=f"Получено записей: {len(payload.tenders)}, без товарных ключей отброшено: {discarded}.",
         )
     )
+    note = new_tenders_notification(session, now, run.id)
     session.flush()
+    send_to_managers(session, note)
     return stat

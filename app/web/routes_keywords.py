@@ -19,6 +19,7 @@ from app.services.keywords import (
     parse_keyword_file,
     reclassify_all,
 )
+from app.services.users import CurrentUser
 from app.web.auth import require_auth
 from app.web.templating import templates
 
@@ -154,7 +155,7 @@ def activate_upload(
     filename: str = Form(...),
     allow_errors: bool = Form(False),
     db: Session = Depends(get_db),
-    user: str = Depends(require_auth),
+    user: CurrentUser = Depends(require_auth),
 ):
     if not all(c in "0123456789abcdef" for c in token) or len(token) != 64:
         return RedirectResponse("/keywords", status_code=303)
@@ -162,7 +163,9 @@ def activate_upload(
     if not path.exists():
         return RedirectResponse("/keywords", status_code=303)
     try:
-        activate_keyword_file(db, path.read_bytes(), filename, uploaded_by=user, allow_errors=allow_errors)
+        activate_keyword_file(
+            db, path.read_bytes(), filename, uploaded_by=user.login, allow_errors=allow_errors
+        )
     except KeywordFileRejected as exc:
         return templates.TemplateResponse(
             request,

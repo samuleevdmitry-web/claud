@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход · Velmorium</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar"><span class="brand">Velmorium · тендеры</span></header>
+  <main>
+    <section class="card login-card">
+      <h1>Вход</h1>
+      {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+      <form method="post" action="/login" class="try-form">
+        <input type="hidden" name="next" value="{{ next }}">
+        <label>Логин <input name="login" value="{{ login or '' }}" autocomplete="username" required autofocus></label>
+        <label>Пароль <input type="password" name="password" autocomplete="current-password" required></label>
+        <div><button type="submit">Войти</button></div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

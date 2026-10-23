@@ -14,6 +14,8 @@ import httpx
 
 from app.config import get_settings
 
+NEW_TENDERS = "new_tenders"  # вид уведомления, которое видят менеджеры
+
 log = logging.getLogger(__name__)
 
 
@@ -88,3 +90,79 @@ def send_external(messages: list[tuple[str, str]], notifiers: list[Notifier] | N
             n.send(title, body)
         except Exception:  # noqa: BLE001
             log.exception("Не удалось отправить уведомление через %s", n.name)
+
+
+# --------------------------------------------------------------------------- новые тендеры для менеджеров
+
+
+def _money(value) -> str:
+    return f"{float(value):,.0f}".replace(",", " ") + " ₽" if value is not None else "—"
+
+
+def new_tenders_notification(session, since, run_id: int | None = None):
+    """Уведомление «Новые тендеры» со списком найденных с момента since (релевантные и на проверку)."""
+    from sqlalchemy import case, select
+
+    from app.models import Notification, Tender
+    from app.sources.util import MSK, aware
+
+    tenders = session.scalars(
+        select(Tender)
+        .where(
+            Tender.first_seen_at >= since,
+            Tender.deleted_at.is_(None),
+            Tender.relevance.in_(["relevant", "review"]),
+        )
+        .order_by(case((Tender.relevance == "relevant", 0), else_=1), Tender.application_deadline)
+    ).all()
+    if not tenders:
+        return None
+    relevant = sum(t.relevance == "relevant" for t in tenders)
+    title = f"Новые тендеры: {relevant} релевантных, {len(tenders) - relevant} на проверку"
+    base = get_settings().app_base_url.rstrip("/")
+    lines = []
+    for t in tenders[:30]:
+        deadline = aware(t.application_deadline)
+        when = deadline.astimezone(MSK).strftime("%d.%m %H:%M") if deadline else "—"
+        mark = "★" if t.relevance == "relevant" else "?"
+        line = f"{mark} {t.title}\n   {t.customer_name or '—'}; срок {when}; НМЦК {_money(t.nmck)}"
+        if base:
+            line += f"\n   {base}/tenders/{t.id}"
+        lines.append(line)
+    if len(tenders) > 30:
+        lines.append(f"…и ещё {len(tenders) - 30}")
+    note = Notification(kind=NEW_TENDERS, level="info", title=title, body="\n".join(lines), run_id=run_id)
+    session.add(note)
+    return note
+
+
+def manager_notifiers(session) -> list[Notifier]:
+    """Письма менеджерам (у кого указан e-mail и включены письма) и группа менеджеров в Telegram."""
+    from sqlalchemy import select
+
+    from app.models import User
+
+    s = get_settings()
+    out: list[Notifier] = []
+    if s.telegram_bot_token and s.telegram_managers_chat_id:
+        out.append(TelegramNotifier(s.telegram_bot_token, s.telegram_managers_chat_id))
+    if s.smtp_host:
+        emails = [
+            u.email
+            for u in session.scalars(
+                select(User).where(User.is_active.is_(True), User.notify_email.is_(True))
+            )
+            if u.email
+        ]
+        if emails:
+            out.append(
+                EmailNotifier(
+                    s.smtp_host, s.smtp_port, s.smtp_user, s.smtp_password, s.smtp_from or s.smtp_user, emails
+                )
+            )
+    return out
+
+
+def send_to_managers(session, note) -> None:
+    if note is not None:
+        send_external([(note.title, note.body)], manager_notifiers(session))

@@ -3,14 +3,14 @@
 {% block content %}
 <p><a href="{{ back }}">← к списку</a></p>
 {% if request.query_params.get('applied') %}<div class="flash">Правка ключей применена, все тендеры пересчитаны.</div>{% endif %}
-{% if t.deleted_at %}
+{% if t.deleted_at and can_admin(request) %}
   <div class="flash flash-error">Тендер удалён {{ t.deleted_at|dt }} — его нет в списках, и при следующих прогонах он не вернётся.
     <form method="post" action="/tenders/{{ t.id }}/restore" class="inline"><button type="submit" class="secondary small-btn">Восстановить</button></form></div>
 {% endif %}
 <h1 class="tender-title">{{ highlight(t.title, matches, 'title') }}</h1>
 <p>
   <b>Подходит?</b> {% include "_verdict.html" %}
-  {% if not t.deleted_at %}
+  {% if not t.deleted_at and can_admin(request) %}
   <form method="post" action="/tenders/{{ t.id }}/delete" class="inline" onsubmit="return confirm('Удалить тендер? Его можно будет восстановить из вкладки «Удалённые».')">
     <button type="submit" class="danger small-btn">Удалить</button></form>
   {% endif %}
@@ -91,7 +91,7 @@
 </section>
 {% endif %}
 
-{% if mismatch %}
+{% if mismatch and can_admin(request) %}
 <section class="card card-accent" id="fix">
   <h2>Автоматика ошиблась — что поправить в ключах</h2>
   <p class="muted">Вы отметили «{{ verdict_labels[t.verdict] }}», а автоматика — «{{ relevance_labels[t.relevance] }}».

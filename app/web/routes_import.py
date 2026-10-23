@@ -107,13 +107,14 @@ async def import_form(
 
 
 def _api_auth(
+    request: Request,
     x_import_token: str | None = Header(default=None),
     credentials: HTTPBasicCredentials | None = Depends(_security),
 ) -> None:
     token = get_settings().import_token
     if token and x_import_token and secrets.compare_digest(x_import_token, token):
         return
-    require_auth(credentials)
+    require_auth(request, credentials)  # менеджеру адрес закрыт списком разрешённых
 
 
 @router.post("/api/import", dependencies=[Depends(_api_auth)])

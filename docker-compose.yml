@@ -20,7 +20,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://tenders:${POSTGRES_PASSWORD:-tenders}@db:5432/tenders
     ports:
-      - "127.0.0.1:8000:8000"
+      # 127.0.0.1 — только этот компьютер; APP_BIND=0.0.0.0 в .env — доступ из локальной сети.
+      - "${APP_BIND:-127.0.0.1}:8000:8000"
     volumes:
       - ./data:/app/data
     depends_on:
