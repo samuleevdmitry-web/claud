@@ -38,11 +38,23 @@ function db(): PDO
     static $pdo = null;
     if ($pdo === null) {
         $c = config();
-        $pdo = new PDO($c['db_dsn'], $c['db_user'] ?? null, $c['db_password'] ?? null, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]);
-        ensure_schema($pdo);
+        try {
+            $pdo = new PDO($c['db_dsn'], $c['db_user'] ?? null, $c['db_password'] ?? null, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ]);
+            ensure_schema($pdo);
+        } catch (PDOException $e) {
+            // Понятная причина вместо пустой «ошибки 500» (пароль в сообщение не попадает).
+            http_response_code(500);
+            $text = 'Нет подключения к базе — проверьте имя базы, пользователя и пароль в config.php: ' . $e->getMessage();
+            if (basename($_SERVER['SCRIPT_NAME'] ?? '') === 'api.php') {
+                header('Content-Type: application/json; charset=utf-8');
+                exit(json_encode(['error' => $text], JSON_UNESCAPED_UNICODE));
+            }
+            header('Content-Type: text/plain; charset=utf-8');
+            exit($text);
+        }
     }
     return $pdo;
 }

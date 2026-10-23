@@ -1,6 +1,5 @@
 # Сайт менеджеров Velmorium
 DirectoryIndex index.php
-Options -Indexes
 <FilesMatch "^(config|config\.example|lib)\.php$">
     Require all denied
 </FilesMatch>
