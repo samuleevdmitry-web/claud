@@ -60,7 +60,7 @@
         <button type="submit" class="secondary small-btn">Сохранить</button></form></td>
       <td class="nowrap">{{ u.last_login_at|dt }}</td>
       <td><form method="post" action="/users/{{ u.id }}/password" class="fix-form">
-        <input name="password" value="{{ suggested_password }}" minlength="8" required>
+        <input name="password" minlength="8" placeholder="пусто — придумаем">
         <button type="submit" class="secondary small-btn">Сменить</button></form></td>
       <td><form method="post" action="/users/{{ u.id }}/delete" onsubmit="return confirm('Удалить пользователя {{ u.login }}?')">
         <button type="submit" class="danger small-btn">Удалить</button></form></td>

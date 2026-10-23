@@ -192,6 +192,19 @@ def test_admin_manages_users(client):  # noqa: F811
     assert "Менеджеров пока нет" in client.get("/users", auth=AUTH).text
 
 
+def test_manager_added_while_site_is_down(client, monkeypatch):  # noqa: F811
+    from app.config import get_settings
+
+    monkeypatch.setenv("PORTAL_URL", "http://127.0.0.1:9")
+    monkeypatch.setenv("PORTAL_TOKEN", "test-sync-token-0123456789")
+    get_settings.cache_clear()
+    r = client.post("/users", data={"login": "petrov", "password": "password1"}, auth=AUTH)
+    assert "Менеджер «petrov» добавлен" in r.text
+    assert "На сайт менеджеров пока не отправлено (сайт недоступен" in r.text
+    client.cookies.clear()
+    assert _login(client, "petrov", "password1").status_code == 303  # в приложении менеджер сохранён
+
+
 def test_login_rate_limit_and_no_api_docs(client, monkeypatch):  # noqa: F811
     import app.web.routes_auth as auth_routes
 

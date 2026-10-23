@@ -15,6 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import get_settings
 from app.db import Base
 from app.models import Tender, User
 from app.services import portal
@@ -23,6 +24,7 @@ from app.services.keywords import activate_keyword_file, get_active_keyword_set
 from app.services.tenders import delete_tenders, set_verdict
 from app.services.users import create_manager, set_password
 from app.sources.base import Position, TenderDetails
+from tests.test_web import AUTH, client  # noqa: F401 — фикстура приложения
 
 PORTAL_DIR = Path(__file__).resolve().parent.parent / "portal"
 TOKEN = "test-sync-token-0123456789"
@@ -245,6 +247,30 @@ def test_site_notifications_and_security(site, factory):
         data={"login": "ivanov", "password": "password1", "csrf": csrf_of(c.get("/login.php").text)},
     )
     assert r.status_code == 429
+
+
+def test_manager_changes_reach_site_at_once(site, client, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("PORTAL_URL", site)
+    monkeypatch.setenv("PORTAL_TOKEN", TOKEN)
+    get_settings.cache_clear()
+    r = client.post("/users", data={"login": "petrov", "password": "password1"}, auth=AUTH)
+    assert "Сайт менеджеров обновлён" in r.text
+    manager_session(site, "petrov", "password1")  # без «Обменяться сейчас»
+
+    uid = re.search(r'action="/users/(\d+)/password"', r.text).group(1)
+    assert 'placeholder="пусто — придумаем"' in r.text
+    r = client.post(f"/users/{uid}/password", data={"password": ""}, auth=AUTH)
+    new = re.search(r"Новый пароль «petrov»: ([\w-]+)\.", r.text).group(1)
+    assert "Сайт менеджеров обновлён" in r.text
+    manager_session(site, "petrov", new)
+
+    r = client.post(f"/users/{uid}/update", data={"name": "Петров"}, auth=AUTH)  # доступ снят
+    assert "Сохранено. Сайт менеджеров обновлён." in r.text
+    c = httpx.Client(base_url=site, follow_redirects=True)
+    r = c.post(
+        "/login.php", data={"login": "petrov", "password": new, "csrf": csrf_of(c.get("/login.php").text)}
+    )
+    assert r.status_code == 401
 
 
 def test_sync_error_is_recorded(factory):

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
@@ -37,6 +39,21 @@ def _page(request: Request, db: Session, message: str = "", error: str = "", sta
     )
 
 
+def _to_portal(db: Session) -> str:
+    """Сразу отправить изменения менеджеров на сайт, чтобы не ждать обмена по расписанию."""
+    from app.db import get_session_factory
+
+    if not portal.configured():
+        return ""
+    db.commit()
+    result = portal.sync(get_session_factory())
+    db.expire_all()
+    if result.errors:
+        errors = "; ".join(result.errors)
+        return f" На сайт менеджеров пока не отправлено ({errors}) — уйдёт при ближайшем обмене."
+    return " Сайт менеджеров обновлён."
+
+
 def _user(db: Session, user_id: int) -> User:
     user = db.get(User, user_id)
     if user is None:
@@ -65,7 +82,8 @@ def add_user(
     return _page(
         request,
         db,
-        message=f"Менеджер «{user.login}» добавлен. Пароль: {password} — передайте его менеджеру.",
+        message=f"Менеджер «{user.login}» добавлен. Пароль: {password} — передайте его менеджеру."
+        + _to_portal(db),
     )
 
 
@@ -116,13 +134,18 @@ async def portal_ping(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/{user_id}/password", response_class=HTMLResponse)
-def reset_password(request: Request, user_id: int, password: str = Form(...), db: Session = Depends(get_db)):
+def reset_password(request: Request, user_id: int, password: str = Form(""), db: Session = Depends(get_db)):
     user = _user(db, user_id)
+    password = password.strip() or generate_password()
     try:
         set_password(user, password)
     except UserError as exc:
         return _page(request, db, error=str(exc), status_code=400)
-    return _page(request, db, message=f"Новый пароль «{user.login}»: {password}. Старый вход у него закрыт.")
+    return _page(
+        request,
+        db,
+        message=f"Новый пароль «{user.login}»: {password}. Старый вход у него закрыт." + _to_portal(db),
+    )
 
 
 @router.post("/{user_id}/update")
@@ -137,10 +160,13 @@ def update_user(
     user = _user(db, user_id)
     user.name, user.email = name.strip(), email.strip()
     user.notify_email, user.is_active = notify_email, is_active
-    return RedirectResponse("/users?message=Сохранено", status_code=303)
+    return RedirectResponse(
+        f"/users?{urlencode({'message': 'Сохранено.' + _to_portal(db)})}", status_code=303
+    )
 
 
 @router.post("/{user_id}/delete")
 def delete_user(user_id: int, db: Session = Depends(get_db)):
     db.delete(_user(db, user_id))
-    return RedirectResponse("/users?message=Пользователь удалён", status_code=303)
+    message = "Пользователь удалён." + _to_portal(db)
+    return RedirectResponse(f"/users?{urlencode({'message': message})}", status_code=303)
