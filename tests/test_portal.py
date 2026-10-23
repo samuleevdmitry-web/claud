@@ -253,3 +253,44 @@ def test_sync_error_is_recorded(factory):
     assert res.errors and "недоступен" in res.errors[0]
     with factory() as s:
         assert "недоступен" in portal.status(s)["error"]
+
+
+def test_bad_database_settings_give_clear_message(tmp_path):
+    config = tmp_path / "config.php"
+    config.write_text(
+        "<?php return ['db_dsn' => 'mysql:host=127.0.0.1;port=1;dbname=x', 'db_user' => 'Dm', "
+        f"'db_password' => 'secret', 'sync_token' => '{TOKEN}'];",
+        encoding="utf-8",
+    )
+    port = _free_port()
+    proc = subprocess.Popen(
+        [
+            "php",
+            "-d",
+            "display_errors=1",
+            "-d",
+            "error_reporting=E_ALL",
+            "-S",
+            f"127.0.0.1:{port}",
+            "-t",
+            str(PORTAL_DIR),
+        ],
+        env={"PORTAL_CONFIG": str(config), "PATH": "/usr/bin:/bin"},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        url = f"http://127.0.0.1:{port}"
+        for _ in range(50):
+            try:
+                r = httpx.get(url + "/login.php", timeout=2)
+                break
+            except httpx.HTTPError:
+                time.sleep(0.1)
+        assert r.status_code == 500 and r.text.startswith("Нет подключения к базе")
+        assert "Warning" not in r.text and "secret" not in r.text
+        r = httpx.post(url + "/api.php", json={"token": TOKEN, "action": "ping"})
+        assert r.status_code == 500 and "Нет подключения к базе" in r.json()["error"]
+    finally:
+        proc.terminate()
+        proc.wait(5)

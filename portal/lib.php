@@ -46,14 +46,13 @@ function db(): PDO
             ensure_schema($pdo);
         } catch (PDOException $e) {
             // Понятная причина вместо пустой «ошибки 500» (пароль в сообщение не попадает).
-            http_response_code(500);
             $text = 'Нет подключения к базе — проверьте имя базы, пользователя и пароль в config.php: ' . $e->getMessage();
-            if (basename($_SERVER['SCRIPT_NAME'] ?? '') === 'api.php') {
-                header('Content-Type: application/json; charset=utf-8');
-                exit(json_encode(['error' => $text], JSON_UNESCAPED_UNICODE));
+            $api = basename($_SERVER['SCRIPT_NAME'] ?? '') === 'api.php';
+            if (!headers_sent()) {
+                http_response_code(500);
+                header('Content-Type: ' . ($api ? 'application/json' : 'text/plain') . '; charset=utf-8');
             }
-            header('Content-Type: text/plain; charset=utf-8');
-            exit($text);
+            exit($api ? json_encode(['error' => $text], JSON_UNESCAPED_UNICODE) : $text);
         }
     }
     return $pdo;
@@ -341,13 +340,15 @@ function new_count(string $login): int
 function page_header(string $title, ?array $manager): void
 {
     $self = basename($_SERVER['SCRIPT_NAME'] ?? '');
+    // Всё, что читает базу, — до вывода страницы: ошибка подключения покажется без мусора.
+    $synced = meta_get('last_push_at');
+    $new = $manager ? new_count($manager['login']) : 0;
+    $unread = $manager ? unread_count($manager['login']) : 0;
     echo '<!doctype html><html lang="ru"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         '<title>', h($title), ' · Velmorium</title><link rel="stylesheet" href="style.css"></head><body>',
         '<header class="topbar"><a class="brand" href="index.php">Velmorium · тендеры</a>';
     if ($manager) {
-        $new = new_count($manager['login']);
-        $unread = unread_count($manager['login']);
         echo '<nav><a href="index.php" class="', in_array($self, ['index.php', 'tender.php'], true) ? 'active' : '', '">Тендеры',
             $new ? ' <span class="badge badge-relevant">' . $new . '</span>' : '', '</a>',
             '<a href="notifications.php" class="', $self === 'notifications.php' ? 'active' : '', '">Уведомления',
@@ -357,7 +358,6 @@ function page_header(string $title, ?array $manager): void
             '<button type="submit">Выйти</button></form></div>';
     }
     echo '</header><main>';
-    $synced = meta_get('last_push_at');
     if ($manager && $synced) {
         echo '<p class="small muted sync-note">Данные обновлены ', h(fmt_dt($synced)), '</p>';
     }
