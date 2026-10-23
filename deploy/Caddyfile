@@ -1,0 +1,13 @@
+# HTTPS-вход в приложение на сервере. Сертификат Let's Encrypt Caddy получает и продлевает сам.
+# Домен берётся из переменной DOMAIN в .env (запись A домена должна указывать на IP сервера).
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy app:8000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+}

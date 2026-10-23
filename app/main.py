@@ -59,7 +59,14 @@ async def lifespan(_app: FastAPI):
         shutdown_scheduler()
 
 
-app = FastAPI(title="Velmorium — мониторинг тендеров", lifespan=lifespan)
+# Служебные страницы API (/docs, /openapi.json) отключены: приложение может стоять в интернете.
+app = FastAPI(
+    title="Velmorium — мониторинг тендеров",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
 app.include_router(auth_router)
 app.include_router(keywords_router)

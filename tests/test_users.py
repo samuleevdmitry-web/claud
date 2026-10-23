@@ -190,3 +190,20 @@ def test_admin_manages_users(client):  # noqa: F811
     assert _login(client, "petrov", "newpassword").status_code == 401
     client.post(f"/users/{uid}/delete", auth=AUTH)
     assert "Менеджеров пока нет" in client.get("/users", auth=AUTH).text
+
+
+def test_login_rate_limit_and_no_api_docs(client, monkeypatch):  # noqa: F811
+    import app.web.routes_auth as auth_routes
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(auth_routes.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(auth_routes, "_failures", auth_routes.defaultdict(auth_routes.deque))
+    for _ in range(auth_routes.MAX_FAILURES):
+        assert _login(client, "velmorium", "wrong").status_code == 401
+    r = _login(client, "velmorium", "secret")  # даже верный пароль — после 10 ошибок ждём
+    assert r.status_code == 429 and "Подождите 15 минут" in r.text
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code in (401, 404)
+    assert client.get("/docs", auth=AUTH).status_code == 404
