@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "analytics"
+version = "0.1.0"
+description = "Сбор данных из Метрики, Вебмастера, Яндекс Бизнеса и Битрикс24 для дашборда и ИИ-помощника"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "psycopg[binary]>=3.1",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["analytics*"]
+
+[tool.setuptools.package-data]
+analytics = ["sql/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
