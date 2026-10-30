@@ -82,10 +82,10 @@ class MetrikaClient:
         max_retries: int = 4,
         backoff: float = 2.0,
     ):
-        if not token:
-            raise MetrikaError("Не задан YANDEX_OAUTH_TOKEN")
         self.session = session or requests.Session()
-        self.session.headers["Authorization"] = f"OAuth {token}"
+        # Без токена заголовок не ставим: его может подставлять прокси (секрет облачного окружения).
+        if token:
+            self.session.headers["Authorization"] = f"OAuth {token}"
         self.max_retries = max_retries
         self.backoff = backoff
 
@@ -98,6 +98,11 @@ class MetrikaClient:
                 time.sleep(self.backoff * 2**attempt)
                 attempt += 1
                 continue
+            if resp.status_code in (401, 403):
+                raise MetrikaError(
+                    f"{path}: HTTP {resp.status_code}: {_error_message(resp)}. Проверьте токен "
+                    "(YANDEX_OAUTH_TOKEN или секрет окружения) и доступ аккаунта к счётчику"
+                )
             if resp.status_code != 200:
                 raise MetrikaError(f"{path}: HTTP {resp.status_code}: {_error_message(resp)}")
             return resp.json()

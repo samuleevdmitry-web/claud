@@ -80,9 +80,12 @@ def test_error_message_from_api():
         client.goals(1)
 
 
-def test_missing_token():
-    with pytest.raises(MetrikaError, match="YANDEX_OAUTH_TOKEN"):
-        MetrikaClient("")
+def test_without_token_leaves_authorization_to_proxy():
+    session = FakeSession([FakeResponse(401, {"message": "Invalid oauth_token"})])
+    client = MetrikaClient("", session=session)
+    assert "Authorization" not in session.headers
+    with pytest.raises(MetrikaError, match="401: Invalid oauth_token. Проверьте токен"):
+        client.counters()
 
 
 def test_dimensions_use_attribution():
