@@ -6,12 +6,15 @@ from analytics.sources.metrika import (
     GOALS_PER_REQUEST,
     MetrikaClient,
     MetrikaError,
+    Report,
     TrafficRow,
     dimensions_for,
     fetch_goals,
     grain_range,
+    month_split_point,
     parse_goals,
     parse_traffic,
+    report_by_parts,
 )
 from tests.fakes import FakeResponse, FakeSession, dim
 
@@ -116,3 +119,57 @@ def test_fetch_goals_splits_metrics_into_batches():
     fetch_goals(client, 1, "day", "total", goal_ids, date(2026, 8, 1), date(2026, 8, 1), "lastsign")
     metric_counts = [len(params["metrics"].split(",")) for _, params in session.calls]
     assert metric_counts == [2 * GOALS_PER_REQUEST, 4]
+
+
+def test_too_complex_error_is_recognised():
+    message = "Запрос слишком сложный. Пожалуйста, уменьшите интервал дат или семплирование."
+    client, _ = make_client([FakeResponse(400, {"errors": [{"error_type": "query_error"}], "message": message})])
+    with pytest.raises(MetrikaError) as exc:
+        client.counters()
+    assert exc.value.too_complex
+
+
+@pytest.mark.parametrize(
+    ("date1", "date2", "expected"),
+    [
+        (date(2025, 1, 1), date(2026, 10, 30), date(2025, 12, 1)),
+        (date(2025, 1, 15), date(2025, 2, 3), date(2025, 2, 1)),
+        (date(2025, 11, 10), date(2026, 2, 1), date(2026, 1, 1)),
+        (date(2025, 3, 1), date(2025, 3, 31), None),
+    ],
+)
+def test_month_split_point(date1, date2, expected):
+    assert month_split_point(date1, date2) == expected
+
+
+class SplittingClient:
+    """Отказывает, как Метрика, если период длиннее двух календарных месяцев."""
+
+    def __init__(self, error_too_complex=True):
+        self.error_too_complex = error_too_complex
+        self.calls = []
+
+    def report(self, counter_id, metrics, dimensions, date1, date2):
+        self.calls.append((date1, date2))
+        if (date2.year - date1.year) * 12 + date2.month - date1.month >= 2:
+            raise MetrikaError("HTTP 400", too_complex=self.error_too_complex)
+        return Report([{"period": (date1, date2)}], sampled=date1.month == 2)
+
+
+def test_report_by_parts_splits_on_month_boundaries():
+    client = SplittingClient()
+    report = report_by_parts(client, 1, ["ym:s:visits"], ["ym:s:date"], date(2026, 1, 10), date(2026, 6, 5))
+    assert [row["period"] for row in report.rows] == [
+        (date(2026, 1, 10), date(2026, 1, 31)),
+        (date(2026, 2, 1), date(2026, 3, 31)),
+        (date(2026, 4, 1), date(2026, 4, 30)),
+        (date(2026, 5, 1), date(2026, 6, 5)),
+    ]
+    assert report.sampled is True
+
+
+def test_report_by_parts_does_not_split_other_errors():
+    client = SplittingClient(error_too_complex=False)
+    with pytest.raises(MetrikaError):
+        report_by_parts(client, 1, ["ym:s:visits"], ["ym:s:date"], date(2026, 1, 1), date(2026, 6, 30))
+    assert len(client.calls) == 1

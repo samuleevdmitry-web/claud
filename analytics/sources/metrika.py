@@ -33,13 +33,18 @@ TRAFFIC_METRICS = [
     "ym:s:avgVisitDurationSeconds",
 ]
 
+# У ошибки «уменьшите интервал дат» нет своего кода (error_type общий — query_error), только текст.
+TOO_COMPLEX_MARKERS = ("слишком сложный", "too complex", "too complicated")
+
 TOTAL_LABEL = "Всего"
 NONE_KEY = "(none)"
 NONE_LABEL = "Не определено"
 
 
 class MetrikaError(RuntimeError):
-    pass
+    def __init__(self, message: str, too_complex: bool = False):
+        super().__init__(message)
+        self.too_complex = too_complex  # Метрика просит уменьшить период запроса
 
 
 @dataclass(frozen=True)
@@ -104,7 +109,9 @@ class MetrikaClient:
                     "(YANDEX_OAUTH_TOKEN или секрет окружения) и доступ аккаунта к счётчику"
                 )
             if resp.status_code != 200:
-                raise MetrikaError(f"{path}: HTTP {resp.status_code}: {_error_message(resp)}")
+                message = _error_message(resp)
+                too_complex = any(marker in message.lower() for marker in TOO_COMPLEX_MARKERS)
+                raise MetrikaError(f"{path}: HTTP {resp.status_code}: {message}", too_complex=too_complex)
             return resp.json()
 
     def counters(self) -> list[dict]:
@@ -240,7 +247,9 @@ def fetch_traffic(
     date2: date,
     attribution: str,
 ) -> tuple[list[TrafficRow], bool]:
-    report = client.report(counter_id, TRAFFIC_METRICS, dimensions_for(grain, slice_, attribution), date1, date2)
+    report = report_by_parts(
+        client, counter_id, TRAFFIC_METRICS, dimensions_for(grain, slice_, attribution), date1, date2
+    )
     return parse_traffic(report.rows, grain, slice_), report.sampled
 
 
@@ -257,8 +266,40 @@ def fetch_goals(
     rows = []
     for start in range(0, len(goal_ids), GOALS_PER_REQUEST):
         batch = goal_ids[start : start + GOALS_PER_REQUEST]
-        report = client.report(
-            counter_id, goal_metrics(batch), dimensions_for(grain, slice_, attribution), date1, date2
+        report = report_by_parts(
+            client, counter_id, goal_metrics(batch), dimensions_for(grain, slice_, attribution), date1, date2
         )
         rows.extend(parse_goals(report.rows, grain, slice_, batch))
     return rows
+
+
+def report_by_parts(
+    client: MetrikaClient,
+    counter_id: int,
+    metrics: list[str],
+    dimensions: list[str],
+    date1: date,
+    date2: date,
+) -> Report:
+    """Отчёт за период; если Метрика считает запрос слишком сложным, период делится пополам.
+
+    Деление идёт по границе месяца, чтобы месячная строка не собиралась из двух частей.
+    """
+    try:
+        return client.report(counter_id, metrics, dimensions, date1, date2)
+    except MetrikaError as exc:
+        split = month_split_point(date1, date2)
+        if not exc.too_complex or split is None:
+            raise
+    left = report_by_parts(client, counter_id, metrics, dimensions, date1, split - timedelta(days=1))
+    right = report_by_parts(client, counter_id, metrics, dimensions, split, date2)
+    return Report(left.rows + right.rows, left.sampled or right.sampled)
+
+
+def month_split_point(date1: date, date2: date) -> date | None:
+    """Первое число месяца в середине периода; None, если период внутри одного месяца."""
+    months = (date2.year - date1.year) * 12 + date2.month - date1.month
+    if months == 0:
+        return None
+    years, month = divmod(date1.month - 1 + (months + 1) // 2, 12)
+    return date(date1.year + years, month + 1, 1)
