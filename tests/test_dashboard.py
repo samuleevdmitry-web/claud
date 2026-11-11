@@ -1,0 +1,101 @@
+"""Страница дашборда на настоящем PostgreSQL с синтетическими данными (нужен TEST_DATABASE_URL)."""
+
+import os
+from datetime import date
+
+import pytest
+
+from analytics import db
+from analytics.dashboard.app import trend_months
+from analytics.dashboard.format import delta, fmt_change, fmt_duration, fmt_int, fmt_pct
+from analytics.sync import sync_metrika, sync_webmaster
+from tests.fakes import FakeMetrikaClient, FakeWebmasterClient, dim
+
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+needs_db = pytest.mark.skipif(not TEST_DATABASE_URL, reason="TEST_DATABASE_URL не задан")
+
+
+def test_formatting():
+    assert fmt_int(23061) == "23 061"
+    assert fmt_pct(25.384) == "25,4%"
+    assert fmt_duration(153.9) == "2 мин 34 с"
+    assert fmt_change(120, 100) == "+20,0%" and fmt_change(80, 100) == "−20,0%"
+    assert delta(17.2, 18.1, "pp", good="down").tone == "good"
+    assert delta(7.8, 7.67, "abs", good="down").tone == "bad"
+    assert delta(100, 100, "pct").text == "без изменений"
+
+
+def test_trend_months_keeps_gaps_and_drops_current():
+    rows = [
+        {"month": date(2026, 7, 1), "days_with_data": 31, "days_in_month": 31, "visits": 10},
+        {"month": date(2026, 8, 1), "days_with_data": 12, "days_in_month": 31, "visits": 3},
+        {"month": date(2026, 9, 1), "days_with_data": 30, "days_in_month": 30, "visits": 12},
+        {"month": date(2026, 11, 1), "days_with_data": 10, "days_in_month": 30, "visits": 4},
+    ]
+    shown, skipped = trend_months(rows, current=date(2026, 11, 1), coverage=True)
+    assert [(r["month"].month, r.get("visits")) for r in shown] == [(7, 10), (8, None), (9, 12)]
+    assert skipped == ["авг 2026 (12 из 31 дн.)"]
+
+
+@pytest.fixture
+def client(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from analytics.dashboard.app import app
+
+    for name, value in {
+        "DATABASE_URL": TEST_DATABASE_URL or "",
+        "METRIKA_COUNTERS": "42",
+        "METRIKA_MAPS_COUNTERS": "",
+        "WEBMASTER_HOSTS": "https:example.ru:443",
+        "METRIKA_LEAD_GOALS": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    with db.connect(TEST_DATABASE_URL) as conn:
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        db.apply_schema(conn)
+    return TestClient(app)
+
+
+@needs_db
+def test_empty_database_explains_itself(client):
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "Данных пока нет" in page.text
+
+
+@needs_db
+def test_first_load_in_progress(client):
+    with db.connect(TEST_DATABASE_URL) as conn:
+        db.upsert_counter(conn, {"id": 42, "name": "example.ru", "site2": {"site": "example.ru"}}, "site")
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "Данных пока нет" in page.text
+
+
+@needs_db
+def test_page_with_data(client):
+    aug, sep = date(2026, 8, 1), date(2026, 9, 1)
+    data = {
+        ("month", "total"): [(aug, [], [1000, 800, 2500, 20.0, 2.5, 150.0], {1: (10, 9)}),
+                             (sep, [], [1200, 900, 3000, 18.0, 2.6, 160.0], {1: (15, 14)})],
+        ("month", "source"): [(sep, [dim("Переходы из поисковых систем", "organic")],
+                               [700, 500, 2000, 9.0, 3.0, 200.0], {1: (12, 11)})],
+    }
+    goals = [{"id": 1, "name": "Отправил контактные данные", "type": "contact_data_sent"}]
+    with db.connect(TEST_DATABASE_URL) as conn:
+        sync_metrika(conn, FakeMetrikaClient(goals, data), 42, frozenset({1}), "lastsign",
+                     since=aug, until=date(2026, 9, 30), today=date(2026, 10, 2), log=lambda _: None)
+        search = {date(2026, 9, d): (100, 5, 8.0, 3.0) for d in range(1, 31)}
+        sync_webmaster(conn, FakeWebmasterClient(search, [], []), "https:example.ru:443",
+                       since=aug, until=date(2026, 9, 30), today=date(2026, 10, 2), log=lambda _: None)
+
+    page = client.get("/", params={"month": "2026-09"})
+    assert page.status_code == 200
+    text = page.text
+    assert "Сентябрь 2026" in text and "сравнение с август 2026" in text
+    assert "1 200" in text                      # визиты за сентябрь
+    assert "▲ 20,0%" in text                    # +20% к августу
+    assert "Переходы из поисковых систем" in text   # таблица каналов
+    assert "3 000" in text                      # показы в поиске за сентябрь (100 × 30)
+    assert 'id="chart-data"' in text

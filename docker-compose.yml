@@ -1,3 +1,4 @@
+# Запуск на ноутбуке: docker compose up -d --build, затем http://localhost:8080
 services:
   db:
     image: postgres:16
@@ -6,10 +7,41 @@ services:
       POSTGRES_USER: analytics
       POSTGRES_PASSWORD: analytics
       POSTGRES_DB: analytics
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Порт 5433, чтобы не мешать другому PostgreSQL на ноутбуке; доступен только с самого ноутбука.
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U analytics"]
+      interval: 5s
+      retries: 20
+
+  # Ежедневный сбор: при пустой базе сначала загружает историю с января 2025 года.
+  collector:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://analytics:analytics@db:5432/analytics
+    command: python -m analytics schedule
+    depends_on:
+      db:
+        condition: service_healthy
+
+  dashboard:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://analytics:analytics@db:5432/analytics
+    command: uvicorn analytics.dashboard.app:app --host 0.0.0.0 --port 8080
+    # Только для этого ноутбука: у дашборда нет пароля.
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   pgdata:

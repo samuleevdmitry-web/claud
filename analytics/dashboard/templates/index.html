@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Аналитика{% if site %} · {{ site.name }}{% endif %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='dashboard.css') }}">
+</head>
+<body>
+<div class="page">
+
+{% macro tiles(items) %}
+  <div class="tiles">
+    {% for t in items %}
+    <div class="tile">
+      <div class="tile-label">{{ t.label }}</div>
+      <div class="tile-value">{{ t.value }}</div>
+      {% if t.delta %}<div class="tile-delta {{ t.delta.tone }}">{{ t.delta.text }}</div>{% endif %}
+      {% if t.note %}<div class="tile-note">{{ t.note }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+{% endmacro %}
+
+{% macro chart_block(id, title) %}
+  {% if charts and charts.get(id) %}
+  <figure class="card chart-card">
+    <figcaption class="chart-title">{{ title }}</figcaption>
+    <div class="chart" id="chart-{{ id }}" data-chart="{{ id }}" role="img" aria-label="{{ title }}"></div>
+    <details class="chart-table">
+      <summary>Таблица</summary>
+      <table>
+        <thead><tr><th></th>{% for c in charts[id].table.columns %}<th class="num">{{ c }}</th>{% endfor %}</tr></thead>
+        <tbody>
+        {% for row in charts[id].table.rows %}
+          <tr><td>{{ row[0] }}</td>{% for v in row[1:] %}<td class="num">{{ v }}</td>{% endfor %}</tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </details>
+  </figure>
+  {% endif %}
+{% endmacro %}
+
+{% if error %}
+  <h1>Аналитика</h1>
+  <div class="alert">{{ error }}</div>
+{% elif empty %}
+  <h1>Аналитика</h1>
+  <div class="card">Данных пока нет: сборщик загружает историю, это занимает несколько минут. Обновите страницу позже.</div>
+{% else %}
+
+<header class="header">
+  <div>
+    <h1>{{ site.name }}</h1>
+    <div class="subtitle">{{ month|month }} · сравнение с {{ prev|month|lower }}</div>
+  </div>
+  <form class="filters" method="get">
+    <nav class="segmented" aria-label="Сайт">
+      {% for s in sites %}
+      <a href="?site={{ s.counter_id }}&month={{ month.strftime('%Y-%m') }}"
+         {% if s.counter_id == site.counter_id %}aria-current="page"{% endif %}>{{ s.site or s.name }}</a>
+      {% endfor %}
+    </nav>
+    <input type="hidden" name="site" value="{{ site.counter_id }}">
+    <label class="select">
+      <span class="visually-hidden">Месяц</span>
+      <select name="month" onchange="this.form.submit()">
+        {% for m in months %}
+        <option value="{{ m.strftime('%Y-%m') }}" {% if m == month %}selected{% endif %}>{{ m|month }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <noscript><button type="submit">Показать</button></noscript>
+  </form>
+</header>
+
+{% for a in alerts %}
+<div class="alert" role="status"><span class="alert-icon" aria-hidden="true">!</span>{{ a }}</div>
+{% endfor %}
+
+<section>
+  <h2>Трафик сайта</h2>
+  {{ tiles(traffic_tiles) }}
+  <div class="grid-2">
+    {{ chart_block('site_trend', 'Визиты и посетители по месяцам') }}
+    {{ chart_block('site_daily', 'Визиты по дням, ' ~ (month|month|lower)) }}
+  </div>
+  {% if skipped_site %}<p class="note">На графиках по месяцам нет месяцев, когда счётчик собирал данные не каждый день: {{ skipped_site|join(', ') }}.</p>{% endif %}
+</section>
+
+<section>
+  <h2>Заявки</h2>
+  {{ tiles(lead_tiles) }}
+  {{ chart_block('leads_trend', 'Заявки и контакты по месяцам') }}
+</section>
+
+<section>
+  <h2>Каналы</h2>
+  <div class="card table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>Канал</th><th class="num">Визиты</th><th class="num">к {{ prev|month_short }}</th>
+          <th class="num">Посетители</th><th class="num">Отказы</th><th class="num">Глубина</th>
+          <th class="num">Время</th><th class="num">Заявки</th><th class="num">Конверсия</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for c in channels %}
+        <tr>
+          <td>{{ c.dim_label }}</td>
+          <td class="num">{{ c.visits|int }}</td>
+          <td class="num muted">{{ c.visits|change(c.visits_prev) }}</td>
+          <td class="num">{{ c.users|int }}</td>
+          <td class="num">{{ c.bounce_rate|pct }}</td>
+          <td class="num">{{ c.page_depth|dec }}</td>
+          <td class="num">{{ c.avg_duration_sec|duration }}</td>
+          <td class="num">{{ c.leads|int }}</td>
+          <td class="num">{{ c.conversion_pct|pct(2) }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="9" class="muted">Нет данных за месяц</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if search %}
+<section>
+  <h2>Поиск Яндекса <span class="h2-note">{{ search.host }}, Вебмастер</span></h2>
+  {% if search.tiles %}{{ tiles(search.tiles) }}{% else %}<div class="card muted">Нет данных Вебмастера за этот месяц.</div>{% endif %}
+  {% if search.coverage %}<p class="note">Неполный месяц: {{ search.coverage }}.</p>{% endif %}
+  <div class="grid-2">
+    {{ chart_block('search_shows', 'Показы по месяцам') }}
+    {{ chart_block('search_clicks', 'Клики по месяцам') }}
+  </div>
+  {% if search.skipped %}<p class="note">Нет месяцев, за которые Вебмастер отдал данные не за все дни: {{ search.skipped|join(', ') }}.</p>{% endif %}
+  <div class="grid-2">
+    <div class="card table-card">
+      <div class="chart-title">Популярные запросы</div>
+      <table>
+        <thead><tr><th>Запрос</th><th class="num">Показы</th><th class="num">Клики</th><th class="num">CTR</th><th class="num">Позиция</th><th class="num">к {{ prev|month_short }}</th></tr></thead>
+        <tbody>
+        {% for r in search.queries %}
+          <tr>
+            <td>{{ r.query_text }}</td><td class="num">{{ r.shows|int }}</td><td class="num">{{ r.clicks|int }}</td>
+            <td class="num">{{ r.ctr_pct|pct }}</td><td class="num">{{ r.avg_show_position|dec }}</td>
+            <td class="num muted">{% if r.position_prev %}{{ r.position_prev|dec }}{% else %}—{% endif %}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="muted">Нет данных за месяц</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card table-card">
+      <div class="chart-title">Показы по позициям</div>
+      {% if search.buckets %}
+      <p class="note">По аналитике запросов за {{ search.buckets.first_day.strftime('%d.%m') }}–{{ search.buckets.last_day.strftime('%d.%m') }}: API хранит только 14 последних дней.</p>
+      <table>
+        <thead><tr><th>Позиция</th><th class="num">Показы</th><th class="num">Доля</th><th class="bar-col"></th></tr></thead>
+        <tbody>
+        {% for b in search.buckets.ranges %}
+          <tr><td>{{ b.range }}</td><td class="num">{{ b.impressions|int }}</td><td class="num">{{ b.share|pct }}</td>
+              <td class="bar-col"><span class="share-bar" style="width: {{ '%.1f'|format(b.share) }}%"></span></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">За этот месяц аналитики запросов нет: API хранит только 14 последних дней, история копится с первого запуска сборщика.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if maps %}
+<section>
+  <h2>Яндекс Карты</h2>
+  {% for card in maps %}
+    <h3>{{ card.name }}</h3>
+    {{ tiles(card.tiles) }}
+    {% if card.chart %}{{ chart_block(card.chart, 'Действия в карточке по месяцам') }}{% endif %}
+  {% endfor %}
+  <p class="note">Счётчик карточки в Метрике. Звонки, маршруты и переходы на сайт близки к кабинету Яндекс Бизнеса; визиты карточки меньше «переходов в профиль» в кабинете — он считает шире.</p>
+</section>
+{% endif %}
+
+{% endif %}
+
+{% if status %}
+<section>
+  <h2>Состояние данных</h2>
+  <div class="card table-card">
+    <table>
+      <thead><tr><th>Источник</th><th>Последний запуск</th><th>Последняя успешная загрузка</th><th></th></tr></thead>
+      <tbody>
+      {% for s in status %}
+        <tr>
+          <td>{{ s.name }}</td>
+          <td>{{ s.started_at|local }} · {% if s.status == 'ok' %}успешно{% elif s.status == 'error' %}<strong class="bad">ошибка</strong>{% else %}идёт{% endif %}</td>
+          <td>{{ s.last_ok|local }}</td>
+          <td class="muted error-text">{{ s.error or '' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Время московское. Формулы показателей описаны в docs/metrics.md.</p>
+</section>
+{% endif %}
+
+</div>
+{% if charts %}
+<script id="chart-data" type="application/json">{{ charts|tojson }}</script>
+<script src="{{ url_for('static', path='vendor/echarts.min.js') }}"></script>
+<script src="{{ url_for('static', path='dashboard.js') }}"></script>
+{% endif %}
+</body>
+</html>

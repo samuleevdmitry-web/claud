@@ -11,16 +11,21 @@ dependencies = [
     "requests>=2.31",
     "psycopg[binary]>=3.1",
     "python-dotenv>=1.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "jinja2>=3.1",
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]
 include = ["analytics*"]
 
 [tool.setuptools.package-data]
 analytics = ["sql/*.sql"]
+"analytics.dashboard" = ["templates/*.html", "static/*.css", "static/*.js", "static/vendor/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

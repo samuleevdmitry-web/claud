@@ -21,7 +21,7 @@ def point(day, value, time="00:00:00"):
     return {"date": f"{day}T{time}.000+03:00", "value": value}
 
 
-def test_search_history_drops_trailing_days_without_data():
+def test_search_history_drops_days_without_data():
     indicators = {
         "TOTAL_SHOWS": [point("2026-10-07", 100.0), point("2026-10-08", 0.0), point("2026-10-09", 50.0),
                         point("2026-10-10", 0.0), point("2026-10-11", 0.0)],
@@ -32,10 +32,9 @@ def test_search_history_drops_trailing_days_without_data():
         "AVG_CLICK_POSITION": [point("2026-10-07", 2.0), point("2026-10-08", 0.0), point("2026-10-09", 3.0),
                                point("2026-10-10", 0.0), point("2026-10-11", 0.0)],
     }
+    # нули — «нет данных», а не провал трафика: и в конце периода, и в середине
     assert parse_search_history(indicators) == [
         SearchDay(date(2026, 10, 7), 100, 5, 7.5, 2.0),
-        # ноль внутри периода — настоящий ноль, позиции при нём не определены
-        SearchDay(date(2026, 10, 8), 0, 0, None, None),
         SearchDay(date(2026, 10, 9), 50, 2, 8.0, 3.0),
     ]
     assert parse_search_history({"TOTAL_SHOWS": [point("2026-11-01", 0.0)]}) == []

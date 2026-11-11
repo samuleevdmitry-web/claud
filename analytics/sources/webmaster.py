@@ -185,25 +185,23 @@ def _day(value: str) -> date:
 
 
 def parse_search_history(indicators: dict) -> list[SearchDay]:
-    """Показы и клики по дням.
+    """Показы и клики по дням; дни без показов и кликов отбрасываются.
 
-    Дни после последнего дня с показами или кликами отбрасываются: Вебмастер отдаёт за них нули,
-    пока данные не готовы, и в базе это выглядело бы как полная потеря трафика из поиска.
+    Нулём Вебмастер отвечает и за дни, по которым данных ещё нет, и за периоды, когда сайт не был
+    в его истории (у oldos.ru — июль 2025 – январь 2026, хотя трафик из Яндекса по Метрике был).
+    Записанные нулями, такие дни выглядели бы как полная потеря трафика из поиска. Настоящее падение
+    показов до нуля мониторинг увидит по Метрике: пропадут визиты из поиска Яндекса.
     """
     by_day: dict[date, dict[str, float]] = defaultdict(dict)
     for indicator, points in indicators.items():
         for point in points:
             by_day[_day(point["date"])][indicator] = point["value"]
-    days = sorted(by_day)
-    with_data = [d for d in days if by_day[d].get("TOTAL_SHOWS") or by_day[d].get("TOTAL_CLICKS")]
-    if not with_data:
-        return []
     out = []
-    for d in days:
-        if d > with_data[-1]:
-            break
+    for d in sorted(by_day):
         v = by_day[d]
         shows, clicks = int(v.get("TOTAL_SHOWS") or 0), int(v.get("TOTAL_CLICKS") or 0)
+        if not shows and not clicks:
+            continue
         out.append(SearchDay(
             d, shows, clicks,
             v.get("AVG_SHOW_POSITION") if shows else None,
