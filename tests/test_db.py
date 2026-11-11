@@ -9,8 +9,8 @@ from datetime import date
 import pytest
 
 from analytics import db
-from analytics.sync import sync_metrika
-from tests.fakes import FakeMetrikaClient, dim
+from analytics.sync import sync_metrika, sync_webmaster
+from tests.fakes import FakeMetrikaClient, FakeWebmasterClient, dim
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not TEST_DATABASE_URL, reason="TEST_DATABASE_URL не задан")
@@ -44,7 +44,9 @@ def month_data(aug_direct_visits=40):
 
 
 def test_schema_is_idempotent(conn):
-    assert db.apply_schema(conn) == ["001_metrika.sql", "002_metrika_views.sql"]
+    assert db.apply_schema(conn) == [
+        "001_metrika.sql", "002_metrika_views.sql", "003_webmaster.sql", "004_webmaster_views.sql"
+    ]
 
 
 def test_sync_builds_monthly_kpi(conn):
@@ -105,3 +107,53 @@ def test_sync_run_log(conn):
     assert conn.execute("SELECT status, error FROM sync_runs WHERE id = %s", (run_id,)).fetchone() == (
         "error", "HTTP 403"
     )
+
+
+def qa_row(query, day, impressions, position):
+    return {"text_indicator": {"type": "QUERY", "value": query}, "statistics": [
+        {"date": day.isoformat(), "field": "IMPRESSIONS", "value": float(impressions)},
+        {"date": day.isoformat(), "field": "CLICKS", "value": 0.0},
+        {"date": day.isoformat(), "field": "POSITION", "value": position},
+    ]}
+
+
+def test_sync_webmaster(conn):
+    host = "https:www.example.ru:443"
+    search = {
+        date(2026, 7, 31): (100, 10, 10.0, 2.0),
+        date(2026, 8, 1): (300, 20, 8.0, 3.0),
+        date(2026, 8, 2): (100, 20, 12.0, 4.0),
+    }
+    queries = [{"query_id": "a1", "query_text": "ткани оптом", "indicators": {"TOTAL_SHOWS": 400.0, "TOTAL_CLICKS": 40.0}}]
+    day = date(2026, 8, 2)
+    query_rows = [qa_row("q1", day, 50, 1.2), qa_row("q2", day, 30, 2.6), qa_row("q3", day, 20, 7.0),
+                  qa_row("q4", day, 5, 60.0)]
+    client = FakeWebmasterClient(search, queries, query_rows)
+    sync_webmaster(conn, client, host, since=date(2026, 7, 1), until=date(2026, 8, 20), today=date(2026, 8, 20),
+                   log=lambda _: None)
+
+    aug = conn.execute(
+        "SELECT shows, clicks, ctr_pct, avg_show_position, avg_click_position, days_with_data, shows_prev "
+        "FROM webmaster_search_monthly WHERE host_id = %s AND month = %s", (host, date(2026, 8, 1))
+    ).fetchone()
+    # позиции взвешены: показов (8×300 + 12×100) / 400 = 9, кликов (3×20 + 4×20) / 40 = 3.5;
+    # 3–20 августа данных ещё нет — их нет и в таблице
+    assert [float(v) for v in aug] == [400, 40, 10.0, 9.0, 3.5, 2, 100]
+
+    buckets = dict(conn.execute(
+        "SELECT position_range, impressions FROM webmaster_position_buckets WHERE host_id = %s", (host,)
+    ).fetchall())
+    assert buckets == {"1": 50, "2-3": 30, "4-10": 20, "51+": 5}
+
+    freshness = dict(conn.execute(
+        "SELECT stream, last_date FROM webmaster_freshness WHERE host_id = %s", (host,)
+    ).fetchall())
+    assert freshness["search"] == date(2026, 8, 2) and freshness["query_analytics"] == day
+
+    assert conn.execute(
+        "SELECT count(*) FROM webmaster_queries_monthly WHERE host_id = %s", (host,)
+    ).fetchone() == (2,)  # июль и август
+    assert conn.execute(
+        "SELECT state FROM webmaster_diagnostics WHERE host_id = %s AND problem = 'INSIGNIFICANT_CGI_PARAMETER'",
+        (host,),
+    ).fetchone() == ("PRESENT",)

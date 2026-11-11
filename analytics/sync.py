@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import date
+from collections.abc import Callable, Iterator
+from dataclasses import astuple
+from datetime import date, timedelta
 
 import psycopg
 
 from analytics import db
 from analytics.sources.metrika import GRAINS, SLICES, MetrikaClient, fetch_goals, fetch_traffic, grain_range
+from analytics.sources.webmaster import (
+    WebmasterClient,
+    parse_crawl,
+    parse_diagnostics,
+    parse_pages,
+    parse_popular,
+    parse_query_analytics,
+    parse_search_history,
+    parse_sqi,
+)
 
 
 def sync_metrika(
@@ -40,4 +51,75 @@ def sync_metrika(
             )
             note = " (данные семплированы)" if sampled else ""
             log(f"  {grain:<5} {slice_:<6} {date_from}…{date_to}: трафик {len(traffic)}, цели {len(goal_rows)}{note}")
+    return loaded
+
+
+def month_ranges(since: date, until: date) -> Iterator[tuple[date, date]]:
+    """Календарные месяцы периода: первый — с начала месяца, последний — по until."""
+    start = since.replace(day=1)
+    while start <= until:
+        next_start = (start + timedelta(days=32)).replace(day=1)
+        yield start, min(next_start - timedelta(days=1), until)
+        start = next_start
+
+
+def sync_webmaster(
+    conn: psycopg.Connection,
+    client: WebmasterClient,
+    host_id: str,
+    since: date,
+    until: date,
+    today: date | None = None,
+    log: Callable[[str], None] = print,
+) -> int:
+    """Перегружает данные Вебмастера за период; возвращает число загруженных строк."""
+    today = today or date.today()
+    db.save_webmaster_state(
+        conn, host_id, today, client.summary(host_id), parse_diagnostics(client.diagnostics(host_id))
+    )
+
+    def replace(table: str, fields: list[str], rows: list, date_from: date = since, date_to: date = until,
+                date_column: str = "date") -> int:
+        last = max((row[0] if isinstance(row, tuple) else row.date for row in rows), default=None)
+        log(f"  {table:<26} {date_from}…{date_to}: {len(rows)} строк, данные по {last or '—'}")
+        return db.replace_host_rows(conn, table, host_id, date_column, date_from, date_to, fields, rows)
+
+    loaded = replace(
+        "webmaster_search_daily",
+        ["date", "shows", "clicks", "avg_show_position", "avg_click_position"],
+        parse_search_history(client.search_history(host_id, since, until)),
+    )
+    loaded += replace("webmaster_sqi", ["date", "sqi"], parse_sqi(client.sqi_history(host_id, since, until)))
+    loaded += replace(
+        "webmaster_pages_in_search",
+        ["date", "pages", "appeared", "removed"],
+        parse_pages(
+            client.in_search_history(host_id, since, until), client.search_events_history(host_id, since, until)
+        ),
+    )
+    loaded += replace(
+        "webmaster_crawl_daily",
+        ["date", "http_2xx", "http_3xx", "http_4xx", "http_5xx", "other"],
+        parse_crawl(client.indexing_history(host_id, since, until)),
+    )
+    for month_start, month_end in month_ranges(since, until):
+        queries = parse_popular(client.popular_queries(host_id, month_start, month_end))
+        loaded += replace(
+            "webmaster_queries_monthly",
+            ["month", "query_id", "query_text", "shows", "clicks", "avg_show_position", "avg_click_position"],
+            [(month_start, *astuple(q)) for q in queries],
+            month_start,
+            month_start,
+            "month",
+        )
+
+    query_days = parse_query_analytics(client.query_analytics(host_id))
+    if query_days:
+        loaded += replace(
+            "webmaster_query_daily",
+            ["date", "query", "top_url", "impressions", "clicks", "position", "demand"],
+            query_days,
+            min(q.date for q in query_days),
+            max(q.date for q in query_days),
+        )
     return loaded

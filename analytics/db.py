@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import astuple
 from datetime import date
 from importlib import resources
 
 import psycopg
+from psycopg import sql
 
 from analytics.sources.metrika import GoalRow, TrafficRow
+from analytics.sources.webmaster import Problem
 
 
 def connect(url: str) -> psycopg.Connection:
@@ -97,3 +100,63 @@ def replace_metrika_slice(
             ],
         )
     return len(traffic) + len(goal_rows)
+
+
+def replace_host_rows(
+    conn: psycopg.Connection,
+    table: str,
+    host_id: str,
+    date_column: str,
+    date_from: date,
+    date_to: date,
+    fields: list[str],
+    rows: list,
+) -> int:
+    """Заменяет строки сайта за период; rows — датаклассы или кортежи с полями в порядке fields."""
+    columns = ["host_id", *fields]
+    insert = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+        sql.Identifier(table),
+        sql.SQL(", ").join(map(sql.Identifier, columns)),
+        sql.SQL(", ").join([sql.Placeholder()] * len(columns)),
+    )
+    delete = sql.SQL("DELETE FROM {} WHERE host_id = %s AND {} BETWEEN %s AND %s").format(
+        sql.Identifier(table), sql.Identifier(date_column)
+    )
+    values = [(host_id, *(row if isinstance(row, tuple) else astuple(row))) for row in rows]
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(delete, (host_id, date_from, date_to))
+        cur.executemany(insert, values)
+    return len(values)
+
+
+def save_webmaster_state(
+    conn: psycopg.Connection, host_id: str, snapshot_date: date, summary: dict, problems: list[Problem]
+) -> None:
+    """Сводка сайта на дату и текущее состояние проверок диагностики."""
+    counts = summary.get("site_problems") or {}
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO webmaster_summary (host_id, snapshot_date, sqi, searchable_pages, excluded_pages,
+                problems_fatal, problems_critical, problems_possible, problems_recommendation)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (host_id, snapshot_date) DO UPDATE SET
+                sqi = EXCLUDED.sqi, searchable_pages = EXCLUDED.searchable_pages,
+                excluded_pages = EXCLUDED.excluded_pages, problems_fatal = EXCLUDED.problems_fatal,
+                problems_critical = EXCLUDED.problems_critical, problems_possible = EXCLUDED.problems_possible,
+                problems_recommendation = EXCLUDED.problems_recommendation
+            """,
+            (host_id, snapshot_date, summary.get("sqi"), summary.get("searchable_pages_count"),
+             summary.get("excluded_pages_count"), counts.get("FATAL", 0), counts.get("CRITICAL", 0),
+             counts.get("POSSIBLE_PROBLEM", 0), counts.get("RECOMMENDATION", 0)),
+        )
+        cur.executemany(
+            """
+            INSERT INTO webmaster_diagnostics (host_id, problem, severity, state, last_state_update, checked_at)
+            VALUES (%s, %s, %s, %s, %s, now())
+            ON CONFLICT (host_id, problem) DO UPDATE SET
+                severity = EXCLUDED.severity, state = EXCLUDED.state,
+                last_state_update = EXCLUDED.last_state_update, checked_at = now()
+            """,
+            [(host_id, p.code, p.severity, p.state, p.last_state_update) for p in problems],
+        )

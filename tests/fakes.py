@@ -27,8 +27,8 @@ class FakeSession:
         self.responses = list(responses)
         self.calls: list[tuple[str, dict | None]] = []
 
-    def get(self, url, params=None, timeout=None):
-        self.calls.append((url, params))
+    def request(self, method, url, params=None, json=None, timeout=None):
+        self.calls.append((url, params if json is None else json))
         return self.responses.pop(0)
 
 
@@ -78,3 +78,49 @@ def _slice_by_dimensions(dims: list[str]) -> str:
     if "UTM" in dims[0]:
         return "utm"
     return "city" if dims[0] == "ym:s:regionCity" else "device"
+
+
+class FakeWebmasterClient:
+    """Вебмастер с синтетическими данными; дни вне search отдаются нулями, как у API, пока данных нет."""
+
+    def __init__(self, search: dict[date, tuple[int, int, float, float]], queries: list[dict], query_rows: list[dict]):
+        self.search = search
+        self.queries = queries
+        self.query_rows = query_rows
+
+    @staticmethod
+    def _pt(d: date, value) -> dict:
+        return {"date": f"{d.isoformat()}T00:00:00.000+03:00", "value": value}
+
+    def summary(self, host_id):
+        return {"sqi": 430, "searchable_pages_count": 3394, "excluded_pages_count": 408,
+                "site_problems": {"RECOMMENDATION": 1, "POSSIBLE_PROBLEM": 1}}
+
+    def diagnostics(self, host_id):
+        return {"THREATS": {"severity": "FATAL", "state": "ABSENT", "last_state_update": None},
+                "INSIGNIFICANT_CGI_PARAMETER": {"severity": "RECOMMENDATION", "state": "PRESENT",
+                                                "last_state_update": "2026-10-08T10:00:39.000+03:00"}}
+
+    def search_history(self, host_id, date_from, date_to):
+        days = [date.fromordinal(n) for n in range(date_from.toordinal(), date_to.toordinal() + 1)]
+        values = [self.search.get(d, (0, 0, 0.0, 0.0)) for d in days]
+        names = ["TOTAL_SHOWS", "TOTAL_CLICKS", "AVG_SHOW_POSITION", "AVG_CLICK_POSITION"]
+        return {name: [self._pt(d, float(v[i])) for d, v in zip(days, values)] for i, name in enumerate(names)}
+
+    def sqi_history(self, host_id, date_from, date_to):
+        return [self._pt(date_from, 430)]
+
+    def in_search_history(self, host_id, date_from, date_to):
+        return [self._pt(date_from, 3300)]
+
+    def search_events_history(self, host_id, date_from, date_to):
+        return {"APPEARED_IN_SEARCH": [self._pt(date_from, 10)], "REMOVED_FROM_SEARCH": []}
+
+    def indexing_history(self, host_id, date_from, date_to):
+        return {"HTTP_2XX": [self._pt(date_from, 500)], "HTTP_4XX": [self._pt(date_from, 20)]}
+
+    def popular_queries(self, host_id, date_from, date_to):
+        return self.queries
+
+    def query_analytics(self, host_id):
+        return self.query_rows

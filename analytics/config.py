@@ -14,6 +14,7 @@ class Settings:
     metrika_counter_id: int | None
     metrika_lead_goals: frozenset[int]
     metrika_attribution: str
+    webmaster_host_id: str | None
     database_url: str
 
 
@@ -29,5 +30,6 @@ def load_settings() -> Settings:
         metrika_counter_id=int(counter) if counter else None,
         metrika_lead_goals=_int_set(os.environ.get("METRIKA_LEAD_GOALS", "")),
         metrika_attribution=os.environ.get("METRIKA_ATTRIBUTION", "").strip() or "lastsign",
+        webmaster_host_id=os.environ.get("WEBMASTER_HOST_ID", "").strip() or None,
         database_url=os.environ.get("DATABASE_URL", "").strip() or DEFAULT_DATABASE_URL,
     )

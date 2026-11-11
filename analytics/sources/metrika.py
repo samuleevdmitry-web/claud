@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 
 import requests
+
+from analytics.sources.http import send, yandex_session
 
 API_URL = "https://api-metrika.yandex.net"
 PAGE_SIZE = 10_000
@@ -87,32 +88,24 @@ class MetrikaClient:
         max_retries: int = 4,
         backoff: float = 2.0,
     ):
-        self.session = session or requests.Session()
-        # Без токена заголовок не ставим: его может подставлять прокси (секрет облачного окружения).
-        if token:
-            self.session.headers["Authorization"] = f"OAuth {token}"
+        self.session = yandex_session(token, session)
         self.max_retries = max_retries
         self.backoff = backoff
 
     def _get(self, path: str, params: dict | None = None) -> dict:
-        attempt = 0
-        while True:
-            resp = self.session.get(API_URL + path, params=params, timeout=120)
-            retryable = resp.status_code == 429 or resp.status_code >= 500
-            if retryable and attempt < self.max_retries:
-                time.sleep(self.backoff * 2**attempt)
-                attempt += 1
-                continue
-            if resp.status_code in (401, 403):
-                raise MetrikaError(
-                    f"{path}: HTTP {resp.status_code}: {_error_message(resp)}. Проверьте токен "
-                    "(YANDEX_OAUTH_TOKEN или секрет окружения) и доступ аккаунта к счётчику"
-                )
-            if resp.status_code != 200:
-                message = _error_message(resp)
-                too_complex = any(marker in message.lower() for marker in TOO_COMPLEX_MARKERS)
-                raise MetrikaError(f"{path}: HTTP {resp.status_code}: {message}", too_complex=too_complex)
-            return resp.json()
+        resp = send(
+            self.session, "GET", API_URL + path, params=params, max_retries=self.max_retries, backoff=self.backoff
+        )
+        if resp.status_code in (401, 403):
+            raise MetrikaError(
+                f"{path}: HTTP {resp.status_code}: {_error_message(resp)}. Проверьте токен "
+                "(YANDEX_OAUTH_TOKEN или секрет окружения) и доступ аккаунта к счётчику"
+            )
+        if resp.status_code != 200:
+            message = _error_message(resp)
+            too_complex = any(marker in message.lower() for marker in TOO_COMPLEX_MARKERS)
+            raise MetrikaError(f"{path}: HTTP {resp.status_code}: {message}", too_complex=too_complex)
+        return resp.json()
 
     def counters(self) -> list[dict]:
         return self._get("/management/v1/counters")["counters"]
