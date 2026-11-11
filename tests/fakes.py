@@ -42,10 +42,14 @@ def dim(name, id_=None) -> dict:
 class FakeMetrikaClient:
     """Отвечает на отчёты по таблице {(grain, slice): [(period, [dims], traffic, {goal_id: (reaches, visits)})]}."""
 
-    def __init__(self, goals: list[dict], data: dict):
+    def __init__(self, goals: list[dict], data: dict, name: str = "example.ru"):
         self._goals = goals
         self.data = data
+        self.name = name
         self.reports: list[tuple[list[str], list[str], date, date]] = []
+
+    def counter(self, counter_id: int) -> dict:
+        return {"id": counter_id, "name": self.name, "site2": {"site": "example.ru"}}
 
     def goals(self, counter_id: int) -> list[dict]:
         return self._goals

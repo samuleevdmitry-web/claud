@@ -47,6 +47,18 @@ def finish_run(
     )
 
 
+def upsert_counter(conn: psycopg.Connection, counter: dict, kind: str) -> None:
+    site = (counter.get("site2") or {}).get("site") or counter.get("site")
+    conn.execute(
+        """
+        INSERT INTO metrika_counters (counter_id, name, site, kind, updated_at) VALUES (%s, %s, %s, %s, now())
+        ON CONFLICT (counter_id) DO UPDATE
+        SET name = EXCLUDED.name, site = EXCLUDED.site, kind = EXCLUDED.kind, updated_at = now()
+        """,
+        (counter["id"], counter.get("name") or "", site, kind),
+    )
+
+
 def upsert_goals(conn: psycopg.Connection, counter_id: int, goals: list[dict], lead_ids: frozenset[int]) -> None:
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany(

@@ -110,6 +110,9 @@ class MetrikaClient:
     def counters(self) -> list[dict]:
         return self._get("/management/v1/counters")["counters"]
 
+    def counter(self, counter_id: int) -> dict:
+        return self._get(f"/management/v1/counter/{counter_id}")["counter"]
+
     def goals(self, counter_id: int) -> list[dict]:
         return self._get(f"/management/v1/counter/{counter_id}/goals")["goals"]
 

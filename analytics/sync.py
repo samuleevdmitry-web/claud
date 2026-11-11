@@ -32,9 +32,14 @@ def sync_metrika(
     until: date,
     today: date | None = None,
     log: Callable[[str], None] = print,
+    kind: str = "site",
 ) -> int:
-    """Перегружает цели и все срезы трафика за период; возвращает число загруженных строк."""
+    """Перегружает цели и все срезы трафика за период; возвращает число загруженных строк.
+
+    kind: 'site' — счётчик сайта, 'maps' — счётчик карточки на Картах, который создаёт Яндекс Бизнес.
+    """
     today = today or date.today()
+    db.upsert_counter(conn, client.counter(counter_id), kind)
     goals = client.goals(counter_id)
     db.upsert_goals(conn, counter_id, goals, lead_goals)
     goal_ids = [g["id"] for g in goals]

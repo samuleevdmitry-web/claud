@@ -15,7 +15,7 @@ from analytics.sources.webmaster import WebmasterClient, WebmasterError, parse_s
 from analytics.sync import sync_metrika, sync_webmaster
 
 # Период ежедневной перезагрузки. Вебмастер отдаёт данные с задержкой в несколько дней и уточняет их.
-DEFAULT_DAYS = {"metrika": 7, "webmaster": 30}
+DEFAULT_DAYS = {"metrika": 7, "maps": 7, "webmaster": 30}
 SOURCE_ERRORS = (MetrikaError, WebmasterError)
 
 
@@ -100,13 +100,30 @@ def _sync_metrika(conn: psycopg.Connection, settings: Settings, since: date, unt
     )
 
 
+def _sync_maps(conn: psycopg.Connection, settings: Settings, since: date, until: date) -> int:
+    if not settings.metrika_maps_counters:
+        raise MetrikaError("Не заданы METRIKA_MAPS_COUNTERS (счётчики карточек: python -m analytics check)")
+    client = MetrikaClient(settings.yandex_token)
+    return sum(
+        sync_metrika(conn, client, counter_id, frozenset(), settings.metrika_attribution, since, until, kind="maps")
+        for counter_id in settings.metrika_maps_counters
+    )
+
+
 def _sync_webmaster(conn: psycopg.Connection, settings: Settings, since: date, until: date) -> int:
     if settings.webmaster_host_id is None:
         raise WebmasterError("Не задан WEBMASTER_HOST_ID (список сайтов: python -m analytics check)")
     return sync_webmaster(conn, WebmasterClient(settings.yandex_token), settings.webmaster_host_id, since, until)
 
 
-SYNCS = {"metrika": _sync_metrika, "webmaster": _sync_webmaster}
+SYNCS = {"metrika": _sync_metrika, "maps": _sync_maps, "webmaster": _sync_webmaster}
+
+# Что должно быть настроено, чтобы `sync` загружал источник; явный `sync-<источник>` объяснит, чего не хватает.
+CONFIGURED = {
+    "metrika": lambda s: s.metrika_counter_id is not None,
+    "maps": lambda s: bool(s.metrika_maps_counters),
+    "webmaster": lambda s: s.webmaster_host_id is not None,
+}
 
 
 def run_sync(settings: Settings, source: str, since: date, until: date) -> None:
@@ -132,11 +149,12 @@ def main(argv: list[str] | None = None) -> int:
     for name, help_ in (
         ("sync", "загрузить все источники (для ежедневного запуска)"),
         ("sync-metrika", "загрузить данные Метрики"),
+        ("sync-maps", "загрузить счётчики карточек на Картах"),
         ("sync-webmaster", "загрузить данные Вебмастера"),
     ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("--since", type=date.fromisoformat,
-                       help="с даты ГГГГ-ММ-ДД (по умолчанию: Метрика — 7 дней назад, Вебмастер — 30)")
+                       help="с даты ГГГГ-ММ-ДД (по умолчанию: Метрика и Карты — 7 дней назад, Вебмастер — 30)")
         p.add_argument("--until", type=date.fromisoformat, help="по дату ГГГГ-ММ-ДД (по умолчанию сегодня)")
     args = parser.parse_args(argv)
     settings = load_settings()
@@ -152,7 +170,13 @@ def main(argv: list[str] | None = None) -> int:
 
         today = date.today()
         until = min(args.until or today, today)
-        sources = list(SYNCS) if args.command == "sync" else [args.command.removeprefix("sync-")]
+        if args.command == "sync":
+            sources = [name for name in SYNCS if CONFIGURED[name](settings)]
+            skipped = sorted(set(SYNCS) - set(sources))
+            if skipped:
+                print(f"Не настроены, пропускаю: {', '.join(skipped)}\n")
+        else:
+            sources = [args.command.removeprefix("sync-")]
         failed = False
         for source in sources:
             since = args.since or today - timedelta(days=DEFAULT_DAYS[source])

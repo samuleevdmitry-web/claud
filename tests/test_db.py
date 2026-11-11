@@ -45,7 +45,7 @@ def month_data(aug_direct_visits=40):
 
 def test_schema_is_idempotent(conn):
     assert db.apply_schema(conn) == [
-        "001_metrika.sql", "002_metrika_views.sql", "003_webmaster.sql", "004_webmaster_views.sql"
+        "001_metrika.sql", "002_metrika_views.sql", "003_webmaster.sql", "004_webmaster_views.sql", "005_maps.sql"
     ]
 
 
@@ -157,3 +157,28 @@ def test_sync_webmaster(conn):
         "SELECT state FROM webmaster_diagnostics WHERE host_id = %s AND problem = 'INSIGNIFICANT_CGI_PARAMETER'",
         (host,),
     ).fetchone() == ("PRESENT",)
+
+
+def test_maps_monthly_reads_card_goals(conn):
+    goals = [
+        {"id": 11, "name": "Клик на позвонить - Олдос", "type": "action"},
+        {"id": 12, "name": "Построить маршрут - Олдос", "type": "action"},
+        {"id": 13, "name": "Переход на сайт - Олдос", "type": "action"},
+        {"id": 14, "name": "Лайк - Олдос", "type": "action"},
+    ]
+    data = {("month", "total"): [
+        (JUL, [], [2164, 1911, 3000, 60.0, 1.2, 40.0], {11: (95, 90), 12: (164, 150), 13: (203, 200)}),
+        (AUG, [], [2804, 2520, 3900, 60.0, 1.2, 40.0], {11: (104, 99), 12: (160, 155), 13: (199, 190), 14: (5, 5)}),
+    ]}
+    client = FakeMetrikaClient(goals, data, name="Олдос")
+    sync_metrika(conn, client, 777, frozenset(), "lastsign", since=JUL, until=date(2026, 8, 31),
+                 today=date(2026, 9, 3), log=lambda _: None, kind="maps")
+    # счётчик сайта в представление Карт не попадает
+    sync_metrika(conn, FakeMetrikaClient(GOALS, month_data()), COUNTER, frozenset({1}), "lastsign",
+                 since=JUL, until=date(2026, 8, 31), today=date(2026, 9, 3), log=lambda _: None)
+
+    rows = conn.execute(
+        "SELECT counter_id, name, card_visits, card_visits_prev, calls, calls_prev, routes, site, site_prev "
+        "FROM maps_monthly WHERE month = %s", (AUG,)
+    ).fetchall()
+    assert rows == [(777, "Олдос", 2804, 2164, 104, 95, 160, 199, 203)]
