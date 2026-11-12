@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "macros.html" import tiles as show_tiles, chart_block, insights %}
+{% block title %}Карты{% endblock %}
+{% block content %}
+{{ insights(summary) }}
+{% for card in cards %}
+  <h2>{{ card.name }}</h2>
+  {{ show_tiles(card.tiles) }}
+  {% if card.chart %}{{ chart_block(charts, card.chart, 'Действия в карточке по месяцам') }}{% endif %}
+{% else %}
+  <div class="card muted">Нет данных по карточкам за этот месяц (настройка METRIKA_MAPS_COUNTERS).</div>
+{% endfor %}
+<p class="note">Яндекс Карты — по счётчику Метрики, который Яндекс Бизнес создаёт для карточки. Звонки, маршруты и переходы
+  на сайт близки к кабинету Яндекс Бизнеса; визиты карточки меньше «переходов в профиль» в кабинете — он считает шире.</p>
+{% endblock %}

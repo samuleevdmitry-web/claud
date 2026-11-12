@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Аналитика{% endblock %}{% if f %} · {{ f.site.site or f.site.name }}{% endif %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='dashboard.css') }}">
+</head>
+<body>
+{% set icons = {
+  "home": "M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z",
+  "chart": "M4 20V10M10 20V4M16 20v-7M22 20H2",
+  "target": "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+  "search": "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3",
+  "trend": "M3 17l6-6 4 4 8-8M15 7h6v6",
+  "pin": "M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11zM12 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+  "db": "M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3",
+} %}
+{% set extra = {"tab": tab} if tab is defined and tab and tab != "summary" else {} %}
+<aside class="sidebar" id="sidebar" aria-label="Разделы">
+  <div class="brand">Аналитика</div>
+  <nav>
+    {% for key, href, title, icon in nav %}
+    <a href="{{ href }}{{ f.query() if f else '' }}" {% if key == page %}aria-current="page"{% endif %}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{ icons[icon] }}"/></svg>{{ title }}
+    </a>
+    {% endfor %}
+  </nav>
+</aside>
+<div class="overlay" onclick="document.body.classList.remove('nav-open')"></div>
+
+<main class="main">
+  <header class="topbar">
+    <button type="button" class="menu-button" aria-label="Меню" onclick="document.body.classList.toggle('nav-open')">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <div class="titles">
+      <h1>{{ self.title() }}</h1>
+      {% if f %}<div class="subtitle">{{ f.month|month }} · сравнение с {{ f.prev|month|lower }} · {{ audiences[f.audience]|lower }}</div>{% endif %}
+    </div>
+  </header>
+
+  {% if f %}
+  <form class="filters" method="get">
+    <nav class="segmented" aria-label="Сайт">
+      {% for s in f.sites %}
+      <a href="{{ request.url.path }}{{ f.query(site=s.counter_id, **extra) }}" {% if s.counter_id == f.counter_id %}aria-current="page"{% endif %}>{{ s.site or s.name }}</a>
+      {% endfor %}
+    </nav>
+    <nav class="segmented" aria-label="Аудитория">
+      {% for key, title in audiences.items() %}
+      <a href="{{ request.url.path }}{{ f.query(aud=key, **extra) }}" {% if key == f.audience %}aria-current="page"{% endif %}>{{ title }}</a>
+      {% endfor %}
+    </nav>
+    <input type="hidden" name="site" value="{{ f.counter_id }}">
+    <input type="hidden" name="aud" value="{{ f.audience }}">
+    {% if extra.tab %}<input type="hidden" name="tab" value="{{ extra.tab }}">{% endif %}
+    <label class="select">
+      <span class="visually-hidden">Месяц</span>
+      <select name="month" onchange="this.form.submit()">
+        {% for m in f.months %}<option value="{{ m.strftime('%Y-%m') }}" {% if m == f.month %}selected{% endif %}>{{ m|month }}</option>{% endfor %}
+      </select>
+    </label>
+    <noscript><button type="submit">Показать</button></noscript>
+  </form>
+  {% endif %}
+
+  {% block content %}{% endblock %}
+</main>
+
+{% if charts %}
+<script id="chart-data" type="application/json">{{ charts|tojson }}</script>
+<script src="{{ url_for('static', path='vendor/echarts.min.js') }}"></script>
+<script src="{{ url_for('static', path='dashboard.js') }}"></script>
+{% endif %}
+</body>
+</html>

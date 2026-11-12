@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "macros.html" import tiles as show_tiles, chart_block, insights, slice_table %}
+{% block title %}Заявки и цели{% endblock %}
+{% block content %}
+{{ show_tiles(tiles) }}
+{{ insights(summary) }}
+{{ chart_block(charts, 'leads_trend', 'Заявки и контакты по месяцам') }}
+
+<div class="card table-card">
+  <div class="chart-title">Цели Метрики</div>
+  <table>
+    <thead><tr><th>Цель</th><th>Тип</th><th class="num">Достижения</th><th class="num">к {{ f.prev|month_short }}</th><th class="num">Визиты с целью</th></tr></thead>
+    <tbody>
+    {% for g in goals %}
+      <tr>
+        <td>{{ g.name }}{% if g.is_lead %} <span class="badge">заявка</span>{% elif g.type in ('phone', 'email', 'messenger') %} <span class="badge badge-muted">контакт</span>{% endif %}</td>
+        <td class="muted">{{ g.type }}</td>
+        <td class="num">{{ g.reaches|int }}</td>
+        <td class="num muted">{{ g.reaches|change(g.reaches_prev) }}</td>
+        <td class="num">{{ g.visits|int }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="note">Заявка — цели из настройки METRIKA_LEAD_GOALS; контакты — клики по телефону, почте и мессенджерам.</p>
+</div>
+
+<h2>Откуда приходят заявки</h2>
+<div class="grid-2">
+  {% for report in cross %}{{ slice_table(report, f, limit=10, compact=True) }}{% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "macros.html" import tiles as show_tiles, chart_block, insights, alerts as show_alerts %}
+{% block title %}Поиск Яндекса{% endblock %}
+
+{% macro movers_table(title, rows, total, kind) %}
+  <div class="card table-card">
+    <div class="chart-title">{{ title }} <span class="h2-note">{{ total }}</span></div>
+    {% if rows %}
+    <table>
+      <thead><tr><th>Запрос</th>
+        {% if kind in ('up', 'down') %}<th class="num">Позиция</th><th class="num">была</th>{% endif %}
+        <th class="num">Показы</th><th class="num">были</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr><td>{{ r.query }}</td>
+          {% if kind in ('up', 'down') %}<td class="num">{{ r.position|dec }}</td><td class="num muted">{{ r.position_prev|dec }}</td>{% endif %}
+          <td class="num">{{ r.shows|int }}</td><td class="num muted">{{ r.shows_prev|int }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">Нет таких запросов.</p>{% endif %}
+  </div>
+{% endmacro %}
+
+{% block content %}
+{% if not host %}
+  <div class="card muted">Сайт не подключён к Вебмастеру (настройка WEBMASTER_HOSTS).</div>
+{% else %}
+  {{ show_alerts(alerts) }}
+  {% if tiles %}{{ show_tiles(tiles) }}{% else %}<div class="card muted">Нет данных Вебмастера за этот месяц.</div>{% endif %}
+  {% if partial %}<p class="note">Неполный месяц: {{ partial }}.</p>{% endif %}
+  {{ insights(summary) }}
+  <section class="grid-2">
+    {{ chart_block(charts, 'search_shows', 'Показы по месяцам') }}
+    {{ chart_block(charts, 'search_clicks', 'Клики по месяцам') }}
+  </section>
+  {% if skipped %}<p class="note">Нет месяцев, за которые Вебмастер отдал данные не за все дни: {{ skipped|join(', ') }}.</p>{% endif %}
+
+  <h2>Движение позиций <span class="h2-note">популярные запросы {{ f.month|month_short }} против {{ f.prev|month_short }}, от 20 показов</span></h2>
+  <div class="grid-2">
+    {{ movers_table('Выросли', movers.up, movers_count.up, 'up') }}
+    {{ movers_table('Упали', movers.down, movers_count.down, 'down') }}
+    {{ movers_table('Пропали из выдачи', movers.lost, movers_count.lost, 'lost') }}
+    {{ movers_table('Новые', movers.new, movers_count.new, 'new') }}
+  </div>
+  <p class="note">Позиция — средняя позиция показа за месяц, меньше — лучше. «Пропали» — были в популярных запросах прошлого месяца и исчезли в этом.</p>
+
+  <div class="grid-2">
+    <div class="card table-card">
+      <div class="chart-title">Популярные запросы</div>
+      <table>
+        <thead><tr><th>Запрос</th><th class="num">Показы</th><th class="num">Клики</th><th class="num">CTR</th><th class="num">Позиция</th><th class="num">к {{ f.prev|month_short }}</th></tr></thead>
+        <tbody>
+        {% for r in queries %}
+          <tr><td>{{ r.query_text }}</td><td class="num">{{ r.shows|int }}</td><td class="num">{{ r.clicks|int }}</td>
+              <td class="num">{{ r.ctr_pct|pct }}</td><td class="num">{{ r.avg_show_position|dec }}</td>
+              <td class="num muted">{% if r.position_prev %}{{ r.position_prev|dec }}{% else %}—{% endif %}</td></tr>
+        {% else %}
+          <tr><td colspan="6" class="muted">Нет данных за месяц</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card table-card">
+      <div class="chart-title">Показы по позициям</div>
+      {% if buckets %}
+      <p class="note">По аналитике запросов за {{ buckets.first_day.strftime('%d.%m') }}–{{ buckets.last_day.strftime('%d.%m') }}: API хранит только 14 последних дней.</p>
+      <table>
+        <thead><tr><th>Позиция</th><th class="num">Показы</th><th class="num">Доля</th><th class="bar-col"></th></tr></thead>
+        <tbody>
+        {% for b in buckets.ranges %}
+          <tr><td>{{ b.range }}</td><td class="num">{{ b.impressions|int }}</td><td class="num">{{ b.share|pct }}</td>
+              <td class="bar-col"><span class="share-bar" style="width: {{ '%.1f'|format(b.share) }}%"></span></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">За этот месяц аналитики запросов нет: API хранит только 14 последних дней, история копится с первого запуска сборщика.</p>
+      {% endif %}
+      {% if summary_info %}
+      <p class="note">ИКС {{ summary_info.sqi|int }} · страниц в поиске {{ summary_info.searchable_pages|int }} · исключено {{ summary_info.excluded_pages|int }}</p>
+      {% endif %}
+      {% if problems %}
+      <div class="chart-title" style="margin-top: 12px">Диагностика Вебмастера</div>
+      <ul class="plain">{% for p in problems %}<li>{{ p.problem }} <span class="muted">· {{ p.severity }}</span></li>{% endfor %}</ul>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

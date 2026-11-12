@@ -172,6 +172,27 @@ def run_sync(settings: Settings, source: str, since: date, until: date) -> None:
     print(f"Готово: загружено {loaded} строк.\n")
 
 
+def missing_history(conn: psycopg.Connection, settings: Settings) -> set[str]:
+    """Источники Метрики, у которых в базе нет истории «только людей» или новых отчётов.
+
+    Так бывает после обновления, добавившего отчёты: обычная ежедневная загрузка берёт только последние дни,
+    поэтому таким источникам расписание один раз загружает историю с начала, как пустой базе.
+    Признак — нет ни одной месячной строки «только люди» в отчёте, который появился последним из нужных.
+    """
+    checks = {"metrika": (settings.metrika_counters, "hour"), "maps": (settings.metrika_maps_counters, "total")}
+    missing = set()
+    for source, (counters, slice_) in checks.items():
+        for counter_id in counters:
+            found = conn.execute(
+                "SELECT 1 FROM metrika_traffic WHERE counter_id = %s AND audience = 'humans' AND grain = 'month'"
+                " AND slice = %s LIMIT 1", (counter_id, slice_),
+            ).fetchone()
+            if found is None:
+                missing.add(source)
+                break
+    return missing
+
+
 def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
     """Бесконечный цикл для Docker: раз в 15 минут проверяет, не пора ли загружать данные.
 
@@ -187,7 +208,10 @@ def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
                     SELECT source, max(finished_at) FILTER (WHERE status = 'ok'), max(started_at)
                     FROM sync_runs GROUP BY source
                 """).fetchall()
+                incomplete = missing_history(conn, settings)
             runs = {source: {"last_ok": ok, "last_attempt": attempt} for source, ok, attempt in rows}
+            for source in incomplete & set(runs):  # история неполная — загрузить её с начала
+                runs[source]["last_ok"] = None
             now = datetime.now(TZ)
             sources = [name for name in SYNCS if CONFIGURED[name](settings)]
             for source, since in due_sources(now, runs, sources, DEFAULT_DAYS, monthly_on=MONTHLY_ON):

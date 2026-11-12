@@ -1,0 +1,98 @@
+{% macro tiles(items) %}
+  <div class="tiles">
+    {% for t in items %}
+    <div class="tile">
+      <div class="tile-label">{{ t.label }}</div>
+      <div class="tile-value">{{ t.value }}</div>
+      {% if t.delta %}<div class="tile-delta {{ t.delta.tone }}">{{ t.delta.text }}</div>{% endif %}
+      {% if t.note %}<div class="tile-note">{{ t.note }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+{% endmacro %}
+
+{% macro chart_block(charts, id, title) %}
+  {% if charts and charts.get(id) %}
+  <figure class="card chart-card">
+    <figcaption class="chart-title">{{ title }}</figcaption>
+    <div class="chart" id="chart-{{ id }}" data-chart="{{ id }}" role="img" aria-label="{{ title }}"></div>
+    <details class="chart-table">
+      <summary>Таблица</summary>
+      <table>
+        <thead><tr><th></th>{% for c in charts[id].table.columns %}<th class="num">{{ c }}</th>{% endfor %}</tr></thead>
+        <tbody>
+        {% for row in charts[id].table.rows %}
+          <tr><td>{{ row[0] }}</td>{% for v in row[1:] %}<td class="num">{{ v }}</td>{% endfor %}</tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </details>
+  </figure>
+  {% endif %}
+{% endmacro %}
+
+{% macro insights(summary, title="Аналитическая сводка") %}
+  {% if summary %}
+  <section class="card insights" aria-label="{{ title }}">
+    <div class="insights-title">{{ title }}</div>
+    <div class="insights-grid">
+      {% for kind, name, items in summary.groups %}
+      <div class="insight-group insight-{{ kind }}">
+        <h4><span class="dot" aria-hidden="true"></span>{{ name }}</h4>
+        <ul>{% for t in items %}<li>{{ t }}</li>{% endfor %}</ul>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+{% endmacro %}
+
+{% macro slice_table(report, f, limit=15, compact=False) %}
+  {# compact — только визиты и результат: для узких блоков «Откуда приходят заявки» #}
+  <div class="card table-card">
+    <div class="chart-title">{{ report.title }}</div>
+    {% if report.rows %}
+    <table>
+      <thead><tr>
+        <th>Значение</th><th class="num">Визиты</th>
+        {% if not compact %}<th class="num">к {{ f.prev|month_short }}</th><th class="num">Доля</th>
+        <th class="num">Отказы</th><th class="num">Глубина</th><th class="num">Время</th>{% endif %}
+        <th class="num">Заявки</th><th class="num">Конверсия</th><th class="num">Контакты</th>
+      </tr></thead>
+      <tbody>
+      {% for r in report.rows %}
+        {% if loop.index == limit + 1 %}</tbody><tbody class="more" hidden>{% endif %}
+        <tr>
+          <td class="label" title="{{ r.dim_label }}">{{ r.dim_label }}</td>
+          <td class="num">{{ r.visits|int }}</td>
+          {% if not compact %}
+          <td class="num muted">{{ r.visits|change(r.visits_prev) }}</td>
+          <td class="num muted">{% if r.share is not none %}{{ r.share|pct }}{% endif %}</td>
+          <td class="num">{{ r.bounce_rate|pct }}</td>
+          <td class="num">{{ r.page_depth|dec }}</td>
+          <td class="num">{{ r.avg_duration_sec|duration }}</td>
+          {% endif %}
+          <td class="num">{{ r.leads|int }}</td>
+          <td class="num">{{ r.conversion_pct|pct(2) }}</td>
+          <td class="num">{{ r.contacts|int }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if report.rows|length > limit %}
+    <button type="button" class="link-button"
+            onclick="this.previousElementSibling.querySelector('.more').hidden = false; this.remove()">
+      Показать все строки ({{ report.rows|length }})
+    </button>
+    {% endif %}
+    {% else %}
+    <p class="muted">Нет данных за месяц.</p>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+{% macro alerts(items) %}
+  {% for a in items %}
+  <div class="alert" role="status"><span class="alert-icon" aria-hidden="true">!</span>{{ a }}</div>
+  {% endfor %}
+{% endmacro %}

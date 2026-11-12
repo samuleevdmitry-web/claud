@@ -51,22 +51,22 @@ def test_schema_is_idempotent(conn):
 
 
 def test_sync_builds_monthly_kpi(conn):
-    client = FakeMetrikaClient(GOALS, month_data())
+    client = FakeMetrikaClient(GOALS, month_data(), humans_share=0.5)
     loaded = sync_metrika(conn, client, COUNTER, frozenset({1}), "lastsign",
                           since=JUL, until=date(2026, 8, 31), today=date(2026, 9, 3), log=lambda _: None)
-    assert loaded == (2 + 4) + (2 + 1)  # total: 2 месяца и 4 строки целей; source: 2 канала и 1 строка целей
+    # total: 2 месяца и 4 строки целей; source: 2 канала и 1 строка целей — для обеих аудиторий
+    assert loaded == 2 * ((2 + 4) + (2 + 1))
 
-    monthly = conn.execute(
-        "SELECT visits, visits_prev, leads, leads_prev, conversion_pct, conversion_pct_prev, visits_yoy "
-        "FROM metrika_monthly WHERE counter_id = %s AND month = %s",
-        (COUNTER, AUG),
-    ).fetchone()
+    query = ("SELECT visits, visits_prev, leads, leads_prev, conversion_pct, conversion_pct_prev, visits_yoy "
+             "FROM metrika_monthly WHERE counter_id = %s AND month = %s AND audience = %s")
     # заявка — только цель 1: клики по телефону в заявки не попадают
-    assert monthly == (200, 100, 6, 2, 3.0, 2.0, None)
+    assert conn.execute(query, (COUNTER, AUG, "all")).fetchone() == (200, 100, 6, 2, 3.0, 2.0, None)
+    # «только люди» — отдельные строки, а не копия всего трафика
+    assert conn.execute(query, (COUNTER, AUG, "humans")).fetchone() == (100, 50, 3, 1, 3.0, 2.0, None)
 
     by_source = conn.execute(
         "SELECT dim_key, leads, conversion_pct FROM metrika_kpi "
-        "WHERE grain = 'month' AND slice = 'source' ORDER BY dim_key"
+        "WHERE grain = 'month' AND slice = 'source' AND audience = 'all' ORDER BY dim_key"
     ).fetchall()
     assert [(k, leads, float(c)) for k, leads, c in by_source] == [("direct", 0, 0.0), ("organic", 6, 3.75)]
 
@@ -83,7 +83,7 @@ def test_resync_replaces_period_and_drops_stale_rows(conn):
     run(data)
 
     rows = conn.execute(
-        "SELECT dim_key, visits FROM metrika_traffic WHERE slice = 'source' ORDER BY dim_key"
+        "SELECT dim_key, visits FROM metrika_traffic WHERE slice = 'source' AND audience = 'all' ORDER BY dim_key"
     ).fetchall()
     assert rows == [("direct", 55)]
     assert conn.execute("SELECT count(*) FROM metrika_goal_stats WHERE slice = 'source'").fetchone() == (0,)
@@ -98,7 +98,7 @@ def test_lead_goals_follow_config(conn):
     kwargs = dict(since=AUG, until=date(2026, 8, 31), today=date(2026, 9, 3), log=lambda _: None)
     sync_metrika(conn, client, COUNTER, frozenset({1}), "lastsign", **kwargs)
     sync_metrika(conn, client, COUNTER, frozenset({1, 2}), "lastsign", **kwargs)
-    leads = conn.execute("SELECT leads FROM metrika_monthly WHERE month = %s", (AUG,)).fetchone()
+    leads = conn.execute("SELECT leads FROM metrika_monthly WHERE month = %s AND audience = 'all'", (AUG,)).fetchone()
     assert leads == (15,)
 
 
@@ -180,6 +180,6 @@ def test_maps_monthly_reads_card_goals(conn):
 
     rows = conn.execute(
         "SELECT counter_id, name, card_visits, card_visits_prev, calls, calls_prev, routes, site, site_prev "
-        "FROM maps_monthly WHERE month = %s", (AUG,)
+        "FROM maps_monthly WHERE month = %s AND audience = 'all'", (AUG,)
     ).fetchall()
     assert rows == [(777, "Олдос", 2804, 2164, 104, 95, 160, 199, 203)]

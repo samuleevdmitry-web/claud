@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from analytics import db
-from analytics.dashboard.app import seasonality
+from analytics.dashboard.pages import seasonality
 from analytics.keywords import load_keywords
 from analytics.schedule import TZ, due_sources
 from analytics.sources.wordstat import MonthCount, WordstatClient, WordstatError, parse_dynamics
@@ -158,7 +158,7 @@ def test_sync_and_demand_section(tmp_path, monkeypatch):
     for name, value in {"DATABASE_URL": TEST_DATABASE_URL, "METRIKA_COUNTERS": "42", "METRIKA_MAPS_COUNTERS": "",
                         "WEBMASTER_HOSTS": "", "WORDSTAT_KEYWORDS": str(path)}.items():
         monkeypatch.setenv(name, value)
-    page = TestClient(app).get("/", params={"month": "2026-10"})
+    page = TestClient(app).get("/demand", params={"month": "2026-10", "aud": "all"})
     assert page.status_code == 200
     text = page.text
     assert "Вордстат, Россия, сентябрь 2026" in text  # октября в Вордстате ещё нет

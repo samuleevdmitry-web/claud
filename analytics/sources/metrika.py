@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -16,13 +17,58 @@ GOALS_PER_REQUEST = MAX_METRICS // 2  # на каждую цель — две м
 
 GRAINS = {"day": "ym:s:date", "month": "ym:s:startOfMonth"}
 
-# Срезы трафика; {attr} заменяется моделью атрибуции (lastsign, last, first).
+# Весь трафик и «только люди» — как сегмент Метрики «Поведение → Роботность → Люди».
+AUDIENCES = {"all": None, "humans": "ym:s:isRobot=='No'"}
+
+
+@dataclass(frozen=True)
+class SliceSpec:
+    """Отчёт Метрики: группировки, зернистость и ограничение на число строк.
+
+    top — для отчётов с тысячами значений (страницы, фразы, сайты): за каждый месяц берётся
+    топ-N строк по визитам. core — срез собирается и для счётчиков карточек на Картах.
+    """
+
+    dims: tuple[str, ...]
+    grains: tuple[str, ...] = ("month",)
+    top: int | None = None
+    core: bool = False
+
+
+# Отчёты по разделам Метрики; {attr} заменяется моделью атрибуции (lastsign, last, first).
 SLICES = {
-    "total": [],
-    "source": ["ym:s:{attr}TrafficSource"],
-    "utm": ["ym:s:{attr}UTMSource", "ym:s:{attr}UTMMedium", "ym:s:{attr}UTMCampaign"],
-    "city": ["ym:s:regionCity"],
-    "device": ["ym:s:deviceCategory"],
+    # Сводка и источники
+    "total": SliceSpec((), ("day", "month"), core=True),
+    "source": SliceSpec(("ym:s:{attr}TrafficSource",), ("day", "month"), core=True),
+    "utm": SliceSpec(("ym:s:{attr}UTMSource", "ym:s:{attr}UTMMedium", "ym:s:{attr}UTMCampaign"), ("day", "month"), core=True),
+    "search_engine": SliceSpec(("ym:s:{attr}SearchEngineRoot",)),
+    "search_phrase": SliceSpec(("ym:s:{attr}SearchPhrase",), top=100),
+    "referrer": SliceSpec(("ym:s:{attr}ReferalSource",), top=100),
+    "social": SliceSpec(("ym:s:{attr}SocialNetwork",)),
+    "adv_engine": SliceSpec(("ym:s:{attr}AdvEngine",)),
+    "recommendation": SliceSpec(("ym:s:{attr}RecommendationSystem",)),
+    "messenger": SliceSpec(("ym:s:{attr}Messenger",)),
+    # География
+    "country": SliceSpec(("ym:s:regionCountry",)),
+    "region": SliceSpec(("ym:s:regionArea",), top=100),
+    "city": SliceSpec(("ym:s:regionCity",), ("day", "month"), core=True),
+    # Аудитория
+    "gender": SliceSpec(("ym:s:gender",)),
+    "age": SliceSpec(("ym:s:ageInterval",)),
+    "new_user": SliceSpec(("ym:s:isNewUser",)),
+    "interest": SliceSpec(("ym:s:interest",)),
+    # Технологии
+    "device": SliceSpec(("ym:s:deviceCategory",), ("day", "month"), core=True),
+    "os": SliceSpec(("ym:s:operatingSystemRoot",)),
+    "browser": SliceSpec(("ym:s:browser",)),
+    # Содержание и поведение
+    "landing": SliceSpec(("ym:s:startURL",), top=100),
+    "exit": SliceSpec(("ym:s:endURLPath",), top=100),
+    "depth": SliceSpec(("ym:s:pageViewsInterval",)),
+    "duration": SliceSpec(("ym:s:visitDurationInterval",)),
+    # Время
+    "hour": SliceSpec(("ym:s:hour",)),
+    "weekday": SliceSpec(("ym:s:dayOfWeek",)),
 }
 
 TRAFFIC_METRICS = [
@@ -33,6 +79,12 @@ TRAFFIC_METRICS = [
     "ym:s:pageDepth",
     "ym:s:avgVisitDurationSeconds",
 ]
+
+# Суточные квоты: 5000 запросов на пользователя и на счётчик, сброс в 00:00 по Гринвичу (03:00 МСК).
+# Повторять такие запросы до сброса бессмысленно.
+DAILY_QUOTAS = {"quota_requests_by_uid", "quota_requests_by_counter_id"}
+# Отчётный API: не больше 200 запросов за 5 минут на пользователя — между запросами не меньше 1,5 с.
+STAT_INTERVAL = 1.6
 
 # У ошибки «уменьшите интервал дат» нет своего кода (error_type общий — query_error), только текст.
 TOO_COMPLEX_MARKERS = ("слишком сложный", "too complex", "too complicated")
@@ -85,17 +137,35 @@ class MetrikaClient:
         self,
         token: str,
         session: requests.Session | None = None,
-        max_retries: int = 4,
+        max_retries: int = 6,
         backoff: float = 2.0,
+        quota_wait: float = 30.0,
+        stat_interval: float = STAT_INTERVAL,
     ):
         self.session = yandex_session(token, session)
         self.max_retries = max_retries
         self.backoff = backoff
+        # Квота на частоту запросов снимается через несколько минут — после 429 ждём не меньше 30 секунд.
+        self.quota_wait = quota_wait
+        self.stat_interval = stat_interval
+        self._last_stat = 0.0
 
     def _get(self, path: str, params: dict | None = None) -> dict:
+        if path.startswith("/stat/"):
+            pause = self._last_stat + self.stat_interval - time.monotonic()
+            if pause > 0:
+                time.sleep(pause)
+            self._last_stat = time.monotonic()
         resp = send(
-            self.session, "GET", API_URL + path, params=params, max_retries=self.max_retries, backoff=self.backoff
+            self.session, "GET", API_URL + path, params=params, max_retries=self.max_retries,
+            backoff=self.backoff, quota_wait=self.quota_wait,
+            give_up=lambda r: r.status_code == 429 and _error_type(r) in DAILY_QUOTAS,
         )
+        if resp.status_code == 429 and _error_type(resp) in DAILY_QUOTAS:
+            raise MetrikaError(
+                f"{path}: исчерпана суточная квота API Метрики (5000 запросов), она обнулится в 03:00 по Москве. "
+                f"{_error_message(resp)}"
+            )
         if resp.status_code in (401, 403):
             raise MetrikaError(
                 f"{path}: HTTP {resp.status_code}: {_error_message(resp)}. Проверьте токен "
@@ -123,31 +193,43 @@ class MetrikaClient:
         dimensions: list[str],
         date1: date,
         date2: date,
+        filters: str | None = None,
+        top: int | None = None,
     ) -> Report:
-        """Отчёт целиком, со всеми страницами."""
+        """Отчёт целиком, со всеми страницами; с top — только первые top строк по первой метрике."""
         rows: list[dict] = []
         sampled = False
         while True:
-            data = self._get(
-                "/stat/v1/data",
-                {
-                    "ids": counter_id,
-                    "metrics": ",".join(metrics),
-                    "dimensions": ",".join(dimensions),
-                    "date1": date1.isoformat(),
-                    "date2": date2.isoformat(),
-                    "limit": PAGE_SIZE,
-                    "offset": len(rows) + 1,  # строки в API нумеруются с единицы
-                    "accuracy": "full",
-                    "include_undefined": "true",
-                    "lang": "ru",
-                },
-            )
+            params = {
+                "ids": counter_id,
+                "metrics": ",".join(metrics),
+                "dimensions": ",".join(dimensions),
+                "date1": date1.isoformat(),
+                "date2": date2.isoformat(),
+                "limit": top or PAGE_SIZE,
+                "offset": len(rows) + 1,  # строки в API нумеруются с единицы
+                "accuracy": "full",
+                "include_undefined": "true",
+                "lang": "ru",
+            }
+            if filters:
+                params["filters"] = filters
+            if top:
+                params["sort"] = f"-{metrics[0]}"
+            data = self._get("/stat/v1/data", params)
             sampled = sampled or bool(data.get("sampled"))
             page = data.get("data", [])
             rows.extend(page)
-            if not page or len(rows) >= data.get("total_rows", 0):
+            if top or not page or len(rows) >= data.get("total_rows", 0):
                 return Report(rows, sampled)
+
+
+def _error_type(resp: requests.Response) -> str:
+    try:
+        errors = resp.json().get("errors") or [{}]
+        return str(errors[0].get("error_type", ""))
+    except ValueError:
+        return ""
 
 
 def _error_message(resp: requests.Response) -> str:
@@ -158,7 +240,17 @@ def _error_message(resp: requests.Response) -> str:
 
 
 def dimensions_for(grain: str, slice_: str, attribution: str) -> list[str]:
-    return [GRAINS[grain]] + [d.format(attr=attribution) for d in SLICES[slice_]]
+    return [GRAINS[grain]] + [d.format(attr=attribution) for d in SLICES[slice_].dims]
+
+
+def month_starts(date1: date, date2: date) -> list[tuple[date, date]]:
+    """Календарные месяцы периода [date1, date2], обрезанные по его границам."""
+    out, start = [], date1
+    while start <= date2:
+        next_month = (start.replace(day=1) + timedelta(days=32)).replace(day=1)
+        out.append((start, min(next_month - timedelta(days=1), date2)))
+        start = next_month
+    return out
 
 
 def goal_metrics(goal_ids: list[int]) -> list[str]:
@@ -219,12 +311,13 @@ def parse_traffic(rows: list[dict], grain: str, slice_: str) -> list[TrafficRow]
     return out
 
 
-def parse_goals(rows: list[dict], grain: str, slice_: str, goal_ids: list[int]) -> list[GoalRow]:
+def parse_goals(rows: list[dict], grain: str, slice_: str, goal_ids: list[int], skip: int = 0) -> list[GoalRow]:
+    """skip — сколько метрик в начале строки не относятся к целям (визиты для сортировки топ-отчётов)."""
     out = []
     for row in rows:
         period, *dims = row["dimensions"]
         key, _ = _slice_key(dims)
-        values = row["metrics"]
+        values = row["metrics"][skip:]
         for i, goal_id in enumerate(goal_ids):
             reaches, visits = int(values[2 * i] or 0), int(values[2 * i + 1] or 0)
             if reaches or visits:
@@ -242,11 +335,16 @@ def fetch_traffic(
     date1: date,
     date2: date,
     attribution: str,
+    audience: str = "all",
 ) -> tuple[list[TrafficRow], bool]:
-    report = report_by_parts(
-        client, counter_id, TRAFFIC_METRICS, dimensions_for(grain, slice_, attribution), date1, date2
-    )
-    return parse_traffic(report.rows, grain, slice_), report.sampled
+    spec, dims, rows, sampled = SLICES[slice_], dimensions_for(grain, slice_, attribution), [], False
+    # топ-отчёт запрашивается помесячно: иначе топ-N был бы общим на весь период, а не на каждый месяц
+    periods = month_starts(date1, date2) if spec.top else [(date1, date2)]
+    for d1, d2 in periods:
+        report = report_by_parts(client, counter_id, TRAFFIC_METRICS, dims, d1, d2, AUDIENCES[audience], spec.top)
+        rows += parse_traffic(report.rows, grain, slice_)
+        sampled = sampled or report.sampled
+    return rows, sampled
 
 
 def fetch_goals(
@@ -258,14 +356,20 @@ def fetch_goals(
     date1: date,
     date2: date,
     attribution: str,
+    audience: str = "all",
 ) -> list[GoalRow]:
-    rows = []
-    for start in range(0, len(goal_ids), GOALS_PER_REQUEST):
-        batch = goal_ids[start : start + GOALS_PER_REQUEST]
-        report = report_by_parts(
-            client, counter_id, goal_metrics(batch), dimensions_for(grain, slice_, attribution), date1, date2
-        )
-        rows.extend(parse_goals(report.rows, grain, slice_, batch))
+    spec, dims, rows = SLICES[slice_], dimensions_for(grain, slice_, attribution), []
+    # В топ-отчёте первой метрикой идут визиты: по ним сортировка, чтобы строки совпали с отчётом трафика.
+    lead = ["ym:s:visits"] if spec.top else []
+    per_request = (MAX_METRICS - len(lead)) // 2
+    periods = month_starts(date1, date2) if spec.top else [(date1, date2)]
+    for d1, d2 in periods:
+        for start in range(0, len(goal_ids), per_request):
+            batch = goal_ids[start : start + per_request]
+            report = report_by_parts(
+                client, counter_id, lead + goal_metrics(batch), dims, d1, d2, AUDIENCES[audience], spec.top
+            )
+            rows.extend(parse_goals(report.rows, grain, slice_, batch, skip=len(lead)))
     return rows
 
 
@@ -276,19 +380,21 @@ def report_by_parts(
     dimensions: list[str],
     date1: date,
     date2: date,
+    filters: str | None = None,
+    top: int | None = None,
 ) -> Report:
     """Отчёт за период; если Метрика считает запрос слишком сложным, период делится пополам.
 
     Деление идёт по границе месяца, чтобы месячная строка не собиралась из двух частей.
     """
     try:
-        return client.report(counter_id, metrics, dimensions, date1, date2)
+        return client.report(counter_id, metrics, dimensions, date1, date2, filters, top)
     except MetrikaError as exc:
         split = month_split_point(date1, date2)
         if not exc.too_complex or split is None:
             raise
-    left = report_by_parts(client, counter_id, metrics, dimensions, date1, split - timedelta(days=1))
-    right = report_by_parts(client, counter_id, metrics, dimensions, split, date2)
+    left = report_by_parts(client, counter_id, metrics, dimensions, date1, split - timedelta(days=1), filters, top)
+    right = report_by_parts(client, counter_id, metrics, dimensions, split, date2, filters, top)
     return Report(left.rows + right.rows, left.sampled or right.sampled)
 
 

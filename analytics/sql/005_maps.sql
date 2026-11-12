@@ -7,9 +7,11 @@ CREATE TABLE IF NOT EXISTS metrika_counters (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+DROP VIEW IF EXISTS maps_monthly, maps_actions CASCADE;
+
 -- Действия в карточке: цели счётчика Карт, разобранные по названию («Клик на позвонить - Олдос» и т. п.).
-CREATE OR REPLACE VIEW maps_actions AS
-SELECT s.counter_id, s.grain, s.period_start, s.slice, s.dim_key, a.action,
+CREATE VIEW maps_actions AS
+SELECT s.counter_id, s.audience, s.grain, s.period_start, s.slice, s.dim_key, a.action,
        sum(s.reaches)::integer AS reaches
 FROM metrika_goal_stats s
 JOIN metrika_goals g USING (counter_id, goal_id)
@@ -24,12 +26,13 @@ CROSS JOIN LATERAL (
     END AS action
 ) a
 WHERE c.kind = 'maps' AND a.action IS NOT NULL
-GROUP BY s.counter_id, s.grain, s.period_start, s.slice, s.dim_key, a.action;
+GROUP BY s.counter_id, s.audience, s.grain, s.period_start, s.slice, s.dim_key, a.action;
 
 -- Карточка по месяцам с прошлым месяцем (слайд «Яндекс Карты» в отчёте).
-CREATE OR REPLACE VIEW maps_monthly AS
+CREATE VIEW maps_monthly AS
 WITH m AS (
     SELECT t.counter_id,
+           t.audience,
            t.period_start AS month,
            t.visits       AS card_visits,
            coalesce(sum(a.reaches) FILTER (WHERE a.action = 'calls'), 0)       AS calls,
@@ -39,12 +42,12 @@ WITH m AS (
            coalesce(sum(a.reaches) FILTER (WHERE a.action = 'messengers'), 0)  AS messengers
     FROM metrika_traffic t
     JOIN metrika_counters c ON c.counter_id = t.counter_id AND c.kind = 'maps'
-    LEFT JOIN maps_actions a ON a.counter_id = t.counter_id AND a.grain = t.grain
+    LEFT JOIN maps_actions a ON a.counter_id = t.counter_id AND a.audience = t.audience AND a.grain = t.grain
                             AND a.period_start = t.period_start AND a.slice = t.slice AND a.dim_key = t.dim_key
     WHERE t.grain = 'month' AND t.slice = 'total'
-    GROUP BY t.counter_id, t.period_start, t.visits
+    GROUP BY t.counter_id, t.audience, t.period_start, t.visits
 )
-SELECT cur.counter_id, c.name, cur.month,
+SELECT cur.counter_id, cur.audience, c.name, cur.month,
        cur.card_visits, prev.card_visits AS card_visits_prev,
        cur.calls,       prev.calls       AS calls_prev,
        cur.routes,      prev.routes      AS routes_prev,
@@ -52,4 +55,5 @@ SELECT cur.counter_id, c.name, cur.month,
        cur.route_trips, cur.messengers
 FROM m cur
 JOIN metrika_counters c USING (counter_id)
-LEFT JOIN m prev ON prev.counter_id = cur.counter_id AND prev.month = (cur.month - interval '1 month')::date;
+LEFT JOIN m prev ON prev.counter_id = cur.counter_id AND prev.audience = cur.audience
+                AND prev.month = (cur.month - interval '1 month')::date;

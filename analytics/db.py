@@ -77,6 +77,7 @@ def upsert_goals(conn: psycopg.Connection, counter_id: int, goals: list[dict], l
 def replace_metrika_slice(
     conn: psycopg.Connection,
     counter_id: int,
+    audience: str,
     grain: str,
     slice_: str,
     date_from: date,
@@ -86,30 +87,31 @@ def replace_metrika_slice(
     goal_rows: list[GoalRow],
 ) -> int:
     """Заменяет данные среза за период целиком, чтобы в базе не оставались строки, пропавшие из Метрики."""
-    where = "counter_id = %s AND grain = %s AND slice = %s AND period_start BETWEEN %s AND %s"
-    scope = (counter_id, grain, slice_, date_from, date_to)
+    where = "counter_id = %s AND audience = %s AND grain = %s AND slice = %s AND period_start BETWEEN %s AND %s"
+    scope = (counter_id, audience, grain, slice_, date_from, date_to)
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(f"DELETE FROM metrika_traffic WHERE {where}", scope)
         cur.execute(f"DELETE FROM metrika_goal_stats WHERE {where}", scope)
         cur.executemany(
             """
-            INSERT INTO metrika_traffic (counter_id, grain, period_start, slice, dim_key, dim_label, visits,
+            INSERT INTO metrika_traffic (counter_id, audience, grain, period_start, slice, dim_key, dim_label, visits,
                                          users, pageviews, bounce_rate, page_depth, avg_duration_sec, sampled)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
-                (counter_id, r.grain, r.period_start, r.slice, r.dim_key, r.dim_label, r.visits, r.users,
+                (counter_id, audience, r.grain, r.period_start, r.slice, r.dim_key, r.dim_label, r.visits, r.users,
                  r.pageviews, r.bounce_rate, r.page_depth, r.avg_duration_sec, sampled)
                 for r in traffic
             ],
         )
         cur.executemany(
             """
-            INSERT INTO metrika_goal_stats (counter_id, grain, period_start, slice, dim_key, goal_id, reaches, visits)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO metrika_goal_stats (counter_id, audience, grain, period_start, slice, dim_key, goal_id,
+                                            reaches, visits)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
-                (counter_id, r.grain, r.period_start, r.slice, r.dim_key, r.goal_id, r.reaches, r.visits)
+                (counter_id, audience, r.grain, r.period_start, r.slice, r.dim_key, r.goal_id, r.reaches, r.visits)
                 for r in goal_rows
             ],
         )

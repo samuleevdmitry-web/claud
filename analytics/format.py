@@ -45,6 +45,18 @@ def fmt_duration(seconds: Number) -> str:
     return f"{minutes}{NBSP}мин {sec}{NBSP}с" if minutes else f"{sec}{NBSP}с"
 
 
+def plural(n: Number, forms: tuple[str, str, str]) -> str:
+    """Число со словом в нужной форме: plural(21, ("визит", "визита", "визитов")) → «21 визит»."""
+    value = abs(round(float(n or 0)))
+    if value % 10 == 1 and value % 100 != 11:
+        form = forms[0]
+    elif 2 <= value % 10 <= 4 and not 12 <= value % 100 <= 14:
+        form = forms[1]
+    else:
+        form = forms[2]
+    return f"{fmt_int(n)}{NBSP}{form}"
+
+
 def fmt_change(cur: Number, prev: Number) -> str:
     """Относительное изменение со знаком для таблиц: «+18,6%», «−62,5%»."""
     if cur is None or not prev:

@@ -4,6 +4,7 @@ import pytest
 
 from analytics.sources.metrika import (
     GOALS_PER_REQUEST,
+    fetch_traffic,
     MetrikaClient,
     MetrikaError,
     Report,
@@ -21,7 +22,7 @@ from tests.fakes import FakeResponse, FakeSession, dim
 
 def make_client(responses):
     session = FakeSession(responses)
-    return MetrikaClient("token", session=session, backoff=0), session
+    return MetrikaClient("token", session=session, backoff=0, quota_wait=0, stat_interval=0), session
 
 
 def test_parse_traffic_source_slice():
@@ -149,7 +150,7 @@ class SplittingClient:
         self.error_too_complex = error_too_complex
         self.calls = []
 
-    def report(self, counter_id, metrics, dimensions, date1, date2):
+    def report(self, counter_id, metrics, dimensions, date1, date2, filters=None, top=None):
         self.calls.append((date1, date2))
         if (date2.year - date1.year) * 12 + date2.month - date1.month >= 2:
             raise MetrikaError("HTTP 400", too_complex=self.error_too_complex)
@@ -173,3 +174,25 @@ def test_report_by_parts_does_not_split_other_errors():
     with pytest.raises(MetrikaError):
         report_by_parts(client, 1, ["ym:s:visits"], ["ym:s:date"], date(2026, 1, 1), date(2026, 6, 30))
     assert len(client.calls) == 1
+
+
+def test_top_report_is_requested_per_month_sorted_by_visits():
+    rows = {"data": [{"dimensions": [dim("2026-08-01"), dim("https://oldos.ru/")], "metrics": [5, 4, 9, 0, 1.8, 60]}],
+            "total_rows": 3406}
+    client, session = make_client([FakeResponse(200, rows), FakeResponse(200, rows)])
+    traffic, _ = fetch_traffic(client, 1, "month", "landing", date(2026, 8, 1), date(2026, 9, 10), "lastsign", "humans")
+    assert [(params["date1"], params["date2"]) for _, params in session.calls] == [
+        ("2026-08-01", "2026-08-31"), ("2026-09-01", "2026-09-10")
+    ]
+    params = session.calls[0][1]
+    assert params["limit"] == 100 and params["sort"] == "-ym:s:visits"
+    assert params["filters"] == "ym:s:isRobot=='No'"
+    assert len(traffic) == 2  # одна страница за раз: топ не листается дальше
+
+
+def test_daily_quota_fails_fast_without_retries():
+    payload = {"errors": [{"error_type": "quota_requests_by_uid", "message": "Quota exceeded"}], "code": 429}
+    client, session = make_client([FakeResponse(429, payload)])
+    with pytest.raises(MetrikaError, match="суточная квота"):
+        client.report(1, ["ym:s:visits"], ["ym:s:date"], date(2026, 10, 1), date(2026, 10, 31))
+    assert len(session.calls) == 1

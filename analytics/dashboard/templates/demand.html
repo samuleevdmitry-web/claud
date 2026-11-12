@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "macros.html" import tiles as show_tiles, chart_block, insights %}
+{% block title %}Спрос{% endblock %}
+{% block content %}
+{% if not demand %}
+  <div class="card muted">Вордстат не настроен или ещё не загружен (WORDSTAT_FOLDER_ID, файл wordstat.toml).</div>
+{% else %}
+  <p class="note">Вордстат, {{ demand.region }}, {{ demand.month|month|lower }}.
+    {% if demand.lagging %}Вордстат публикует месячные данные с задержкой: последний доступный месяц — {{ demand.month|month|lower }}.{% endif %}</p>
+  {{ show_tiles(demand.tiles) }}
+  {{ insights(demand.summary) }}
+  <section class="grid-2">
+    {{ chart_block(charts, 'demand_brand', 'Брендовый спрос (B2B) по месяцам') }}
+    {{ chart_block(charts, 'demand_directions', 'Спрос по направлениям каталога') }}
+  </section>
+  <div class="card table-card">
+    <div class="chart-title">Спрос по категориям каталога</div>
+    <p class="note">Сумма запросов по ключам категории (наведите на название, чтобы увидеть ключи). Пик · спад — месяцы
+      самого высокого и самого низкого спроса в среднем за полные годы. Ключи и минус-слова — в файле wordstat.toml.</p>
+    <table>
+      <thead><tr>
+        <th>Направление / категория</th><th class="num">{{ demand.month|month_short }}</th>
+        <th class="num">к {{ demand.prev|month_short }}</th><th class="num">к {{ demand.year_ago|month_short }}</th>
+        <th class="num">Пик · спад</th>
+      </tr></thead>
+      {% for d in demand.directions %}
+      <tbody>
+        <tr class="group-row">
+          <td>{{ d.name }}</td><td class="num">{{ d.demand|int }}</td>
+          <td class="num">{{ d.demand|change(d.prev) }}</td><td class="num">{{ d.demand|change(d.yoy) }}</td>
+          <td class="num">{{ d.season }}</td>
+        </tr>
+        {% for r in d.rows %}
+        <tr>
+          <td class="indent" title="{{ r.phrases }}">{{ r.category }}</td><td class="num">{{ r.demand|int }}</td>
+          <td class="num muted">{{ r.demand|change(r.prev) }}</td><td class="num muted">{{ r.demand|change(r.yoy) }}</td>
+          <td class="num muted">{{ r.season }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% endfor %}
+    </table>
+  </div>
+  {% if demand.brand_queries %}
+  <div class="card table-card">
+    <div class="chart-title">Брендовые запросы за 30 дней</div>
+    <table>
+      <thead><tr><th>Запрос</th><th class="num">Частотность</th></tr></thead>
+      <tbody>
+      {% for r in demand.brand_queries %}<tr><td>{{ r.query }}</td><td class="num">{{ r.count|int }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

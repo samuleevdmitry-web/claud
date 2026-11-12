@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "macros.html" import tiles as show_tiles, chart_block, insights %}
+{% block title %}Обзор{% endblock %}
+{% block content %}
+<section>
+  {{ show_tiles(tiles) }}
+</section>
+{{ insights(summary, "Главное за месяц") }}
+<section class="grid-2">
+  {{ chart_block(charts, 'site_trend', 'Визиты и посетители по месяцам') }}
+  {{ chart_block(charts, 'leads_trend', 'Заявки и контакты по месяцам') }}
+</section>
+{% if skipped %}<p class="note">На графиках нет месяцев, когда счётчик собирал данные не каждый день: {{ skipped|join(', ') }}.</p>{% endif %}
+<p class="note">Подробности — в разделах меню. Каждая сводка собрана по правилам из цифр раздела; формулы — в docs/metrics.md.</p>
+{% endblock %}

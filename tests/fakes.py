@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from datetime import date
 
-from analytics.sources.metrika import GRAINS, Report
+from analytics.sources.metrika import GRAINS, SLICES, TRAFFIC_METRICS, Report
 
 
 class FakeResponse:
-    def __init__(self, status_code: int, payload: dict | None = None, text: str = ""):
+    def __init__(self, status_code: int, payload: dict | None = None, text: str = "", headers: dict | None = None):
         self.status_code = status_code
         self._payload = payload
         self.text = text
+        self.headers = headers or {}
 
     def json(self) -> dict:
         if self._payload is None:
@@ -40,12 +41,16 @@ def dim(name, id_=None) -> dict:
 
 
 class FakeMetrikaClient:
-    """Отвечает на отчёты по таблице {(grain, slice): [(period, [dims], traffic, {goal_id: (reaches, visits)})]}."""
+    """Отвечает на отчёты по таблице {(grain, slice): [(period, [dims], traffic, {goal_id: (reaches, visits)})]}.
 
-    def __init__(self, goals: list[dict], data: dict, name: str = "example.ru"):
+    С фильтром «только люди» количества умножаются на humans_share.
+    """
+
+    def __init__(self, goals: list[dict], data: dict, name: str = "example.ru", humans_share: float = 1.0):
         self._goals = goals
         self.data = data
         self.name = name
+        self.humans_share = humans_share
         self.reports: list[tuple[list[str], list[str], date, date]] = []
 
     def counter(self, counter_id: int) -> dict:
@@ -54,34 +59,29 @@ class FakeMetrikaClient:
     def goals(self, counter_id: int) -> list[dict]:
         return self._goals
 
-    def report(self, counter_id, metrics, dimensions, date1, date2) -> Report:
+    def report(self, counter_id, metrics, dimensions, date1, date2, filters=None, top=None) -> Report:
         self.reports.append((metrics, dimensions, date1, date2))
         grain = next(g for g, d in GRAINS.items() if d == dimensions[0])
-        slice_ = _slice_by_dimensions(dimensions[1:])
+        slice_ = next(name for name, spec in SLICES.items()
+                      if [d.format(attr="lastsign") for d in spec.dims] == dimensions[1:])
+        share = self.humans_share if filters else 1.0
         rows = []
         for period, dims, traffic, goals in self.data.get((grain, slice_), []):
             if not date1 <= period <= date2:
                 continue
-            if metrics[0] == "ym:s:visits":
-                values = list(traffic)
-            else:
-                values = []
-                for m in metrics:
+            values = []
+            for m in metrics:
+                if m in TRAFFIC_METRICS:
+                    i = TRAFFIC_METRICS.index(m)
+                    values.append(traffic[i] * share if i < 3 else traffic[i])  # визиты, посетители, просмотры
+                else:
                     goal_id = int(m.removeprefix("ym:s:goal").removesuffix("reaches").removesuffix("visits"))
                     reaches, visits = goals.get(goal_id, (0, 0))
-                    values.append(float(reaches if m.endswith("reaches") else visits))
+                    values.append(float(reaches if m.endswith("reaches") else visits) * share)
             rows.append({"dimensions": [dim(period.isoformat())] + dims, "metrics": values})
+        if top:
+            rows = sorted(rows, key=lambda r: -r["metrics"][0])[:top]
         return Report(rows, sampled=False)
-
-
-def _slice_by_dimensions(dims: list[str]) -> str:
-    if not dims:
-        return "total"
-    if dims[0].endswith("TrafficSource"):
-        return "source"
-    if "UTM" in dims[0]:
-        return "utm"
-    return "city" if dims[0] == "ym:s:regionCity" else "device"
 
 
 class FakeWebmasterClient:

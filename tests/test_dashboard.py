@@ -6,8 +6,8 @@ from datetime import date
 import pytest
 
 from analytics import db
-from analytics.dashboard.app import trend_months
-from analytics.dashboard.format import delta, fmt_change, fmt_duration, fmt_int, fmt_pct
+from analytics.dashboard.pages import trend_months
+from analytics.format import delta, fmt_change, fmt_duration, fmt_int, fmt_pct
 from analytics.sync import sync_metrika, sync_webmaster
 from tests.fakes import FakeMetrikaClient, FakeWebmasterClient, dim
 
@@ -99,3 +99,30 @@ def test_page_with_data(client):
     assert "Переходы из поисковых систем" in text   # таблица каналов
     assert "3 000" in text                      # показы в поиске за сентябрь (100 × 30)
     assert 'id="chart-data"' in text
+
+
+@needs_db
+def test_every_section_renders(client):
+    aug, sep = date(2026, 8, 1), date(2026, 9, 1)
+    china = dim("Китай", "134")
+    data = {
+        ("month", "total"): [(aug, [], [1000, 800, 2500, 20.0, 2.5, 150.0], {1: (10, 9)}),
+                             (sep, [], [1200, 900, 3000, 18.0, 2.6, 160.0], {1: (15, 14)})],
+        ("month", "country"): [(sep, [dim("Россия", "225")], [1000, 750, 2600, 15.0, 2.8, 170.0], {1: (15, 14)}),
+                               (sep, [china], [200, 150, 400, 60.0, 1.1, 20.0], {})],
+        ("month", "hour"): [(sep, [dim(f"{h}:00", str(h))], [50, 40, 100, 18.0, 2.0, 100.0], {1: (1, 1)}) for h in range(24)],
+    }
+    goals = [{"id": 1, "name": "Отправил контактные данные", "type": "contact_data_sent"}]
+    with db.connect(TEST_DATABASE_URL) as conn:
+        sync_metrika(conn, FakeMetrikaClient(goals, data, humans_share=0.8), 42, frozenset({1}), "lastsign",
+                     since=aug, until=date(2026, 9, 30), today=date(2026, 10, 2), log=lambda _: None)
+    for path in ("/", "/traffic", "/traffic?tab=geo", "/traffic?tab=time", "/traffic?tab=sources", "/leads",
+                 "/search", "/demand", "/maps", "/status"):
+        page = client.get(path, params={"month": "2026-09"})
+        assert page.status_code == 200, path
+    geo = client.get("/traffic", params={"month": "2026-09", "tab": "geo", "aud": "all"}).text
+    assert "Аналитическая сводка" in geo and "Китай" in geo  # вывод про страны без продаж
+    humans = client.get("/", params={"month": "2026-09", "aud": "humans"}).text
+    assert "960" in humans  # 1200 визитов × 0,8 — «только люди» читаются отдельно
+    status = client.get("/status", params={"month": "2026-09"}).text
+    assert "Роботы в трафике" in status and "20,0%" in status

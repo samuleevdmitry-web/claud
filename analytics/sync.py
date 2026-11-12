@@ -10,7 +10,15 @@ import psycopg
 
 from analytics import db
 from analytics.keywords import KeywordConfig
-from analytics.sources.metrika import GRAINS, SLICES, MetrikaClient, fetch_goals, fetch_traffic, grain_range
+from analytics.sources.metrika import (
+    AUDIENCES,
+    GRAINS,
+    SLICES,
+    MetrikaClient,
+    fetch_goals,
+    fetch_traffic,
+    grain_range,
+)
 from analytics.sources.wordstat import WordstatClient, WordstatError
 from analytics.sources.webmaster import (
     WebmasterClient,
@@ -36,9 +44,11 @@ def sync_metrika(
     log: Callable[[str], None] = print,
     kind: str = "site",
 ) -> int:
-    """Перегружает цели и все срезы трафика за период; возвращает число загруженных строк.
+    """Перегружает цели и отчёты за период в двух вариантах — весь трафик и только люди.
 
-    kind: 'site' — счётчик сайта, 'maps' — счётчик карточки на Картах, который создаёт Яндекс Бизнес.
+    kind: 'site' — счётчик сайта (все отчёты), 'maps' — счётчик карточки на Картах, который создаёт
+    Яндекс Бизнес (только основные: сводка, источники, UTM, города, устройства).
+    Возвращает число загруженных строк.
     """
     today = today or date.today()
     db.upsert_counter(conn, client.counter(counter_id), kind)
@@ -48,16 +58,24 @@ def sync_metrika(
     log(f"Счётчик {counter_id}: {len(goals)} целей, из них заявки: {sorted(lead_goals & set(goal_ids))}")
 
     loaded = 0
-    for grain in GRAINS:
-        date_from, date_to = grain_range(grain, since, until, today)
-        for slice_ in SLICES:
-            traffic, sampled = fetch_traffic(client, counter_id, grain, slice_, date_from, date_to, attribution)
-            goal_rows = fetch_goals(client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution)
-            loaded += db.replace_metrika_slice(
-                conn, counter_id, grain, slice_, date_from, date_to, traffic, sampled, goal_rows
-            )
-            note = " (данные семплированы)" if sampled else ""
-            log(f"  {grain:<5} {slice_:<6} {date_from}…{date_to}: трафик {len(traffic)}, цели {len(goal_rows)}{note}")
+    for audience in AUDIENCES:
+        for grain in GRAINS:
+            date_from, date_to = grain_range(grain, since, until, today)
+            for slice_, spec in SLICES.items():
+                if grain not in spec.grains or not (spec.core or kind == "site"):
+                    continue
+                traffic, sampled = fetch_traffic(
+                    client, counter_id, grain, slice_, date_from, date_to, attribution, audience
+                )
+                goal_rows = fetch_goals(
+                    client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution, audience
+                )
+                loaded += db.replace_metrika_slice(
+                    conn, counter_id, audience, grain, slice_, date_from, date_to, traffic, sampled, goal_rows
+                )
+                note = " (данные семплированы)" if sampled else ""
+                log(f"  {audience:<6} {grain:<5} {slice_:<14} {date_from}…{date_to}: "
+                    f"трафик {len(traffic)}, цели {len(goal_rows)}{note}")
     return loaded
 
 

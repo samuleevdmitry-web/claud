@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "macros.html" import tiles as show_tiles, chart_block, insights, slice_table %}
+{% block title %}Трафик{% endblock %}
+{% block content %}
+<nav class="tabs" aria-label="Отчёты">
+  {% for key, title in tabs.items() %}
+  <a href="/traffic{{ f.query(tab=key if key != 'summary' else None) }}" {% if key == tab %}aria-current="page"{% endif %}>{{ title }}</a>
+  {% endfor %}
+</nav>
+
+{% if tab == "summary" %}
+  {{ show_tiles(tiles) }}
+  {{ insights(summary) }}
+  <section class="grid-2">
+    {{ chart_block(charts, 'site_trend', 'Визиты и посетители по месяцам') }}
+    {{ chart_block(charts, 'site_daily', 'Визиты по дням, ' ~ (f.month|month|lower)) }}
+  </section>
+  {% if skipped %}<p class="note">На графиках по месяцам нет месяцев, когда счётчик собирал данные не каждый день: {{ skipped|join(', ') }}.</p>{% endif %}
+  {% for report in reports %}{{ slice_table(report, f) }}{% endfor %}
+{% else %}
+  {{ insights(summary) }}
+  {% for report in reports %}
+    {% if report.chart %}{{ chart_block(charts, 'slice_' ~ report.slice, report.title ~ ': визиты') }}{% endif %}
+    {{ slice_table(report, f) }}
+  {% endfor %}
+{% endif %}
+<p class="note">Средние по сайту за месяц: конверсия {{ site_conv|pct(2) }}, отказы {{ site_bounce|pct }}. Доля — от всех визитов месяца; в «Интересах» визит может попасть в несколько строк.</p>
+{% endblock %}

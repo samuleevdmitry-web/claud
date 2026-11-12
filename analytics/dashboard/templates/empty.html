@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Аналитика{% endblock %}
+{% block content %}
+{% if error %}
+  <div class="alert" role="status"><span class="alert-icon" aria-hidden="true">!</span>{{ error }}</div>
+{% else %}
+  <div class="card">Данных пока нет: сборщик загружает историю, это занимает несколько минут. Обновите страницу позже.</div>
+  {% if status %}
+  <div class="card table-card">
+    <div class="chart-title">Загрузка источников</div>
+    <table>
+      <tbody>
+      {% for s in status %}<tr><td>{{ s.name }}</td><td>{{ s.started_at|local }}</td><td>{{ s.status }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

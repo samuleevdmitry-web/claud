@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Данные{% endblock %}
+{% block content %}
+<div class="card table-card">
+  <div class="chart-title">Загрузка источников</div>
+  <table>
+    <thead><tr><th>Источник</th><th>Последний запуск</th><th>Последняя успешная загрузка</th><th></th></tr></thead>
+    <tbody>
+    {% for s in status %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td>{{ s.started_at|local }} · {% if s.status == 'ok' %}успешно{% elif s.status == 'error' %}<strong class="bad">ошибка</strong>{% else %}идёт{% endif %}</td>
+        <td>{{ s.last_ok|local }}</td>
+        <td class="muted error-text">{{ s.error or '' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">Загрузок ещё не было.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="note">Время московское. Метрика и Карты обновляются каждый день после 6:00, Вебмастер — каждый день
+    за последние 30 дней, Вордстат — 5-го числа.</p>
+</div>
+
+{% if robots %}
+<div class="card table-card">
+  <div class="chart-title">Роботы в трафике {{ f.site.site or f.site.name }}</div>
+  <p class="note">Разница между «весь трафик» и «только люди»: визиты, которые Метрика отнесла к роботам.</p>
+  <table>
+    <thead><tr><th>Месяц</th><th class="num">Весь трафик</th><th class="num">Только люди</th><th class="num">Роботы</th><th class="bar-col"></th></tr></thead>
+    <tbody>
+    {% for r in robots|reverse %}
+      <tr><td>{{ r.month|month }}</td><td class="num">{{ r.all_visits|int }}</td><td class="num">{{ r.human_visits|int }}</td>
+          <td class="num">{{ r.robots_pct|pct }}</td>
+          <td class="bar-col"><span class="share-bar" style="width: {{ '%.1f'|format(r.robots_pct or 0) }}%"></span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
