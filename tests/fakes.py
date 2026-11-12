@@ -28,7 +28,7 @@ class FakeSession:
         self.responses = list(responses)
         self.calls: list[tuple[str, dict | None]] = []
 
-    def request(self, method, url, params=None, json=None, timeout=None):
+    def request(self, method, url, params=None, json=None, timeout=None, headers=None):
         self.calls.append((url, params if json is None else json))
         return self.responses.pop(0)
 

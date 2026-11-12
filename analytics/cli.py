@@ -15,13 +15,14 @@ from analytics.config import Settings, load_settings
 from analytics.schedule import TZ, due_sources
 from analytics.sources.metrika import SLICES, MetrikaClient, MetrikaError, dimensions_for
 from analytics.keywords import KeywordConfig, load_keywords
+from analytics.sources.rabbit import RabbitClient, RabbitError
 from analytics.sources.webmaster import WebmasterClient, WebmasterError, parse_search_history
 from analytics.sources.wordstat import WordstatClient, WordstatError
-from analytics.sync import sync_metrika, sync_webmaster, sync_wordstat
+from analytics.sync import sync_metrika, sync_rabbit, sync_webmaster, sync_wordstat
 
 # Период ежедневной перезагрузки. Вебмастер отдаёт данные с задержкой в несколько дней и уточняет их.
-DEFAULT_DAYS = {"metrika": 7, "maps": 7, "webmaster": 30, "wordstat": 7}
-SOURCE_ERRORS = (MetrikaError, WebmasterError, WordstatError)
+DEFAULT_DAYS = {"metrika": 7, "maps": 7, "webmaster": 30, "wordstat": 7, "rabbit": 7}
+SOURCE_ERRORS = (MetrikaError, WebmasterError, WordstatError, RabbitError)
 WORDSTAT_SINCE = date(2023, 1, 1)  # три полных года — чтобы видеть сезонность
 # Вордстат обновляет данные раз в месяц: загружаем 5-го числа.
 MONTHLY_ON = {"wordstat": 5}
@@ -146,7 +147,13 @@ def _sync_wordstat(conn: psycopg.Connection, settings: Settings, since: date, un
     return sync_wordstat(conn, client, _keywords(settings), WORDSTAT_SINCE)
 
 
-SYNCS = {"metrika": _sync_metrika, "maps": _sync_maps, "webmaster": _sync_webmaster, "wordstat": _sync_wordstat}
+def _sync_rabbit(conn: psycopg.Connection, settings: Settings, since: date, until: date) -> int:
+    # since не используется: страница отдаёт весь последний год одним запросом
+    return sync_rabbit(conn, RabbitClient(settings.rabbit_guest_url), until)
+
+
+SYNCS = {"metrika": _sync_metrika, "maps": _sync_maps, "webmaster": _sync_webmaster, "wordstat": _sync_wordstat,
+         "rabbit": _sync_rabbit}
 
 # Что должно быть настроено, чтобы `sync` загружал источник; явный `sync-<источник>` объяснит, чего не хватает.
 CONFIGURED = {
@@ -154,6 +161,7 @@ CONFIGURED = {
     "maps": lambda s: bool(s.metrika_maps_counters),
     "webmaster": lambda s: bool(s.webmaster_hosts),
     "wordstat": lambda s: bool(s.wordstat_folder_id),
+    "rabbit": lambda s: bool(s.rabbit_guest_url),
 }
 
 
@@ -236,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         ("sync-maps", "загрузить счётчики карточек на Картах"),
         ("sync-webmaster", "загрузить данные Вебмастера"),
         ("sync-wordstat", "загрузить спрос из Вордстата по ключам wordstat.toml"),
+        ("sync-rabbit", "загрузить позиции из RabbitSeo по гостевой ссылке"),
     ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("--since", type=date.fromisoformat,

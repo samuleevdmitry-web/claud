@@ -19,6 +19,7 @@ class Settings:
     wordstat_api_key: str
     wordstat_folder_id: str
     wordstat_keywords_path: str
+    rabbit_guest_url: str
     database_url: str
 
 
@@ -39,5 +40,6 @@ def load_settings() -> Settings:
         wordstat_api_key=os.environ.get("WORDSTAT_API_KEY", "").strip(),
         wordstat_folder_id=os.environ.get("WORDSTAT_FOLDER_ID", "").strip(),
         wordstat_keywords_path=os.environ.get("WORDSTAT_KEYWORDS", "").strip() or "wordstat.toml",
+        rabbit_guest_url=os.environ.get("RABBIT_GUEST_URL", "").strip(),
         database_url=os.environ.get("DATABASE_URL", "").strip() or DEFAULT_DATABASE_URL,
     )

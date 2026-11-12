@@ -306,3 +306,41 @@ def wordstat_brand_queries(conn: psycopg.Connection, region_id: int, limit: int 
         WHERE t.region_id = %s AND t.month = (SELECT max(month) FROM wordstat_top WHERE region_id = %s)
         GROUP BY t.query ORDER BY max(t.count) DESC LIMIT %s
     """, (region_id, region_id, limit))
+
+
+def rabbit_daily(conn: psycopg.Connection, project: str) -> list[dict]:
+    return _all(conn, "SELECT date, top3, top10, found, queries FROM rabbit_daily WHERE project = %s ORDER BY date",
+                (project,))
+
+
+def rabbit_compare(conn: psycopg.Connection, project: str, now: date, then: date) -> dict[str, list[dict]]:
+    """Позиции RabbitSeo на два съёма: выросли, просели, выпали, появились и не найдены ни разу за всё время."""
+    rows = _all(conn, """
+        SELECT q.query, q.frequency, n.position AS position, t.position AS position_prev,
+               bool_or(a.position IS NOT NULL) AS ever_found
+        FROM (SELECT query, max(frequency) AS frequency FROM rabbit_positions
+              WHERE project = %s GROUP BY query) q
+        LEFT JOIN rabbit_positions n ON n.project = %s AND n.query = q.query AND n.date = %s
+        LEFT JOIN rabbit_positions t ON t.project = %s AND t.query = q.query AND t.date = %s
+        LEFT JOIN rabbit_positions a ON a.project = %s AND a.query = q.query
+        GROUP BY q.query, q.frequency, n.position, t.position
+    """, (project, project, now, project, then, project))
+    out: dict[str, list[dict]] = {"up": [], "down": [], "lost": [], "new": [], "never": []}
+    for r in rows:
+        now_pos, then_pos = r["position"], r["position_prev"]
+        if now_pos is not None and then_pos is not None:
+            if now_pos < then_pos:
+                out["up"].append(r)
+            elif now_pos > then_pos:
+                out["down"].append(r)
+        elif now_pos is None and then_pos is not None:
+            out["lost"].append(r)
+        elif now_pos is not None and then_pos is None:
+            out["new"].append(r)
+        elif not r["ever_found"]:
+            out["never"].append(r)
+    for key in ("up", "down"):
+        out[key].sort(key=lambda r: (-abs(r["position_prev"] - r["position"]), -r["frequency"]))
+    for key in ("lost", "new", "never"):
+        out[key].sort(key=lambda r: -r["frequency"])
+    return out

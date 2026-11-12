@@ -9,7 +9,7 @@ from __future__ import annotations
 import tomllib
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from urllib.parse import urlencode
 
 import psycopg
@@ -364,6 +364,9 @@ def search_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
     movers = q.position_movers(conn, host_id, f.month)
     problems = q.search_problems(conn, host_id)
     findings = ins.search_findings(sm, partial, movers, stale_days, problems, f.prev)
+    rabbit = rabbit_block(conn, f.site.get("site") or "")
+    if rabbit:
+        findings += rabbit["findings"]
     alerts = []
     if stale:
         alerts.append(f"Вебмастер не обновлял данные {stale_days} дн. ("
@@ -384,10 +387,38 @@ def search_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
         "alerts": alerts,
         "findings": findings,
         "summary": ins.summarize(findings),
+        "rabbit": rabbit,
         "charts": {
             "search_shows": chart("bar", labels, [("Показы", [r.get("shows") for r in trend])], selected=month_short(f.month)),
             "search_clicks": chart("bar", labels, [("Клики", [r.get("clicks") for r in trend])], selected=month_short(f.month)),
+            **({"rabbit_daily": rabbit["chart"]} if rabbit else {}),
         },
+    }
+
+
+def rabbit_block(conn: psycopg.Connection, project: str, compare_days: int = 7) -> dict | None:
+    """Позиции RabbitSeo: последний съём против съёма неделей раньше (или самого раннего, если истории меньше)."""
+    daily = q.rabbit_daily(conn, project)
+    if not daily:
+        return None
+    now = daily[-1]
+    target = now["date"] - timedelta(days=compare_days)
+    then = next((d for d in reversed(daily) if d["date"] <= target), daily[0])
+    compare = q.rabbit_compare(conn, project, now["date"], then["date"])
+    tiles = [
+        Tile("В ТОП-3", fmt_int(now["top3"]), delta(now["top3"], then["top3"], "pct"), f"{then['date']:%d.%m}: {then['top3']}"),
+        Tile("В ТОП-10", fmt_int(now["top10"]), delta(now["top10"], then["top10"], "pct"), f"{then['date']:%d.%m}: {then['top10']}"),
+        Tile("Найдено в выдаче", f"{now['found']} из {now['queries']}", delta(now["found"], then["found"], "pct"),
+             f"{then['date']:%d.%m}: {then['found']}"),
+    ]
+    labels = [d["date"].strftime("%d.%m") for d in daily]
+    return {
+        "now": now["date"], "then": then["date"], "tiles": tiles,
+        "lists": {k: v[:25] for k, v in compare.items()},
+        "counts": {k: len(v) for k, v in compare.items()},
+        "findings": ins.rabbit_findings(compare, now, then),
+        "chart": chart("line", labels, [("ТОП-3", [d["top3"] for d in daily]), ("ТОП-10", [d["top10"] for d in daily]),
+                                        ("Найдено", [d["found"] for d in daily])]),
     }
 
 

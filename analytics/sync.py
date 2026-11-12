@@ -19,6 +19,7 @@ from analytics.sources.metrika import (
     fetch_traffic,
     grain_range,
 )
+from analytics.sources.rabbit import MAX_DAYS, RabbitClient, parse_positions
 from analytics.sources.wordstat import WordstatClient, WordstatError
 from analytics.sources.webmaster import (
     WebmasterClient,
@@ -182,3 +183,15 @@ def sync_wordstat(
     if failed:
         raise WordstatError(f"Не загрузились {len(failed)} фраз: " + "; ".join(failed[:5]))
     return loaded
+
+
+def sync_rabbit(conn: psycopg.Connection, client: RabbitClient, until: date,
+                log: Callable[[str], None] = print) -> int:
+    """Позиции RabbitSeo за последние 366 дней — столько отдаёт гостевая страница за один запрос."""
+    project = client.project()
+    date_from = until - timedelta(days=MAX_DAYS - 1)
+    rows = parse_positions(client.positions(date_from, until))
+    days = sorted({r.date for r in rows})
+    log(f"  {project}: {len({r.query for r in rows})} запросов, съёмов {len(days)}"
+        + (f" ({days[0]}…{days[-1]})" if days else ""))
+    return db.replace_rabbit_positions(conn, project, date_from, until, rows)

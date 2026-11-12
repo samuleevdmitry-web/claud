@@ -214,3 +214,17 @@ def replace_wordstat_phrase(
             [(phrase, region_id, top_month, query, count) for query, count in top],
         )
     return len(months) + len(top)
+
+
+def replace_rabbit_positions(conn: psycopg.Connection, project: str, date_from: date, date_to: date,
+                             rows: list) -> int:
+    """Позиции проекта за период целиком: RabbitSeo может уточнять прошлые съёмы."""
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM rabbit_positions WHERE project = %s AND date BETWEEN %s AND %s",
+                    (project, date_from, date_to))
+        cur.executemany(
+            "INSERT INTO rabbit_positions (project, date, query, frequency, position) VALUES (%s, %s, %s, %s, %s)"
+            " ON CONFLICT DO NOTHING",
+            [(project, r.date, r.query, r.frequency, r.position) for r in rows],
+        )
+    return len(rows)

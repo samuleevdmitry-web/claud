@@ -404,3 +404,31 @@ def maps_findings(cards: list[dict], prev: date) -> list[Finding]:
             out.append(Finding("check", f"«{c['name']}»: карточку смотрят, но реже звонят и строят маршрут — "
                                         "проверить часы работы, телефоны, фото и свежие отзывы."))
     return out
+
+
+# ----- Позиции RabbitSeo -----
+
+def rabbit_findings(compare: dict[str, list[dict]], now: dict, then: dict) -> list[Finding]:
+    out = []
+    period = f"{then['date']:%d.%m} → {now['date']:%d.%m}"
+    if now["top10"] != then["top10"]:
+        kind = "plus" if now["top10"] > then["top10"] else "minus"
+        out.append(Finding(kind, f"RabbitSeo: в ТОП-10 {plural(now['top10'], QUERIES)} ({period}: было {then['top10']})."))
+    if compare["up"]:
+        top = "; ".join(f"«{r['query']}» {r['position_prev']} → {r['position']}" for r in compare["up"][:3])
+        out.append(Finding("plus", f"RabbitSeo, позиции выросли: {plural(len(compare['up']), QUERIES)}, например {top}."))
+    if compare["down"]:
+        top = "; ".join(f"«{r['query']}» {r['position_prev']} → {r['position']}" for r in compare["down"][:3])
+        out.append(Finding("minus", f"RabbitSeo, позиции просели: {plural(len(compare['down']), QUERIES)}, например {top}."))
+    if compare["lost"]:
+        top = ", ".join(f"«{r['query']}»" for r in compare["lost"][:3])
+        out.append(Finding("check", f"RabbitSeo: выпали из выдачи {plural(len(compare['lost']), QUERIES)}, например {top} — "
+                                    "проверить их страницы."))
+    never = compare["never"]
+    if never:
+        demand = sum(r["frequency"] for r in never)
+        top = ", ".join(f"«{r['query']}» ({fmt_int(r['frequency'])})" for r in never[:3])
+        out.append(Finding("question", f"RabbitSeo: по {plural(len(never), QUERIES)} проекта сайт не найден ни разу "
+                                       f"(суммарная частотность {fmt_int(demand)}), например {top}. Есть ли под них "
+                                       "страницы и нужны ли они в проекте?"))
+    return out

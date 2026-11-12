@@ -45,6 +45,42 @@
   </div>
   <p class="note">Позиция — средняя позиция показа за месяц, меньше — лучше. «Пропали» — были в популярных запросах прошлого месяца и исчезли в этом.</p>
 
+  {% if rabbit %}
+  <h2>Позиции RabbitSeo <span class="h2-note">съём {{ rabbit.now.strftime('%d.%m') }} против {{ rabbit.then.strftime('%d.%m') }}</span></h2>
+  {{ show_tiles(rabbit.tiles) }}
+  {{ chart_block(charts, 'rabbit_daily', 'Запросы в ТОП-3, ТОП-10 и найденные — по дням съёма') }}
+  <div class="grid-2">
+    {% for key, title in (('up', 'Выросли'), ('down', 'Просели'), ('lost', 'Выпали из выдачи'), ('new', 'Появились в выдаче')) %}
+    <div class="card table-card">
+      <div class="chart-title">{{ title }} <span class="h2-note">{{ rabbit.counts[key] }}</span></div>
+      {% if rabbit.lists[key] %}
+      <table>
+        <thead><tr><th>Запрос</th><th class="num">Частота</th><th class="num">Позиция</th><th class="num">была</th></tr></thead>
+        <tbody>
+        {% for r in rabbit.lists[key] %}
+          <tr><td>{{ r.query }}</td><td class="num muted">{{ r.frequency|int }}</td>
+              <td class="num">{{ r.position if r.position is not none else '—' }}</td>
+              <td class="num muted">{{ r.position_prev if r.position_prev is not none else '—' }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="muted">Нет таких запросов.</p>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% if rabbit.lists.never %}
+  <div class="card table-card">
+    <div class="chart-title">Не найдены ни разу <span class="h2-note">{{ rabbit.counts.never }} запросов проекта — сайт не появлялся в выдаче ни в один съём</span></div>
+    <table>
+      <thead><tr><th>Запрос</th><th class="num">Частота</th></tr></thead>
+      <tbody>{% for r in rabbit.lists.never %}<tr><td>{{ r.query }}</td><td class="num">{{ r.frequency|int }}</td></tr>{% endfor %}</tbody>
+    </table>
+    {% if rabbit.counts.never > rabbit.lists.never|length %}<p class="note">Показаны {{ rabbit.lists.never|length }} с самой высокой частотностью.</p>{% endif %}
+  </div>
+  {% endif %}
+  <p class="note">Позиции — из проекта RabbitSeo по гостевой ссылке (регион проекта, глубина проверки — по настройкам RabbitSeo). «Не найден» — сайта нет в проверяемой части выдачи.</p>
+  {% endif %}
+
   <div class="grid-2">
     <div class="card table-card">
       <div class="chart-title">Популярные запросы</div>
