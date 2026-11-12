@@ -23,8 +23,8 @@ from analytics.sync import sync_metrika, sync_webmaster, sync_wordstat
 DEFAULT_DAYS = {"metrika": 7, "maps": 7, "webmaster": 30, "wordstat": 7}
 SOURCE_ERRORS = (MetrikaError, WebmasterError, WordstatError)
 WORDSTAT_SINCE = date(2023, 1, 1)  # три полных года — чтобы видеть сезонность
-# Вордстат публикует месяц раз в месяц, а полная загрузка идёт несколько минут — хватит раза в неделю.
-MIN_INTERVAL = {"wordstat": timedelta(days=7)}
+# Вордстат обновляет данные раз в месяц: загружаем 5-го числа.
+MONTHLY_ON = {"wordstat": 5}
 
 
 def check_metrika(settings: Settings) -> None:
@@ -190,7 +190,7 @@ def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
             runs = {source: {"last_ok": ok, "last_attempt": attempt} for source, ok, attempt in rows}
             now = datetime.now(TZ)
             sources = [name for name in SYNCS if CONFIGURED[name](settings)]
-            for source, since in due_sources(now, runs, sources, DEFAULT_DAYS, min_interval=MIN_INTERVAL):
+            for source, since in due_sources(now, runs, sources, DEFAULT_DAYS, monthly_on=MONTHLY_ON):
                 try:
                     run_sync(settings, source, since, now.date())
                 except Exception as exc:  # ошибка записана в sync_runs; цикл продолжается

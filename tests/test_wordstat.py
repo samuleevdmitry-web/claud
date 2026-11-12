@@ -60,13 +60,22 @@ def test_seasonality_uses_full_years_only():
     assert seasonality({date(2026, 1, 1): 5}) == "—"
 
 
-def test_wordstat_weekly_in_schedule():
-    now = datetime(2026, 11, 12, 9, 0, tzinfo=TZ)
-    runs = {"wordstat": {"last_ok": now - timedelta(days=3), "last_attempt": now - timedelta(days=3)}}
-    weekly = {"wordstat": timedelta(days=7)}
-    assert due_sources(now, runs, ["wordstat"], {"wordstat": 7}, min_interval=weekly) == []
-    runs["wordstat"] = {"last_ok": now - timedelta(days=8), "last_attempt": now - timedelta(days=8)}
-    assert [s for s, _ in due_sources(now, runs, ["wordstat"], {"wordstat": 7}, min_interval=weekly)] == ["wordstat"]
+def test_wordstat_monthly_on_the_fifth():
+    monthly = {"wordstat": 5}
+
+    def due(now, last_ok):
+        runs = {"wordstat": {"last_ok": last_ok, "last_attempt": last_ok}}
+        return [s for s, _ in due_sources(now, runs, ["wordstat"], {"wordstat": 7}, monthly_on=monthly)]
+
+    loaded_nov5 = datetime(2026, 11, 5, 6, 20, tzinfo=TZ)
+    assert due(datetime(2026, 11, 12, 9, 0, tzinfo=TZ), loaded_nov5) == []      # в ноябре уже загружено
+    assert due(datetime(2026, 12, 4, 9, 0, tzinfo=TZ), loaded_nov5) == []       # до 5-го не трогаем
+    assert due(datetime(2026, 12, 5, 5, 0, tzinfo=TZ), loaded_nov5) == []       # 5-е, но до 6:00
+    assert due(datetime(2026, 12, 5, 6, 15, tzinfo=TZ), loaded_nov5) == ["wordstat"]
+    # ноутбук был выключен 5-го — загрузка при первом включении после
+    assert due(datetime(2026, 12, 9, 10, 0, tzinfo=TZ), loaded_nov5) == ["wordstat"]
+    # январь: последний срок — 5 декабря
+    assert due(datetime(2027, 1, 3, 10, 0, tzinfo=TZ), datetime(2026, 12, 5, 7, 0, tzinfo=TZ)) == []
 
 
 class FakeWordstatClient:
