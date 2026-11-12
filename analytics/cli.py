@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+import tomllib
 from datetime import date, datetime, timedelta
 
 import psycopg
@@ -13,12 +14,17 @@ from analytics import db
 from analytics.config import Settings, load_settings
 from analytics.schedule import TZ, due_sources
 from analytics.sources.metrika import SLICES, MetrikaClient, MetrikaError, dimensions_for
+from analytics.keywords import KeywordConfig, load_keywords
 from analytics.sources.webmaster import WebmasterClient, WebmasterError, parse_search_history
-from analytics.sync import sync_metrika, sync_webmaster
+from analytics.sources.wordstat import WordstatClient, WordstatError
+from analytics.sync import sync_metrika, sync_webmaster, sync_wordstat
 
 # Период ежедневной перезагрузки. Вебмастер отдаёт данные с задержкой в несколько дней и уточняет их.
-DEFAULT_DAYS = {"metrika": 7, "maps": 7, "webmaster": 30}
-SOURCE_ERRORS = (MetrikaError, WebmasterError)
+DEFAULT_DAYS = {"metrika": 7, "maps": 7, "webmaster": 30, "wordstat": 7}
+SOURCE_ERRORS = (MetrikaError, WebmasterError, WordstatError)
+WORDSTAT_SINCE = date(2023, 1, 1)  # три полных года — чтобы видеть сезонность
+# Вордстат публикует месяц раз в месяц, а полная загрузка идёт несколько минут — хватит раза в неделю.
+MIN_INTERVAL = {"wordstat": timedelta(days=7)}
 
 
 def check_metrika(settings: Settings) -> None:
@@ -72,9 +78,29 @@ def check_webmaster(settings: Settings) -> None:
             print("Статистики запросов за последние 60 дней нет")
 
 
+def _keywords(settings: Settings) -> KeywordConfig:
+    """wordstat.toml правят руками, поэтому ошибки файла — понятным сообщением, а не трассировкой."""
+    try:
+        return load_keywords(settings.wordstat_keywords_path)
+    except FileNotFoundError:
+        raise WordstatError(f"Нет файла с ключами {settings.wordstat_keywords_path}") from None
+    except tomllib.TOMLDecodeError as exc:
+        raise WordstatError(f"Ошибка в {settings.wordstat_keywords_path}: {exc}") from None
+
+
+def check_wordstat(settings: Settings) -> None:
+    config = _keywords(settings)
+    client = WordstatClient(settings.wordstat_api_key, settings.wordstat_folder_id)
+    print(f"{settings.wordstat_keywords_path}: {len(config.phrases)} фраз, регионы: "
+          + ", ".join(f"{site} → {r.name} ({r.id})" for site, r in config.regions.items()))
+    phrase, region = config.phrases[0], config.region_ids[0]
+    top = client.top_requests(phrase, region, limit=5)
+    print(f"Пробный запрос «{phrase}»: " + "; ".join(f"{q} {c}" for q, c in top))
+
+
 def cmd_check(settings: Settings) -> int:
     ok = True
-    for title, check in (("Метрика", check_metrika), ("Вебмастер", check_webmaster)):
+    for title, check in (("Метрика", check_metrika), ("Вебмастер", check_webmaster), ("Вордстат", check_wordstat)):
         print(f"=== {title}")
         try:
             check(settings)
@@ -114,13 +140,20 @@ def _sync_webmaster(conn: psycopg.Connection, settings: Settings, since: date, u
     return sum(sync_webmaster(conn, client, host_id, since, until) for host_id in settings.webmaster_hosts)
 
 
-SYNCS = {"metrika": _sync_metrika, "maps": _sync_maps, "webmaster": _sync_webmaster}
+def _sync_wordstat(conn: psycopg.Connection, settings: Settings, since: date, until: date) -> int:
+    # since не используется: один запрос отдаёт всю историю фразы, поэтому она перезагружается целиком
+    client = WordstatClient(settings.wordstat_api_key, settings.wordstat_folder_id)
+    return sync_wordstat(conn, client, _keywords(settings), WORDSTAT_SINCE)
+
+
+SYNCS = {"metrika": _sync_metrika, "maps": _sync_maps, "webmaster": _sync_webmaster, "wordstat": _sync_wordstat}
 
 # Что должно быть настроено, чтобы `sync` загружал источник; явный `sync-<источник>` объяснит, чего не хватает.
 CONFIGURED = {
     "metrika": lambda s: bool(s.metrika_counters),
     "maps": lambda s: bool(s.metrika_maps_counters),
     "webmaster": lambda s: bool(s.webmaster_hosts),
+    "wordstat": lambda s: bool(s.wordstat_folder_id),
 }
 
 
@@ -157,7 +190,7 @@ def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
             runs = {source: {"last_ok": ok, "last_attempt": attempt} for source, ok, attempt in rows}
             now = datetime.now(TZ)
             sources = [name for name in SYNCS if CONFIGURED[name](settings)]
-            for source, since in due_sources(now, runs, sources, DEFAULT_DAYS):
+            for source, since in due_sources(now, runs, sources, DEFAULT_DAYS, min_interval=MIN_INTERVAL):
                 try:
                     run_sync(settings, source, since, now.date())
                 except Exception as exc:  # ошибка записана в sync_runs; цикл продолжается
@@ -178,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         ("sync-metrika", "загрузить данные Метрики"),
         ("sync-maps", "загрузить счётчики карточек на Картах"),
         ("sync-webmaster", "загрузить данные Вебмастера"),
+        ("sync-wordstat", "загрузить спрос из Вордстата по ключам wordstat.toml"),
     ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("--since", type=date.fromisoformat,

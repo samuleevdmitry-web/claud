@@ -25,6 +25,8 @@ services:
     environment:
       DATABASE_URL: postgresql://analytics:analytics@db:5432/analytics
     command: python -m analytics schedule
+    volumes:
+      - ./wordstat.toml:/app/wordstat.toml:ro  # ключи Вордстата: правки подхватываются без пересборки
     depends_on:
       db:
         condition: service_healthy
@@ -36,6 +38,8 @@ services:
     environment:
       DATABASE_URL: postgresql://analytics:analytics@db:5432/analytics
     command: uvicorn analytics.dashboard.app:app --host 0.0.0.0 --port 8080
+    volumes:
+      - ./wordstat.toml:/app/wordstat.toml:ro
     # Только для этого ноутбука: у дашборда нет пароля.
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"

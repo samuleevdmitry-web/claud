@@ -135,3 +135,6 @@ tr:last-child td { border-bottom: none; }
   .tile-value { font-size: 24px; }
   .chart { height: 240px; }
 }
+
+.group-row td { font-weight: 600; background: var(--page); }
+.indent { padding-left: 22px; }

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import tomllib
+from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -17,8 +19,10 @@ from fastapi.templating import Jinja2Templates
 
 from analytics import db
 from analytics.config import Settings, load_settings
+from analytics.keywords import load_keywords
 from analytics.dashboard import queries as q
 from analytics.dashboard.format import (
+    MONTHS_SHORT,
     Tile,
     delta,
     fmt_change,
@@ -111,6 +115,85 @@ def trend_months(rows: list[dict], current: date, coverage: bool) -> tuple[list[
         months.append(by_month.get(m, {"month": m}))
         m = _shift_month(m, 1)
     return months, skipped
+
+
+def seasonality(series: dict[date, int]) -> str:
+    """Пик и спад спроса: месяц с самой большой и самой маленькой средней долей в году по полным годам."""
+    years: dict[int, dict[int, int]] = defaultdict(dict)
+    for month, value in series.items():
+        years[month.year][month.month] = value
+    full = [months for months in years.values() if len(months) == 12 and sum(months.values()) > 0]
+    if not full:
+        return "—"
+    share = {m: sum(year[m] / sum(year.values()) for year in full) / len(full) for m in range(1, 13)}
+    peak, low = max(share, key=share.get), min(share, key=share.get)
+    return f"{MONTHS_SHORT[peak - 1]} · {MONTHS_SHORT[low - 1]}"
+
+
+def demand_context(conn: psycopg.Connection, settings: Settings, site: dict, month: date) -> dict | None:
+    """Раздел «Спрос»: Вордстат по региону сайта. None — если Вордстат не настроен или данных нет."""
+    try:
+        region = load_keywords(settings.wordstat_keywords_path).regions.get(site.get("site") or "")
+    except (FileNotFoundError, tomllib.TOMLDecodeError):
+        return None
+    latest = region and q.wordstat_latest_month(conn, region.id)
+    if not latest:
+        return None
+    wmonth = min(month, latest)  # Вордстат публикует месяц с задержкой
+    prev, year_ago = _shift_month(wmonth, -1), _shift_month(wmonth, -12)
+
+    def tile(label: str, series: dict[date, int]) -> Tile:
+        cur, before, yoy = series.get(wmonth), series.get(prev), series.get(year_ago)
+        note = " · ".join(p for p in (
+            before is not None and f"{month_short(prev)}: {fmt_int(before)}",
+            yoy is not None and f"{month_short(year_ago)}: {fmt_int(yoy)}",
+        ) if p)
+        return Tile(label, fmt_int(cur), delta(cur, before, "pct"), note)
+
+    groups = q.wordstat_group_series(conn, region.id)
+    brand = {r["month"]: r["demand"] for r in groups if r["kind"] == "brand"}
+    by_category: dict[tuple[str, str], dict[date, int]] = defaultdict(dict)
+    for r in groups:
+        if r["kind"] == "category":
+            by_category[r["direction"], r["category"]][r["month"]] = r["demand"]
+    market: dict[str, dict[date, int]] = defaultdict(dict)
+    for r in q.wordstat_market(conn, region.id):
+        market[r["phrase"]][r["month"]] = r["count"]
+
+    directions: dict[str, dict] = {}
+    totals: dict[str, dict[date, int]] = defaultdict(dict)
+    for r in q.wordstat_direction_series(conn, region.id):
+        totals[r["direction"]][r["month"]] = r["demand"]
+    for c in q.wordstat_categories(conn):
+        series = by_category.get((c["direction"], c["category"]), {})
+        d = directions.setdefault(c["direction"], {"name": c["direction"], "rows": []})
+        d["rows"].append({
+            "category": c["category"], "phrases": c["phrases"], "demand": series.get(wmonth),
+            "prev": series.get(prev), "yoy": series.get(year_ago), "season": seasonality(series),
+        })
+    for name, d in directions.items():
+        t = totals.get(name, {})
+        d.update(demand=t.get(wmonth), prev=t.get(prev), yoy=t.get(year_ago), season=seasonality(t))
+
+    months_axis = sorted(m for m in brand if m <= latest)
+    labels = [month_short(m) for m in months_axis]
+    main = [name for name in ("Ткани", "ПВХ", "Фурнитура") if name in totals]
+    return {
+        "region": region.name,
+        "month": wmonth,
+        "prev": prev,
+        "year_ago": year_ago,
+        "lagging": wmonth < month,
+        "tiles": [tile("Брендовый спрос (B2B)", brand)] + [tile(f"«{p}»", s) for p, s in market.items()],
+        "directions": list(directions.values()),
+        "brand_queries": q.wordstat_brand_queries(conn, region.id),
+        "charts": {
+            "demand_brand": chart("bar", labels, [("Брендовые запросы", [brand.get(m) for m in months_axis])],
+                                  selected=month_short(wmonth)),
+            "demand_directions": chart("line", labels, [(n, [totals[n].get(m) for m in months_axis]) for n in main],
+                                       selected=month_short(wmonth)),
+        },
+    }
 
 
 def build_context(conn: psycopg.Connection, settings: Settings, site_id: int | None, month_param: str | None,
@@ -268,7 +351,12 @@ def build_context(conn: psycopg.Connection, settings: Settings, site_id: int | N
             ], selected=month_short(month))
         maps.append({"name": card["name"], "tiles": tiles, "chart": chart_id if chart_id in charts else None})
 
+    demand = demand_context(conn, settings, site, month)
+    if demand:
+        charts.update(demand.pop("charts"))
+
     return {
+        "demand": demand,
         "sites": sites,
         "site": site,
         "month": month,

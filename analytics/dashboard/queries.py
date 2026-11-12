@@ -165,3 +165,52 @@ def sync_status(conn: psycopg.Connection) -> list[dict]:
         ) ok ON true
         ORDER BY r.source, r.started_at DESC
     """)
+
+
+def wordstat_latest_month(conn: psycopg.Connection, region_id: int) -> date | None:
+    row = _one(conn, "SELECT max(month) AS month FROM wordstat_monthly WHERE region_id = %s", (region_id,))
+    return row["month"] if row else None
+
+
+def wordstat_group_series(conn: psycopg.Connection, region_id: int) -> list[dict]:
+    """Спрос бренда и категорий по месяцам: kind, direction, category, month, demand."""
+    return _all(conn, """
+        SELECT kind, direction, category, month, demand
+        FROM wordstat_groups_monthly WHERE region_id = %s AND kind IN ('brand', 'category')
+        ORDER BY month
+    """, (region_id,))
+
+
+def wordstat_direction_series(conn: psycopg.Connection, region_id: int) -> list[dict]:
+    return _all(conn, "SELECT direction, month, demand FROM wordstat_directions_monthly WHERE region_id = %s"
+                      " ORDER BY month", (region_id,))
+
+
+def wordstat_market(conn: psycopg.Connection, region_id: int) -> list[dict]:
+    """Рыночные фразы по месяцам, в порядке файла."""
+    return _all(conn, """
+        SELECT k.phrase, m.month, m.count
+        FROM wordstat_keywords k JOIN wordstat_monthly m USING (phrase)
+        WHERE k.kind = 'market' AND m.region_id = %s
+        ORDER BY k.position, m.month
+    """, (region_id,))
+
+
+def wordstat_categories(conn: psycopg.Connection) -> list[dict]:
+    """Категории в порядке файла: направление, категория, фразы через «; »."""
+    return _all(conn, """
+        SELECT direction, category, string_agg(phrase, '; ' ORDER BY position) AS phrases, min(position) AS position
+        FROM wordstat_keywords WHERE kind = 'category'
+        GROUP BY direction, category ORDER BY min(position)
+    """)
+
+
+def wordstat_brand_queries(conn: psycopg.Connection, region_id: int, limit: int = 15) -> list[dict]:
+    """Брендовые формулировки за 30 дней по последней загрузке."""
+    return _all(conn, """
+        SELECT t.query, max(t.count) AS count
+        FROM wordstat_top t
+        JOIN wordstat_keywords k ON k.phrase = t.phrase AND k.kind = 'brand'
+        WHERE t.region_id = %s AND t.month = (SELECT max(month) FROM wordstat_top WHERE region_id = %s)
+        GROUP BY t.query ORDER BY max(t.count) DESC LIMIT %s
+    """, (region_id, region_id, limit))

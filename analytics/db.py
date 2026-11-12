@@ -9,8 +9,10 @@ from importlib import resources
 import psycopg
 from psycopg import sql
 
+from analytics.keywords import Keyword
 from analytics.sources.metrika import GoalRow, TrafficRow
 from analytics.sources.webmaster import Problem
+from analytics.sources.wordstat import MonthCount
 
 
 def connect(url: str) -> psycopg.Connection:
@@ -172,3 +174,41 @@ def save_webmaster_state(
             """,
             [(host_id, p.code, p.severity, p.state, p.last_state_update) for p in problems],
         )
+
+
+def replace_wordstat_keywords(conn: psycopg.Connection, keywords: list[Keyword]) -> None:
+    """Ключи — копия wordstat.toml: удалённые из файла фразы пропадают и из групп дашборда."""
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM wordstat_keywords")
+        cur.executemany(
+            "INSERT INTO wordstat_keywords (phrase, kind, direction, category, position) VALUES (%s, %s, %s, %s, %s)"
+            " ON CONFLICT DO NOTHING",
+            [(k.phrase, k.kind, k.direction, k.category, i) for i, k in enumerate(keywords)],
+        )
+
+
+def replace_wordstat_phrase(
+    conn: psycopg.Connection,
+    phrase: str,
+    region_id: int,
+    since: date,
+    months: list[MonthCount],
+    top_month: date,
+    top: list[tuple[str, int]],
+) -> int:
+    """Перезаписывает помесячную частотность фразы с since и её популярные формулировки за top_month."""
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM wordstat_monthly WHERE phrase = %s AND region_id = %s AND month >= %s",
+                    (phrase, region_id, since))
+        cur.executemany(
+            "INSERT INTO wordstat_monthly (phrase, region_id, month, count, share) VALUES (%s, %s, %s, %s, %s)",
+            [(phrase, region_id, m.month, m.count, m.share) for m in months],
+        )
+        cur.execute("DELETE FROM wordstat_top WHERE phrase = %s AND region_id = %s AND month = %s",
+                    (phrase, region_id, top_month))
+        cur.executemany(
+            "INSERT INTO wordstat_top (phrase, region_id, month, query, count) VALUES (%s, %s, %s, %s, %s)"
+            " ON CONFLICT DO NOTHING",
+            [(phrase, region_id, top_month, query, count) for query, count in top],
+        )
+    return len(months) + len(top)

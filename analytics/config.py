@@ -16,6 +16,9 @@ class Settings:
     metrika_attribution: str
     metrika_maps_counters: tuple[int, ...]
     webmaster_hosts: tuple[str, ...]
+    wordstat_api_key: str
+    wordstat_folder_id: str
+    wordstat_keywords_path: str
     database_url: str
 
 
@@ -33,5 +36,8 @@ def load_settings() -> Settings:
         metrika_attribution=os.environ.get("METRIKA_ATTRIBUTION", "").strip() or "lastsign",
         metrika_maps_counters=tuple(int(v) for v in _list("METRIKA_MAPS_COUNTERS")),
         webmaster_hosts=_list("WEBMASTER_HOSTS"),
+        wordstat_api_key=os.environ.get("WORDSTAT_API_KEY", "").strip(),
+        wordstat_folder_id=os.environ.get("WORDSTAT_FOLDER_ID", "").strip(),
+        wordstat_keywords_path=os.environ.get("WORDSTAT_KEYWORDS", "").strip() or "wordstat.toml",
         database_url=os.environ.get("DATABASE_URL", "").strip() or DEFAULT_DATABASE_URL,
     )

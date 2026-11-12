@@ -9,7 +9,9 @@ from datetime import date, timedelta
 import psycopg
 
 from analytics import db
+from analytics.keywords import KeywordConfig
 from analytics.sources.metrika import GRAINS, SLICES, MetrikaClient, fetch_goals, fetch_traffic, grain_range
+from analytics.sources.wordstat import WordstatClient, WordstatError
 from analytics.sources.webmaster import (
     WebmasterClient,
     parse_crawl,
@@ -127,4 +129,38 @@ def sync_webmaster(
             min(q.date for q in query_days),
             max(q.date for q in query_days),
         )
+    return loaded
+
+
+def sync_wordstat(
+    conn: psycopg.Connection,
+    client: WordstatClient,
+    config: KeywordConfig,
+    since: date,
+    today: date | None = None,
+    log: Callable[[str], None] = print,
+) -> int:
+    """Частотность и формулировки всех фраз wordstat.toml по всем регионам.
+
+    Один запрос отдаёт всю историю фразы, поэтому история перезагружается целиком с since.
+    Ошибка одной фразы (например, опечатка в операторе) не останавливает остальные:
+    они загружаются, а в конце поднимается ошибка со списком неудавшихся фраз.
+    """
+    today = today or date.today()
+    db.replace_wordstat_keywords(conn, config.keywords)
+    loaded, failed = 0, []
+    phrases = config.phrases
+    for region_id in config.region_ids:
+        for i, phrase in enumerate(phrases, 1):
+            try:
+                months = client.monthly(phrase, region_id, since)
+                top = client.top_requests(phrase, region_id)
+            except WordstatError as exc:
+                failed.append(str(exc))
+                continue
+            loaded += db.replace_wordstat_phrase(conn, phrase, region_id, since, months, today.replace(day=1), top)
+            if i % 20 == 0 or i == len(phrases):
+                log(f"  регион {region_id}: {i} из {len(phrases)} фраз")
+    if failed:
+        raise WordstatError(f"Не загрузились {len(failed)} фраз: " + "; ".join(failed[:5]))
     return loaded

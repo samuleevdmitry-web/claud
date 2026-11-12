@@ -17,12 +17,14 @@ def due_sources(
     sources: list[str],
     default_days: dict[str, int],
     run_hour: int = RUN_AFTER_HOUR,
+    min_interval: dict[str, timedelta] | None = None,
 ) -> list[tuple[str, date]]:
     """Какие источники загрузить сейчас и с какой даты.
 
     runs: источник → {"last_ok": время последней успешной загрузки, "last_attempt": время последнего запуска}.
     Источник без успешных загрузок получает всю историю. Если ноутбук был выключен дольше обычного
     окна перезагрузки, период расширяется до дня последней успешной загрузки, чтобы не было дыр.
+    min_interval: источник → как часто его загружать, если не каждый день (Вордстат обновляется раз в месяц).
     """
     due_at = now.replace(hour=run_hour, minute=0, second=0, microsecond=0)
     today = now.date()
@@ -39,6 +41,8 @@ def due_sources(
             continue
         if last_ok is None:
             out.append((source, HISTORY_START))
+        elif min_interval and source in min_interval and now - last_ok < min_interval[source]:
+            continue
         elif now >= due_at and last_ok < due_at:
             since = today - timedelta(days=default_days[source])
             out.append((source, min(since, last_ok.astimezone(TZ).date() - timedelta(days=1))))
