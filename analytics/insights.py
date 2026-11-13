@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
+from math import log10
 from statistics import median
 
 from analytics.format import fmt_dec, fmt_int, fmt_pct, month_short, plural
@@ -922,37 +923,84 @@ MISSED_SHARE, UNPROCESSED_SHARE, NONTARGET_SHARE = 15.0, 20.0, 30.0
 
 
 def crm_stats(forms: list[dict], calls: list[dict], orders: list[dict]) -> dict:
-    """Сводка месяца по выгрузкам: формы, звонки и заказы 1С."""
+    """Сводка месяца по выгрузкам: формы, звонки и заказы 1С — только новые клиенты.
+
+    Действующие клиенты (заказывали и до обращения) в продажи не входят. Заказ, который пришёл и с сайта,
+    и звонком (тот же номер заказа 1С), в общем итоге считается один раз — за сайтом.
+    """
     def count(rows, pred):
         return sum(1 for r in rows if pred(r))
 
     target_forms = [r for r in forms if r["stage"] not in NONTARGET_STAGES]
+    sold = [r for r in forms if r["in_1c"] and r.get("category") != "existing"]
+    form_orders = {no for r in sold for no in (r.get("order_nos") or [])}
     new_orders = [o for o in orders if o["category"] == "new"]
-    existing = [o for o in orders if o["category"] == "existing"]
-    return {
+    calls_only = [o for o in new_orders if o["order_no"] not in form_orders]  # не пришли ещё и с сайта
+    new_closed = float(sum(o["amount"] for o in new_orders if o["status_1c"] in CLOSED_STATUSES))
+    only_closed = float(sum(o["amount"] for o in calls_only if o["status_1c"] in CLOSED_STATUSES))
+    s = {
         "forms": len(forms),
         "forms_target": len(target_forms),
         "forms_nontarget": len(forms) - len(target_forms),
         "forms_unprocessed": count(forms, lambda r: r["stage"] in UNPROCESSED_STAGES),
         "forms_to_deal": count(forms, lambda r: r["stage"] in TO_DEAL_STAGES),
-        "forms_in_1c": count(forms, lambda r: r["in_1c"]),
-        "forms_target_in_1c": count(target_forms, lambda r: r["in_1c"]),
-        "forms_orders": sum(r["orders"] or 0 for r in forms),
-        "forms_amount": float(sum(r["amount"] or 0 for r in forms)),
-        "forms_closed": float(sum(r["closed"] or 0 for r in forms)),
+        "forms_in_1c": len(sold),
+        "forms_target_in_1c": count(sold, lambda r: r["stage"] not in NONTARGET_STAGES),
+        "forms_orders": sum(r["orders"] or 0 for r in sold),
+        "forms_amount": float(sum(r["amount"] or 0 for r in sold)),
+        "forms_closed": float(sum(r["closed"] or 0 for r in sold)),
+        "forms_category_known": any(r.get("category") for r in forms),
         "calls": len(calls),
+        "calls_target": count(calls, lambda r: r["stage"] not in NONTARGET_STAGES),
         "calls_missed": count(calls, lambda r: r["call_type"] == MISSED),
         "calls_missed_unprocessed": count(calls, lambda r: r["call_type"] == MISSED and r["stage"] in UNPROCESSED_STAGES),
         "calls_unprocessed": count(calls, lambda r: r["stage"] in UNPROCESSED_STAGES),
         "calls_nontarget": count(calls, lambda r: r["stage"] in NONTARGET_STAGES),
         "calls_to_deal": count(calls, lambda r: r["stage"] in TO_DEAL_STAGES),
-        "calls_in_1c": count(calls, lambda r: r["in_1c"]),
         "new_sales": len({o["lead_id"] or o["order_no"] for o in new_orders}),
         "new_orders": len(new_orders),
         "new_amount": float(sum(o["amount"] for o in new_orders)),
-        "existing_orders": len(existing),
-        "existing_amount": float(sum(o["amount"] for o in existing)),
+        "new_closed": new_closed,
+        "both_orders": len(new_orders) - len(calls_only),  # заказы, пришедшие и с сайта, и звонком
     }
+    # общий итог без двойного счёта
+    s["clients_total"] = s["forms_in_1c"] + len({o["lead_id"] or o["order_no"] for o in calls_only})
+    s["orders_total"] = s["forms_orders"] + len(calls_only)
+    s["amount_total"] = s["forms_amount"] + float(sum(o["amount"] for o in calls_only))
+    s["closed_total"] = s["forms_closed"] + only_closed
+    s["leads_total"] = s["forms"] + s["calls"]
+    s["target_total"] = s["forms_target"] + s["calls_target"]
+    return s
+
+
+def crm_funnel(s: dict, visits: int | None, lead_visits: int | None) -> list[dict]:
+    """Общая воронка: сайт → заявки → лиды → целевые → новые клиенты → заказы → сумма.
+
+    У каждого шага — всего, из них с сайта (формы и почта) и со звонков, доля от прошлого шага и от лидов.
+    """
+    steps = [
+        ("Визиты на сайт", visits, None, None, "Метрика"),
+        ("Визиты с заявкой", lead_visits, None, None, "Метрика: форма, клик по телефону или почте, заказ"),
+        ("Лиды в Битрикс24", s["leads_total"], s["forms"], s["calls"], "формы и почта + входящие звонки"),
+        ("Целевые лиды", s["target_total"], s["forms_target"], s["calls_target"], "без «Нецелевое обращение»"),
+        ("Новые клиенты с заказом в 1С", s["clients_total"], s["forms_in_1c"],
+         s["clients_total"] - s["forms_in_1c"], "нашлись в 1С по почте или телефону"),
+        ("Заказы новых клиентов", s["orders_total"], s["forms_orders"], s["orders_total"] - s["forms_orders"], None),
+    ]
+    out, prev = [], None
+    for i, (name, total, forms, calls, note) in enumerate(steps):
+        # лиды не вложены в визиты с заявкой (звонки идут не только с сайта), заказы — не доля клиентов
+        nested = i not in (2, 5)
+        out.append({"name": name, "total": total, "forms": forms, "calls": calls, "note": note,
+                    "from_prev": _share(total, prev) if nested and total is not None and prev else None})
+        prev = total if total is not None else prev
+    if s["clients_total"]:
+        out[-1]["note"] = f"{fmt_dec(s['orders_total'] / s['clients_total'], 1)} заказа на клиента"
+    # полосы в логарифмическом масштабе: иначе десятки клиентов не видно рядом с тысячами визитов
+    top = max((x["total"] or 0) for x in out)
+    for x in out:
+        x["width"] = max(3.0, log10(x["total"] + 1) / log10(top + 1) * 100) if x["total"] and top else 0
+    return out
 
 
 def _share(part, whole) -> float:
@@ -983,9 +1031,15 @@ def crm_findings(s: dict, prev: dict | None, lead_visits: int | None) -> list[Fi
             out.append(Finding("minus", f"Пропущено {plural(s['calls_missed'], CALLS)} из {s['calls']} входящих "
                                         f"({fmt_pct(missed)}); по {s['calls_missed_unprocessed']} так и нет решения в Б24."))
         if s["new_sales"]:
+            both = (f"; {plural(s['both_orders'], ORDERS)} из них клиент оформил и через сайт — в общем итоге он "
+                    "считается за сайтом") if s["both_orders"] else ""
             out.append(Finding("plus", f"Звонки дали {plural(s['new_sales'], NEW_CLIENTS)} с заказами на "
-                                       f"{fmt_int(s['new_amount'])} ₽; действующие клиенты после звонков заказали ещё на "
-                                       f"{fmt_int(s['existing_amount'])} ₽."))
+                                       f"{fmt_int(s['new_amount'])} ₽{both}."))
+    if s["clients_total"]:
+        out.append(Finding("plus", f"Всего новых клиентов с заказом — {s['clients_total']}: "
+                                   f"{plural(s['orders_total'], ORDERS)} на {fmt_int(s['amount_total'])} ₽, "
+                                   f"закрыто на {fmt_int(s['closed_total'])} ₽. Целевой лид становится клиентом в "
+                                   f"{fmt_pct(_share(s['clients_total'], s['target_total']))} случаев."))
     unprocessed = s["forms_unprocessed"] + s["calls_unprocessed"]
     total = s["forms"] + s["calls"]
     if total and _share(unprocessed, total) >= UNPROCESSED_SHARE:

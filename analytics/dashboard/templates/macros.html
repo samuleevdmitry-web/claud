@@ -110,3 +110,29 @@
   <div class="card muted">Срочных рекомендаций по данным этого месяца нет.</div>
   {% endfor %}
 {% endmacro %}
+
+{% macro sales_funnel(steps, stats=None, title="Воронка: от сайта до заказа") %}
+  <div class="card funnel">
+    <div class="chart-title">{{ title }}</div>
+    <p class="hint">Только новые клиенты: заказы действующих в продажи не входят. Заказ, пришедший и с сайта, и звонком,
+      считается один раз — за сайтом. Звонки приходят не только с сайта, поэтому лиды не обязаны быть меньше визитов с заявкой.
+      Полосы — в логарифмическом масштабе, чтобы рядом с тысячами визитов были видны десятки клиентов.</p>
+    <table>
+      <thead><tr><th>Шаг</th><th class="bar-col"></th><th class="num">Всего</th><th class="num">С сайта</th>
+        <th class="num">Звонки</th><th class="num">От прошлого шага</th></tr></thead>
+      <tbody>{% for x in steps %}
+        <tr><td>{{ x.name }}{% if x.note %}<div class="muted small">{{ x.note }}</div>{% endif %}</td>
+          <td class="bar-col"><span class="funnel-bar" style="width: {{ '%.1f'|format(x.width) }}%"></span></td>
+          <td class="num"><b>{{ x.total|int if x.total is not none else '—' }}</b></td>
+          <td class="num">{{ x.forms|int if x.forms is not none else '' }}</td>
+          <td class="num">{{ x.calls|int if x.calls is not none else '' }}</td>
+          <td class="num muted">{{ x.from_prev|pct(1) if x.from_prev is not none else '' }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% if stats and stats.orders_total %}
+    <p class="funnel-money">Сумма заказов новых клиентов — <b>{{ stats.amount_total|int }} ₽</b>
+      (с сайта {{ stats.forms_amount|int }} ₽, со звонков {{ (stats.amount_total - stats.forms_amount)|int }} ₽),
+      закрыто на {{ stats.closed_total|int }} ₽; средний заказ — {{ (stats.amount_total / stats.orders_total)|int }} ₽.</p>
+    {% endif %}
+  </div>
+{% endmacro %}

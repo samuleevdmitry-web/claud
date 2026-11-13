@@ -695,7 +695,7 @@ def report_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
             sections.append((f"Трафик: {title.lower()}", traffic(conn, settings, f, tab)["summary"]))
     sales = sales_page(conn, settings, f)
     if sales["stats"]:
-        kpi.insert(1, ("Продажи (Битрикс24 и 1С)", sales["tiles"]))
+        kpi.insert(1, ("Продажи: новые клиенты (Битрикс24 и 1С)", sales["tiles"]))
     sections += [("Продажи (Битрикс24 и 1С)", sales.get("summary")),
                  ("Заявки и цели", leads(conn, settings, f)["summary"]), ("Поиск Яндекса", search.get("summary")),
                  ("Спрос", demand and demand["summary"]), ("Карты", maps["summary"])]
@@ -725,7 +725,8 @@ def report_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
     return {
         # в «Главном» без «что проверить»: эти пункты собраны в «Что сделать»
         "kpi": kpi, "main": ins.Summary([g for g in main["summary"].groups if g[0] != "check"]),
-        "pf": pf, "sections": sections, "recs": recs, "priorities": ins.PRIORITIES,
+        "pf": pf, "sections": sections, "recs": recs, "priorities": ins.PRIORITIES, "funnel": sales.get("funnel"),
+        "sales_stats": sales.get("stats"),
         "todo": todo[:12], "questions": collect("question")[:10], "caveats": caveats,
         "generated": datetime.now(ZoneInfo("Europe/Moscow")),
     }
@@ -770,31 +771,24 @@ def crm_stats(conn: psycopg.Connection, month: date) -> dict | None:
 
 
 def _crm_tiles(f: Filters, s: dict, prev: dict | None) -> list[Tile]:
+    """Только новые клиенты: заказы действующих в продажи не входят."""
     def tile(label, value, key, note=""):
         was = prev.get(key) if prev else None
-        return Tile(label, value, delta(s[key], was, "pct") if was else None,
-                    note or (f"{month_short(f.prev)}: {fmt_int(was)}" if was is not None else ""))
+        return Tile(label, value, delta(s[key], was, "pct") if was else None, note)
 
-    tiles = []
-    if s["forms"]:
-        tiles += [
-            tile("Лиды с сайта (формы и почта)", fmt_int(s["forms"]), "forms", f"целевых {fmt_int(s['forms_target'])}"),
-            tile("Лиды с заказом в 1С", fmt_int(s["forms_in_1c"]), "forms_in_1c",
-                 f"{fmt_pct(ins._share(s['forms_target_in_1c'], s['forms_target']))} целевых"),
-            tile("Заказы по лидам с сайта, ₽", fmt_int(s["forms_amount"]), "forms_amount",
-                 f"закрыто на {fmt_int(s['forms_closed'])} ₽"),
-        ]
-    if s["calls"]:
-        tiles += [
-            tile("Входящие звонки", fmt_int(s["calls"]), "calls",
-                 f"пропущено {fmt_pct(ins._share(s['calls_missed'], s['calls']))}"),
-            tile("Новые продажи со звонков, ₽", fmt_int(s["new_amount"]), "new_amount",
-                 f"{plural(s['new_sales'], ins.NEW_CLIENTS)}"),
-        ]
     unprocessed = s["forms_unprocessed"] + s["calls_unprocessed"]
-    tiles.append(Tile("Не разобрано лидов", fmt_int(unprocessed), None,
-                      f"звонков {s['calls_unprocessed']}, с сайта {s['forms_unprocessed']}"))
-    return tiles
+    return [
+        tile("Лиды в Битрикс24", fmt_int(s["leads_total"]), "leads_total",
+             f"с сайта {fmt_int(s['forms'])}, звонков {fmt_int(s['calls'])}; целевых {fmt_int(s['target_total'])}"),
+        tile("Новые клиенты с заказом", fmt_int(s["clients_total"]), "clients_total",
+             f"с сайта {s['forms_in_1c']}, со звонков {s['clients_total'] - s['forms_in_1c']}"),
+        tile("Заказы новых клиентов, ₽", fmt_int(s["amount_total"]), "amount_total",
+             f"{plural(s['orders_total'], ins.ORDERS)}, закрыто на {fmt_int(s['closed_total'])} ₽"),
+        tile("Пропущенные звонки", fmt_int(s["calls_missed"]), "calls_missed",
+             f"{fmt_pct(ins._share(s['calls_missed'], s['calls']))} входящих"),
+        Tile("Не разобрано лидов", fmt_int(unprocessed), None,
+             f"звонков {s['calls_unprocessed']}, с сайта {s['forms_unprocessed']}"),
+    ]
 
 
 def sales_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
@@ -805,7 +799,6 @@ def sales_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
         return {"stats": None, "folder": settings.imports_dir, "primary": primary}
     prev = crm_stats(conn, f.prev)
     m, _ = _site_basics(conn, f)
-    by_type = q.goal_visits_by_type(conn, f.counter_id, f.audience, f.month)
     calls = q.crm_call_leads(conn, f.month)
 
     def group(key: str) -> list[dict]:
@@ -820,22 +813,13 @@ def sales_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
             g["nontarget"] += r["stage"] in ins.NONTARGET_STAGES
         return sorted(out.values(), key=lambda g: -g["leads"])
 
-    funnel = [
-        ("Визиты на сайт (Метрика)", m.get("visits"), None),
-        ("Визиты с заявкой (Метрика)", m.get("leads"), "клик по телефону, почте, форма, заказ"),
-        ("  из них с формой «контактные данные»", by_type.get("contact_data_sent"), None),
-        ("  из них с кликом по телефону", by_type.get("phone"), None),
-        ("Лиды с форм и почты (Б24)", s["forms"] or None, f"нецелевых {s['forms_nontarget']}"),
-        ("  целевые", s["forms_target"] or None, None),
-        ("  с заказом в 1С", s["forms_in_1c"] or None, f"{plural(s['forms_orders'], ins.ORDERS)} на {fmt_int(s['forms_amount'])} ₽"),
-        ("Входящие звонки (Б24)", s["calls"] or None, f"пропущено {s['calls_missed']}"),
-        ("  целевые (без нецелевых)", (s["calls"] - s["calls_nontarget"]) or None, None),
-        ("  новые продажи", s["new_sales"] or None, f"на {fmt_int(s['new_amount'])} ₽"),
-    ]
+    funnel = ins.crm_funnel(s, m.get("visits"), m.get("leads"))
     findings = ins.crm_findings(s, prev, m.get("leads"))
     return {
         "stats": s, "tiles": _crm_tiles(f, s, prev), "funnel": funnel,
         "managers": group("responsible")[:25], "lines": group("line")[:15],
-        "orders": q.crm_call_orders(conn, f.month), "files": q.crm_files(conn, f.month),
+        "orders": [o for o in q.crm_call_orders(conn, f.month) if o["category"] == "new"],
+        "form_orders": {no for r in q.crm_form_leads(conn, f.month) for no in (r["order_nos"] or [])},
+        "files": q.crm_files(conn, f.month),
         "summary": ins.summarize(findings), "findings": findings, "folder": settings.imports_dir,
     }

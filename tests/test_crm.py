@@ -97,6 +97,8 @@ def test_crm_stats_findings_and_recommendations(tmp_path):
                       as_rows(c.call_orders))
     assert (s["forms"], s["forms_target"], s["forms_in_1c"], s["forms_unprocessed"]) == (4, 3, 1, 1)
     assert (s["calls"], s["calls_missed"], s["calls_unprocessed"], s["new_sales"], s["new_amount"]) == (5, 2, 2, 1, 1000.0)
+    # действующие клиенты в продажи не входят: заказ Б-2 на 500 ₽ не учтён нигде
+    assert (s["clients_total"], s["orders_total"], s["amount_total"]) == (2, 3, 51000.0)
     titles = [r.title for r in ins.crm_recommend(s)]
     assert titles == ["Перезванивать пропущенные звонки", "Разбирать лиды до конца"]
     kinds = [x.kind for x in ins.crm_findings(s, None, 10)]
@@ -116,3 +118,34 @@ def test_import_folder_once(tmp_path):
         assert import_crm_folder(conn, tmp_path, log=lambda _: None) == []  # уже загружены
         assert conn.execute("SELECT count(*), sum(amount) FROM crm_form_leads").fetchone() == (4, 50000)
         assert conn.execute("SELECT count(*) FROM crm_call_leads WHERE called_at IS NULL").fetchone() == (1,)
+
+
+def lead(lead_id, stage="Перевести в сделку", in_1c=False, orders=0, amount=0.0, closed=0.0, order_nos=(), category=None):
+    return {"lead_id": lead_id, "stage": stage, "in_1c": in_1c, "orders": orders, "amount": amount, "closed": closed,
+            "order_nos": list(order_nos), "category": category}
+
+
+def call(lead_id, kind="Входящий", stage="Перевести в сделку"):
+    return {"lead_id": lead_id, "call_type": kind, "stage": stage}
+
+
+def order(no, lead_id, amount, category="new", status="Закрыт"):
+    return {"order_no": no, "lead_id": lead_id, "amount": amount, "category": category, "status_1c": status}
+
+
+def test_new_clients_only_and_no_double_count():
+    forms = [lead(1, in_1c=True, orders=2, amount=100000, closed=50000, order_nos=("А-1", "А-2")),
+             lead(2, in_1c=True, orders=1, amount=70000, order_nos=("А-3",), category="existing"),  # действующий
+             lead(3, "Нецелевое обращение")]
+    calls = [call(10), call(11), call(12, "Пропущенный входящий", "Не обработан")]
+    orders = [order("А-1", 10, 60000),                     # тот же заказ пришёл и с сайта — считается за сайтом
+              order("Б-1", 11, 20000, status="Ожидается оплата"),
+              order("Б-2", 12, 999999, category="existing")]  # действующий клиент — не продажа
+    s = ins.crm_stats(forms, calls, orders)
+    assert (s["forms_in_1c"], s["forms_amount"], s["both_orders"]) == (1, 100000.0, 1)
+    assert (s["clients_total"], s["orders_total"], s["amount_total"], s["closed_total"]) == (2, 3, 120000.0, 50000.0)
+    funnel = ins.crm_funnel(s, 10000, 120)
+    assert [x["total"] for x in funnel] == [10000, 120, 6, 5, 2, 3]
+    assert [x["from_prev"] is None for x in funnel] == [True, False, True, False, False, True]  # лиды и заказы — без доли
+    assert funnel[-1]["note"] == "1,5 заказа на клиента"
+    assert all(0 < x["width"] <= 100 for x in funnel)

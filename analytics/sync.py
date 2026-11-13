@@ -278,7 +278,7 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
     """
     if not folder.is_dir():
         return []
-    done, out = db.imported_files(conn), []
+    done, out = db.imported_files(conn, crm_files.PARSER_VERSION), []
     for path in sorted(folder.glob("*.xlsx")):
         if path.name.startswith("~$"):
             continue  # временный файл открытого Excel
@@ -291,7 +291,7 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
             log(f"  {path.name}: не загружен — {exc}")
             db.skip_crm_file(conn, sha, path.name)
             continue
-        rows = db.save_crm_file(conn, sha, path.name, parsed)
+        rows = db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION)
         log(f"  {path.name}: {crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
         out.append(parsed)
     return out

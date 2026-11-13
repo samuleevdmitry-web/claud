@@ -23,6 +23,8 @@ KINDS = {
     "calls": {"Итог", "Все входящие лиды"},
 }
 KIND_NAMES = {"forms": "лиды с сайта (формы)", "calls": "входящие звонки"}
+# Версия разбора: файлы, загруженные прежней версией, загружаются заново, если ещё лежат в папке.
+PARSER_VERSION = 2
 
 
 class CrmFileError(Exception):
@@ -41,6 +43,8 @@ class FormLead:
     first_order: date | None = None
     match: str | None = None
     manager_1c: str | None = None
+    order_nos: tuple[str, ...] = ()  # номера заказов 1С — чтобы не считать дважды заказ, пришедший и звонком
+    category: str | None = None      # new | existing, если выгрузка различает; иначе неизвестно
 
 
 @dataclass(frozen=True)
@@ -170,6 +174,16 @@ def _summary(rows: list[tuple]) -> list[tuple[str, float | None, str | None]]:
     return out
 
 
+def _category(v) -> str | None:
+    """«Новая продажа…» / «Новый клиент» → new, «Действующий клиент…» → existing."""
+    s = (_text(v) or "").lower()
+    if s.startswith("нов"):
+        return "new"
+    if s.startswith("действ") or s.startswith("постоян"):
+        return "existing"
+    return None
+
+
 def _month(dates: list[datetime]) -> date:
     if not dates:
         raise CrmFileError("в файле нет ни одного лида с датой")
@@ -191,6 +205,9 @@ def _parse_forms(sheets: dict[str, list[tuple]]) -> CrmFile:
             "first_order": first.date() if first else None,
             "match": (_text(r.get("Надёжность")) or "").split(" ")[0] or None,
             "manager_1c": _text(r.get("Менеджер 1С")),
+            "order_nos": tuple(n.strip() for n in (_text(r.get("Номера заказов 1С")) or "").replace(";", ",").split(",")
+                               if n.strip()),
+            "category": _category(r.get("Категория") or r.get("Тип клиента")),
         }
     leads = []
     for r in _table(sheets["Все лиды"]):
@@ -202,7 +219,7 @@ def _parse_forms(sheets: dict[str, list[tuple]]) -> CrmFile:
                               _yes(r.get("Найден в 1С")) or lead_id in matched,
                               extra.get("orders", 0), extra.get("amount", _num(r.get("Сумма заказов в 1С"))),
                               extra.get("closed", 0.0), extra.get("first_order"), extra.get("match"),
-                              extra.get("manager_1c")))
+                              extra.get("manager_1c"), extra.get("order_nos", ()), extra.get("category")))
     return CrmFile("forms", _month([lead.created_at for lead in leads if lead.created_at]), _summary(sheets["Совпадения"]),
                    form_leads=leads)
 
@@ -222,7 +239,7 @@ def _parse_calls(sheets: dict[str, list[tuple]]) -> CrmFile:
         if not order_no:
             continue  # строка «Итого»
         when = _dt(r.get("Дата заказа"))
-        category = "new" if (_text(r.get("Категория")) or "").lower().startswith("нов") else "existing"
+        category = _category(r.get("Категория")) or "existing"
         orders.append(CallOrder(order_no, category, when.date() if when else None, _num(r.get("Сумма, ₽")),
                                 _text(r.get("Статус 1С")), _int(r.get("ID лида")), _text(r.get("Менеджер 1С"))))
     return CrmFile("calls", _month([lead.called_at for lead in leads if lead.called_at]), _summary(sheets["Итог"]),

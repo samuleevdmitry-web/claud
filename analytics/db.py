@@ -257,11 +257,13 @@ def mark_backfilled(conn: psycopg.Connection, counter_id: int, reports: set[str]
                         [(counter_id, r) for r in sorted(reports)])
 
 
-def imported_files(conn: psycopg.Connection) -> set[str]:
-    return {sha for (sha,) in conn.execute("SELECT sha256 FROM crm_imports")}
+def imported_files(conn: psycopg.Connection, version: int = 1) -> set[str]:
+    """Файлы, уже загруженные этой версией разбора (нераспознанные — любой)."""
+    return {sha for (sha,) in conn.execute(
+        "SELECT sha256 FROM crm_imports WHERE parser_version >= %s OR kind = 'unknown'", (version,))}
 
 
-def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed) -> int:
+def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, version: int = 1) -> int:
     """Заменяет данные месяца этого вида выгрузки содержимым файла; повторная выгрузка за месяц — новая версия."""
     month, kind = parsed.month, parsed.kind
     with conn.transaction(), conn.cursor() as cur:
@@ -272,13 +274,13 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed) ->
             cur.execute("DELETE FROM crm_form_leads WHERE month = %s", (month,))
             cur.executemany(
                 "INSERT INTO crm_form_leads (lead_id, month, created_at, stage, in_1c, orders, amount, closed, first_order,"
-                " match, manager_1c) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                " match, manager_1c, order_nos, category) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                 " ON CONFLICT (lead_id) DO UPDATE SET month = EXCLUDED.month, created_at = EXCLUDED.created_at,"
                 " stage = EXCLUDED.stage, in_1c = EXCLUDED.in_1c, orders = EXCLUDED.orders, amount = EXCLUDED.amount,"
                 " closed = EXCLUDED.closed, first_order = EXCLUDED.first_order, match = EXCLUDED.match,"
-                " manager_1c = EXCLUDED.manager_1c",
+                " manager_1c = EXCLUDED.manager_1c, order_nos = EXCLUDED.order_nos, category = EXCLUDED.category",
                 [(x.lead_id, month, x.created_at, x.stage, x.in_1c, x.orders, x.amount, x.closed, x.first_order, x.match,
-                  x.manager_1c) for x in parsed.form_leads],
+                  x.manager_1c, list(x.order_nos), x.category) for x in parsed.form_leads],
             )
         else:
             cur.execute("DELETE FROM crm_call_leads WHERE month = %s", (month,))
@@ -299,9 +301,10 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed) ->
                  for x in parsed.call_orders],
             )
         cur.execute(
-            "INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded) VALUES (%s, %s, %s, %s, %s)"
-            " ON CONFLICT (sha256) DO UPDATE SET imported_at = now()",
-            (sha, file_name, kind, month, parsed.rows),
+            "INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded, parser_version)"
+            " VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (sha256) DO UPDATE SET imported_at = now(),"
+            " rows_loaded = EXCLUDED.rows_loaded, parser_version = EXCLUDED.parser_version",
+            (sha, file_name, kind, month, parsed.rows, version),
         )
     return parsed.rows
 

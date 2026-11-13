@@ -57,3 +57,9 @@ CREATE TABLE IF NOT EXISTS crm_call_orders (
     manager_1c text,
     PRIMARY KEY (month, order_no)
 );
+
+-- Версия 2 разбора: номера заказов у лидов с сайта (чтобы не считать дважды заказ, пришедший и звонком),
+-- категория клиента, если выгрузка её даёт, и версия разбора файла.
+ALTER TABLE crm_form_leads ADD COLUMN IF NOT EXISTS order_nos text[] NOT NULL DEFAULT '{}';
+ALTER TABLE crm_form_leads ADD COLUMN IF NOT EXISTS category text;
+ALTER TABLE crm_imports ADD COLUMN IF NOT EXISTS parser_version integer NOT NULL DEFAULT 1;

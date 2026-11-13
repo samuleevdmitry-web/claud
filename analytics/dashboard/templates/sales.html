@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import tiles as show_tiles, insights %}
+{% from "macros.html" import tiles as show_tiles, insights, sales_funnel %}
 {% block title %}Продажи{% endblock %}
 
 {% macro calls_table(title, rows, hint, label) %}
@@ -32,19 +32,10 @@
   {{ show_tiles(tiles) }}
   {{ insights(summary) }}
 
-  <h2>От заявки до заказа</h2>
-  <div class="card table-card">
-    <p class="hint">Метрика считает визиты с заявкой на сайте, Битрикс24 — лиды (формы, почта, звонки из любых источников),
-      1С — заказы клиентов, нашедшихся по почте и телефону. Это разные счётчики, поэтому числа не обязаны сходиться,
-      но сильный разрыв — повод проверить, все ли заявки доходят до CRM.</p>
-    <table>
-      <thead><tr><th>Шаг</th><th class="num">Число</th><th>Пояснение</th></tr></thead>
-      <tbody>{% for label, value, note in funnel %}
-        <tr><td{% if label.startswith('  ') %} class="indent"{% endif %}>{{ label.strip() }}</td>
-            <td class="num">{{ value|int if value is not none else '—' }}</td><td class="muted">{{ note or '' }}</td></tr>
-      {% endfor %}</tbody>
-    </table>
-  </div>
+  {{ sales_funnel(funnel, stats) }}
+  {% if not stats.forms_category_known %}<p class="note">В выгрузке «лиды с сайта» нет признака, заказывал ли клиент раньше, —
+    все нашедшиеся в 1С считаются новыми. Добавьте колонку «Категория» («Новый клиент» / «Действующий клиент»), как в
+    сводке по звонкам, и действующие исключатся сами.</p>{% endif %}
 
   {% if managers %}
   <h2>Входящие звонки</h2>
@@ -56,15 +47,14 @@
 
   {% if orders %}
   <div class="card table-card">
-    <div class="chart-title">Заказы 1С после звонков</div>
-    <p class="hint">Новая продажа — клиент без заказов до звонка; действующий клиент заказывал и раньше, поэтому продажу
-      звонку не приписываем.</p>
+    <div class="chart-title">Новые клиенты после звонков: заказы 1С</div>
+    <p class="hint">Клиенты без заказов до звонка. Действующие клиенты сюда не входят.</p>
     <table>
-      <thead><tr><th>Заказ</th><th>Дата</th><th class="num">Сумма, ₽</th><th>Статус 1С</th><th>Тип</th><th>Менеджер</th></tr></thead>
+      <thead><tr><th>Заказ</th><th>Дата</th><th class="num">Сумма, ₽</th><th>Статус 1С</th><th>Менеджер</th><th></th></tr></thead>
       <tbody>{% for o in orders %}
         <tr><td>{{ o.order_no }}</td><td>{{ o.order_date.strftime('%d.%m') if o.order_date else '—' }}</td>
-            <td class="num">{{ o.amount|int }}</td><td>{{ o.status_1c or '—' }}</td>
-            <td>{{ 'новая продажа' if o.category == 'new' else 'действующий клиент' }}</td><td class="muted">{{ o.manager_1c or '—' }}</td></tr>
+            <td class="num">{{ o.amount|int }}</td><td>{{ o.status_1c or '—' }}</td><td class="muted">{{ o.manager_1c or '—' }}</td>
+            <td class="muted">{% if o.order_no in form_orders %}также заявка с сайта{% endif %}</td></tr>
       {% endfor %}</tbody>
     </table>
   </div>
