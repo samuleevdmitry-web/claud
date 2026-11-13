@@ -349,21 +349,27 @@ def rabbit_compare(conn: psycopg.Connection, project: str, now: date, then: date
 # ----- ПФ и риски -----
 
 def engine_weekly(conn: psycopg.Connection, counter_id: int, audience: str) -> list[dict]:
-    """Визиты и отказы из Яндекса и Google по полным неделям (с понедельника) — из отчёта по дням."""
+    """Визиты и отказы из Яндекса и Google по полным неделям (с понедельника) — из отчёта по дням.
+
+    Полная неделя — все 7 дней есть в сводке счётчика по дням; поисковых визитов в какой-то день может и не быть.
+    """
     return _all(conn, """
-        SELECT date_trunc('week', period_start)::date AS week,
-               count(DISTINCT period_start) AS days,
-               coalesce(sum(visits) FILTER (WHERE dim_key = 'yandex'), 0) AS yandex,
-               coalesce(sum(visits) FILTER (WHERE dim_key = 'google'), 0) AS google,
-               round(sum(bounce_rate * visits) FILTER (WHERE dim_key = 'yandex')
-                     / nullif(sum(visits) FILTER (WHERE dim_key = 'yandex'), 0), 1) AS yandex_bounce,
-               round(sum(bounce_rate * visits) FILTER (WHERE dim_key = 'google')
-                     / nullif(sum(visits) FILTER (WHERE dim_key = 'google'), 0), 1) AS google_bounce
-        FROM metrika_traffic
-        WHERE counter_id = %s AND audience = %s AND grain = 'day' AND slice = 'search_engine'
-        GROUP BY 1 HAVING count(DISTINCT period_start) = 7
-        ORDER BY 1
-    """, (counter_id, audience))
+        WITH weeks AS (
+            SELECT date_trunc('week', period_start)::date AS week FROM metrika_traffic
+            WHERE counter_id = %(c)s AND audience = %(a)s AND grain = 'day' AND slice = 'total'
+            GROUP BY 1 HAVING count(DISTINCT period_start) = 7
+        ), engines AS (
+            SELECT date_trunc('week', period_start)::date AS week,
+                   coalesce(sum(visits) FILTER (WHERE dim_key = 'yandex'), 0) AS yandex,
+                   coalesce(sum(visits) FILTER (WHERE dim_key = 'google'), 0) AS google
+            FROM metrika_traffic
+            WHERE counter_id = %(c)s AND audience = %(a)s AND grain = 'day' AND slice = 'search_engine'
+            GROUP BY 1
+        )
+        SELECT w.week, e.yandex, e.google
+        FROM weeks w JOIN engines e USING (week)
+        ORDER BY w.week
+    """, {"c": counter_id, "a": audience})
 
 
 _PF_WINDOW = """

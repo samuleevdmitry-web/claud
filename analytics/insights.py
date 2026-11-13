@@ -448,6 +448,7 @@ FULL_CTR_WARN, FULL_CTR_ALERT = 3, 8      # запросов, где клико�
 DOMAIN_ALERT = 5           # запросов «запрос + домен»
 SHARE_DROP_WARN, SHARE_DROP_ALERT = 5.0, 8.0   # п.п. доли Яндекса за неделю против 4 прошлых
 ENGINE_FALL = -25.0        # % визитов из Яндекса за неделю — уже провал
+MIN_WEEKLY = 100           # визитов из Яндекса и Google в неделю: меньше — доля скачет от случайностей
 MASS_DROP_WARN, MASS_DROP_ALERT = 15.0, 30.0   # % запросов RabbitSeo из ТОП-30, выпавших или упавших на 10+
 DROP_FROM = 30             # ниже 30-го места запросы и так то появляются, то пропадают — не считаем
 FREQUENT = 100             # частотность, с которой запрос проекта считается частотным
@@ -523,19 +524,23 @@ def pf_domain(rows: list[dict], domain: str) -> Signal:
 
 
 def pf_engine_share(weeks: list[dict]) -> Signal:
+    """Последняя полная неделя против медианы 4 прошлых: медиана не даёт всплеску раздуть базу."""
     title = "Доля Яндекса против Google"
     if len(weeks) < 5:
         return Signal("nodata", "sanctions", title, "Нужно минимум 5 полных недель визитов по поисковым системам.")
     last, base = weeks[-1], weeks[-5:-1]
-    total = last["yandex"] + last["google"]
-    share = ratio_pct(last["yandex"], total)
-    base_share = ratio_pct(sum(w["yandex"] for w in base), sum(w["yandex"] + w["google"] for w in base))
-    y_change = _pct_change(last["yandex"], sum(w["yandex"] for w in base) / 4) or 0.0
-    g_change = _pct_change(last["google"], sum(w["google"] for w in base) / 4) or 0.0
+    y_base, g_base = median(w["yandex"] for w in base), median(w["google"] for w in base)
+    if y_base + g_base < MIN_WEEKLY:
+        return Signal("nodata", "sanctions", title, f"Из Яндекса и Google в среднем {fmt_int(y_base + g_base)} визитов "
+                                                    "в неделю — слишком мало, чтобы судить по доле.")
+    share = ratio_pct(last["yandex"], last["yandex"] + last["google"])
+    base_share = ratio_pct(y_base, y_base + g_base)
+    y_change = _pct_change(last["yandex"], y_base) or 0.0
+    g_change = _pct_change(last["google"], g_base) or 0.0
     drop = base_share - share
-    text = (f"Неделя с {last['week']:%d.%m}: Яндекс {fmt_int(last['yandex'])} визитов ({_signed(y_change)} к среднему "
-            f"4 прошлых недель), Google {fmt_int(last['google'])} ({_signed(g_change)}); доля Яндекса {fmt_pct(share)} "
-            f"против {fmt_pct(base_share)}.")
+    text = (f"Неделя с {last['week']:%d.%m}: Яндекс — {plural(last['yandex'], VISITS)} ({_signed(y_change)} к обычной "
+            f"неделе, медиане 4 прошлых), Google — {fmt_int(last['google'])} ({_signed(g_change)}); доля Яндекса "
+            f"{fmt_pct(share)} против {fmt_pct(base_share)}.")
     if drop >= SHARE_DROP_ALERT and y_change <= ENGINE_FALL and g_change > -10:
         return Signal("alert", "sanctions", title, text + " Проседает только Яндекс — так выглядит фильтр за накрутку ПФ. "
                                                           "Проверить позиции и сообщения в Вебмастере.")

@@ -54,6 +54,11 @@ def test_engine_share_tells_filter_from_season():
     assert both.status == "warn" and "сезон" in both.text
     assert ins.pf_engine_share(weeks(990, 1210)).status == "ok"
     assert ins.pf_engine_share(weeks(990, 1210)[:4]).status == "nodata"
+    spike = weeks(950, 1150)
+    spike[2] = week(spike[2]["week"], 1900, 2200)  # всплеск в базе не должен делать обычную неделю провалом
+    assert ins.pf_engine_share(spike).status == "ok"
+    tiny = [week(w["week"], 5, 14) for w in weeks(3, 14)]
+    assert ins.pf_engine_share(tiny).status == "nodata"
 
 
 def test_rabbit_mass_drop():
