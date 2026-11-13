@@ -59,16 +59,16 @@ def test_sync_builds_monthly_kpi(conn):
 
     query = ("SELECT visits, visits_prev, leads, leads_prev, conversion_pct, conversion_pct_prev, visits_yoy "
              "FROM metrika_monthly WHERE counter_id = %s AND month = %s AND audience = %s")
-    # заявка — только цель 1: клики по телефону в заявки не попадают
-    assert conn.execute(query, (COUNTER, AUG, "all")).fetchone() == (200, 100, 6, 2, 3.0, 2.0, None)
+    # заявка — визит с целью 1 (в августе 6 достижений в 5 визитах): клики по телефону в заявки не попадают
+    assert conn.execute(query, (COUNTER, AUG, "all")).fetchone() == (200, 100, 5, 2, 2.5, 2.0, None)
     # «только люди» — отдельные строки, а не копия всего трафика
-    assert conn.execute(query, (COUNTER, AUG, "humans")).fetchone() == (100, 50, 3, 1, 3.0, 2.0, None)
+    assert conn.execute(query, (COUNTER, AUG, "humans")).fetchone() == (100, 50, 2, 1, 2.0, 2.0, None)
 
     by_source = conn.execute(
         "SELECT dim_key, leads, conversion_pct FROM metrika_kpi "
         "WHERE grain = 'month' AND slice = 'source' AND audience = 'all' ORDER BY dim_key"
     ).fetchall()
-    assert [(k, leads, float(c)) for k, leads, c in by_source] == [("direct", 0, 0.0), ("organic", 6, 3.75)]
+    assert [(k, leads, float(c)) for k, leads, c in by_source] == [("direct", 0, 0.0), ("organic", 5, 3.13)]
 
 
 def test_humans_without_robots_reuse_all_traffic(conn):
@@ -80,7 +80,8 @@ def test_humans_without_robots_reuse_all_traffic(conn):
                  since=JUL, until=date(2026, 8, 31), today=date(2026, 9, 3), log=lambda _: None)
 
     filtered = {(dims[1] if len(dims) > 1 else "total", d1, d2)
-                for _, dims, d1, d2, filters in client.reports if filters and dims[0] == "ym:s:startOfMonth"}
+                for _, dims, d1, d2, filters in client.reports
+                if filters and "isRobot" in filters and dims[0] == "ym:s:startOfMonth"}
     assert filtered == {("total", JUL, date(2026, 8, 31)), ("ym:s:lastsignTrafficSource", JUL, date(2026, 7, 31))}
 
     rows = conn.execute(
@@ -126,7 +127,7 @@ def test_lead_goals_follow_config(conn):
     sync_metrika(conn, client, COUNTER, frozenset({1}), "lastsign", **kwargs)
     sync_metrika(conn, client, COUNTER, frozenset({1, 2}), "lastsign", **kwargs)
     leads = conn.execute("SELECT leads FROM metrika_monthly WHERE month = %s AND audience = 'all'", (AUG,)).fetchone()
-    assert leads == (15,)
+    assert leads == (14,)  # визиты с целью 1 или 2: 5 + 9
 
 
 def test_sync_run_log(conn):
@@ -210,3 +211,22 @@ def test_maps_monthly_reads_card_goals(conn):
         "FROM maps_monthly WHERE month = %s AND audience = 'all'", (AUG,)
     ).fetchall()
     assert rows == [(777, "Олдос", 2804, 2164, 104, 95, 160, 199, 203)]
+
+
+def test_history_reload_after_lead_definition_change(conn):
+    from analytics.cli import missing_history
+    from analytics.config import Settings
+
+    settings = Settings("", (COUNTER,), frozenset({1}), "lastsign", (), (), "", "", "", "", "")
+    data = month_data()
+    data[("day", "search_engine")] = [(AUG, [dim("Яндекс", "yandex")], [50, 40, 100, 10.0, 2.0, 100.0], {})]
+    kwargs = dict(since=JUL, until=date(2026, 8, 31), today=date(2026, 9, 3), log=lambda _: None)
+
+    sync_metrika(conn, FakeMetrikaClient(GOALS, data), COUNTER, frozenset({1}), "lastsign", **kwargs)
+    assert missing_history(conn, settings) == set()
+    # строки, загруженные до визитов с заявкой, — история перезагрузится
+    conn.execute("UPDATE metrika_traffic SET lead_visits = NULL")
+    assert missing_history(conn, settings) == {"metrika"}
+    # у счётчика без целей-заявок колонка пустая всегда — перезагружать его каждый день нельзя
+    sync_metrika(conn, FakeMetrikaClient(GOALS, data), COUNTER, frozenset(), "lastsign", **kwargs)
+    assert missing_history(conn, settings) == set()

@@ -2,6 +2,7 @@
 -- Представления пересоздаются при каждом применении схемы: так меняются их колонки.
 DROP VIEW IF EXISTS metrika_monthly, metrika_kpi, metrika_leads CASCADE;
 
+-- Достижения целей-заявок: запасной вариант для строк без lead_visits (загруженных до его появления).
 CREATE VIEW metrika_leads AS
 SELECT s.counter_id, s.audience, s.grain, s.period_start, s.slice, s.dim_key,
        sum(s.reaches)::integer AS leads
@@ -13,8 +14,9 @@ GROUP BY s.counter_id, s.audience, s.grain, s.period_start, s.slice, s.dim_key;
 CREATE VIEW metrika_kpi AS
 SELECT t.counter_id, t.audience, t.grain, t.period_start, t.slice, t.dim_key, t.dim_label,
        t.visits, t.users, t.pageviews, t.bounce_rate, t.page_depth, t.avg_duration_sec,
-       coalesce(l.leads, 0) AS leads,
-       round(100.0 * coalesce(l.leads, 0) / nullif(t.visits, 0), 2) AS conversion_pct,
+       -- заявки — визиты с хоть одной целью-заявкой, как конверсия в Метрике
+       coalesce(t.lead_visits, l.leads, 0) AS leads,
+       round(100.0 * coalesce(t.lead_visits, l.leads, 0) / nullif(t.visits, 0), 2) AS conversion_pct,
        t.sampled
 FROM metrika_traffic t
 LEFT JOIN metrika_leads l USING (counter_id, audience, grain, period_start, slice, dim_key);

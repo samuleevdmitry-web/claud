@@ -191,18 +191,22 @@ def missing_history(conn: psycopg.Connection, settings: Settings) -> set[str]:
     Признак — нет ни одной строки «только люди» в отчёте, который появился последним из нужных
     (у сайта — поисковые системы по дням, для слежения за долей Яндекса).
     """
-    checks = {"metrika": (settings.metrika_counters, "day", "search_engine"),
-              "maps": (settings.metrika_maps_counters, "month", "total")}
+    base = "SELECT 1 FROM metrika_traffic t WHERE counter_id = %s AND audience = 'humans' AND "
+    site_checks = [
+        base + "grain = 'day' AND slice = 'search_engine' LIMIT 1",
+        # заявки стали визитами с целью-заявкой: месяцы без lead_visits посчитаны по-старому
+        # (у счётчика без целей-заявок колонка пустая всегда — его не перезагружаем)
+        base + "grain = 'month' AND slice = 'total' AND (lead_visits IS NOT NULL OR NOT EXISTS ("
+               "SELECT 1 FROM metrika_goals g WHERE g.counter_id = t.counter_id AND g.is_lead)) LIMIT 1",
+    ]
+    checks = {
+        "metrika": (settings.metrika_counters, site_checks),
+        "maps": (settings.metrika_maps_counters, [base + "grain = 'month' AND slice = 'total' LIMIT 1"]),
+    }
     missing = set()
-    for source, (counters, grain, slice_) in checks.items():
-        for counter_id in counters:
-            found = conn.execute(
-                "SELECT 1 FROM metrika_traffic WHERE counter_id = %s AND audience = 'humans' AND grain = %s"
-                " AND slice = %s LIMIT 1", (counter_id, grain, slice_),
-            ).fetchone()
-            if found is None:
-                missing.add(source)
-                break
+    for source, (counters, queries) in checks.items():
+        if any(conn.execute(query, (c,)).fetchone() is None for c in counters for query in queries):
+            missing.add(source)
     return missing
 
 

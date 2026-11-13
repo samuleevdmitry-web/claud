@@ -188,6 +188,7 @@ def _note(f: Filters, prev_value, yoy_value=None, fmt=fmt_int, yoy_partial: bool
 
 def _site_basics(conn: psycopg.Connection, f: Filters) -> tuple[dict, bool]:
     m = q.site_month(conn, f.counter_id, f.audience, f.month) or {}
+    m["contact_kinds"] = q.contact_kinds(conn, f.counter_id)
     days_year_ago = (shift_month(f.year_ago, 1) - f.year_ago).days
     yoy_partial = m.get("visits_yoy") is not None and (m.get("yoy_days_with_data") or 0) < days_year_ago * FULL_MONTH
     return m, yoy_partial
@@ -210,16 +211,23 @@ def _traffic_tiles(f: Filters, m: dict, yoy_partial: bool) -> list[Tile]:
     ]
 
 
+CONTACT_KINDS = {"phone": "клики по телефону", "email": "клики по почте", "messenger": "переходы в мессенджеры"}
+
+
 def _lead_tiles(f: Filters, m: dict, yoy_partial: bool) -> list[Tile]:
-    return [
+    """Заявки — визиты с хоть одной целью-заявкой; контакты — клики по контактам, которые заявками не считаются."""
+    tiles = [
         Tile("Заявки с сайта", fmt_int(m.get("leads")), delta(m.get("leads"), m.get("leads_prev"), "pct"),
              _note(f, m.get("leads_prev"), m.get("leads_yoy"), yoy_partial=yoy_partial)),
         Tile("Конверсия в заявку", fmt_pct(m.get("conversion_pct"), 2),
              delta(m.get("conversion_pct"), m.get("conversion_pct_prev"), "pp"),
              _note(f, m.get("conversion_pct_prev"), fmt=lambda v: fmt_pct(v, 2))),
-        Tile("Контакты", fmt_int(m.get("contacts")), delta(m.get("contacts"), m.get("contacts_prev"), "pct"),
-             "клики по телефону, почте и мессенджерам"),
     ]
+    kinds = [CONTACT_KINDS[k] for k in CONTACT_KINDS if k in m.get("contact_kinds", ())]
+    if kinds:
+        tiles.append(Tile("Контакты", fmt_int(m.get("contacts")), delta(m.get("contacts"), m.get("contacts_prev"), "pct"),
+                          ", ".join(kinds)))
+    return tiles
 
 
 def _robots(conn: psycopg.Connection, f: Filters) -> tuple[float | None, float | None]:

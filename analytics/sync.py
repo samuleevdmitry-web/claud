@@ -58,7 +58,8 @@ def sync_metrika(
     goals = client.goals(counter_id)
     db.upsert_goals(conn, counter_id, goals, lead_goals)
     goal_ids = [g["id"] for g in goals]
-    log(f"Счётчик {counter_id}: {len(goals)} целей, из них заявки: {sorted(lead_goals & set(goal_ids))}")
+    lead_ids = sorted(lead_goals & set(goal_ids))
+    log(f"Счётчик {counter_id}: {len(goals)} целей, из них заявки: {lead_ids}")
 
     assert next(iter(SLICES)) == "total", "сводка нужна первой: по ней видно, в какие периоды были роботы"
     loaded = 0
@@ -72,12 +73,12 @@ def sync_metrika(
             for audience in AUDIENCES:
                 if audience == "all" or slice_ == "total":
                     fetched[audience] = _fetch_slice(
-                        client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution, audience
+                        client, counter_id, grain, slice_, goal_ids, lead_ids, date_from, date_to, attribution, audience
                     )
                     how = ""
                 else:
                     fetched[audience], how = _humans_slice(
-                        client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution,
+                        client, counter_id, grain, slice_, goal_ids, lead_ids, date_from, date_to, attribution,
                         fetched["all"], robot_free,
                     )
                 traffic, sampled, goal_rows = fetched[audience]
@@ -92,8 +93,9 @@ def sync_metrika(
     return loaded
 
 
-def _fetch_slice(client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution, audience):
-    traffic, sampled = fetch_traffic(client, counter_id, grain, slice_, date_from, date_to, attribution, audience)
+def _fetch_slice(client, counter_id, grain, slice_, goal_ids, lead_ids, date_from, date_to, attribution, audience):
+    traffic, sampled = fetch_traffic(client, counter_id, grain, slice_, date_from, date_to, attribution, audience,
+                                     lead_ids)
     goal_rows = fetch_goals(client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution, audience)
     return traffic, sampled, goal_rows
 
@@ -104,7 +106,7 @@ def robot_free_periods(all_rows: list[TrafficRow], humans_rows: list[TrafficRow]
     return {r.period_start for r in all_rows if humans.get(r.period_start, 0) == r.visits}
 
 
-def _humans_slice(client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution, all_data,
+def _humans_slice(client, counter_id, grain, slice_, goal_ids, lead_ids, date_from, date_to, attribution, all_data,
                   robot_free):
     """Отчёт «только люди»: где роботов не было, это тот же отчёт без фильтра.
 
@@ -122,7 +124,7 @@ def _humans_slice(client, counter_id, grain, slice_, goal_ids, date_from, date_t
     if grain == "month":
         last = (last + timedelta(days=32)).replace(day=1) - timedelta(days=1)
     traffic, sampled, goal_rows = _fetch_slice(
-        client, counter_id, grain, slice_, goal_ids, max(first, date_from), min(last, date_to), attribution,
+        client, counter_id, grain, slice_, goal_ids, lead_ids, max(first, date_from), min(last, date_to), attribution,
         "humans",
     )
     traffic = [r for r in traffic if r.period_start not in robot_free]

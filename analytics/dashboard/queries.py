@@ -128,6 +128,13 @@ def goals(conn: psycopg.Connection, counter_id: int, audience: str, month: date)
     """, (audience, month, audience, month, counter_id))
 
 
+def contact_kinds(conn: psycopg.Connection, counter_id: int) -> set[str]:
+    """Типы целей-контактов (телефон, почта, мессенджер), которые не считаются заявками."""
+    rows = _all(conn, "SELECT DISTINCT type FROM metrika_goals WHERE counter_id = %s "
+                      "AND type IN ('phone', 'email', 'messenger') AND NOT is_lead", (counter_id,))
+    return {r["type"] for r in rows}
+
+
 def host_for_site(conn: psycopg.Connection, counter_id: int) -> str | None:
     row = _one(conn, "SELECT host_id FROM site_hosts WHERE counter_id = %s ORDER BY host_id LIMIT 1", (counter_id,))
     return row["host_id"] if row else None

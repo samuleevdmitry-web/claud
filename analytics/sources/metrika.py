@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 import requests
@@ -114,6 +114,7 @@ class TrafficRow:
     bounce_rate: float | None
     page_depth: float | None
     avg_duration_sec: float | None
+    lead_visits: int | None = None  # визиты, где достигнута хоть одна цель-заявка; None — не собирали
 
 
 @dataclass(frozen=True)
@@ -337,15 +338,42 @@ def fetch_traffic(
     date2: date,
     attribution: str,
     audience: str = "all",
+    lead_goals: list[int] | tuple[int, ...] = (),
 ) -> tuple[list[TrafficRow], bool]:
+    """Трафик среза; с lead_goals — ещё и визиты с заявкой (отдельным запросом с фильтром по целям)."""
     spec, dims, rows, sampled = SLICES[slice_], dimensions_for(grain, slice_, attribution), [], False
     # топ-отчёт запрашивается помесячно: иначе топ-N был бы общим на весь период, а не на каждый месяц
     periods = month_starts(date1, date2) if spec.top else [(date1, date2)]
     for d1, d2 in periods:
         report = report_by_parts(client, counter_id, TRAFFIC_METRICS, dims, d1, d2, AUDIENCES[audience], spec.top)
-        rows += parse_traffic(report.rows, grain, slice_)
+        part = parse_traffic(report.rows, grain, slice_)
         sampled = sampled or report.sampled
+        if lead_goals:
+            leads = report_by_parts(client, counter_id, ["ym:s:visits"], dims, d1, d2,
+                                    combine_filters(AUDIENCES[audience], lead_filter(lead_goals)), spec.top)
+            by_key = parse_counts(leads.rows)
+            part = [replace(r, lead_visits=by_key.get((r.period_start, r.dim_key), 0)) for r in part]
+        rows += part
     return rows, sampled
+
+
+def lead_filter(goal_ids: list[int] | tuple[int, ...]) -> str:
+    """Визиты, где достигнута хоть одна из целей: так Метрика считает конверсию — визит с двумя целями один."""
+    return "EXISTS(" + " OR ".join(f"ym:s:goal=={g}" for g in goal_ids) + ")"
+
+
+def combine_filters(*parts: str | None) -> str | None:
+    present = [p for p in parts if p]
+    return " AND ".join(present) or None
+
+
+def parse_counts(rows: list[dict]) -> dict[tuple[date, str], int]:
+    """Строки отчёта с одной метрикой: (период, ключ значения среза) → число."""
+    out = {}
+    for row in rows:
+        period, *dims = row["dimensions"]
+        out[(date.fromisoformat(period["name"]), _slice_key(dims)[0])] = int(row["metrics"][0] or 0)
+    return out
 
 
 def fetch_goals(

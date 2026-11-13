@@ -97,12 +97,13 @@ def replace_metrika_slice(
         cur.executemany(
             """
             INSERT INTO metrika_traffic (counter_id, audience, grain, period_start, slice, dim_key, dim_label, visits,
-                                         users, pageviews, bounce_rate, page_depth, avg_duration_sec, sampled)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                         users, pageviews, bounce_rate, page_depth, avg_duration_sec, sampled,
+                                         lead_visits)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
                 (counter_id, audience, r.grain, r.period_start, r.slice, r.dim_key, r.dim_label, r.visits, r.users,
-                 r.pageviews, r.bounce_rate, r.page_depth, r.avg_duration_sec, sampled)
+                 r.pageviews, r.bounce_rate, r.page_depth, r.avg_duration_sec, sampled, r.lead_visits)
                 for r in traffic
             ],
         )

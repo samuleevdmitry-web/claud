@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 from analytics.sources.metrika import GRAINS, SLICES, TRAFFIC_METRICS, Report
@@ -66,11 +67,17 @@ class FakeMetrikaClient:
         slice_ = next(name for name, spec in SLICES.items()
                       if [d.format(attr="lastsign") for d in spec.dims] == dimensions[1:])
         rows = []
+        lead_ids = [int(g) for g in re.findall(r"ym:s:goal==(\d+)", filters or "")]
         for period, dims, traffic, goals in self.data.get((grain, slice_), []):
             if not date1 <= period <= date2:
                 continue
             share = self.humans_share if isinstance(self.humans_share, float) else self.humans_share.get(period, 1.0)
-            share = share if filters else 1.0
+            share = share if filters and "isRobot" in filters else 1.0
+            if lead_ids:  # визиты с хоть одной целью-заявкой; в данных теста цели в одном визите не пересекаются
+                visits = sum(goals.get(g, (0, 0))[1] for g in lead_ids) * share
+                if visits:
+                    rows.append({"dimensions": [dim(period.isoformat())] + dims, "metrics": [float(visits)]})
+                continue
             values = []
             for m in metrics:
                 if m in TRAFFIC_METRICS:

@@ -75,3 +75,7 @@ BEGIN
         END IF;
     END LOOP;
 END $$;
+
+-- Визиты с заявкой: визиты, где достигнута хоть одна цель-заявка (визит с двумя целями — один).
+-- NULL — строка загружена до появления колонки; такие месяцы сборщик перезагружает.
+ALTER TABLE metrika_traffic ADD COLUMN IF NOT EXISTS lead_visits integer;
