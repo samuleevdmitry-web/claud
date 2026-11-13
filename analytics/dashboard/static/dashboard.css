@@ -244,3 +244,5 @@ td.indent { padding-left: 24px; color: var(--text-secondary); }
 .funnel .bar-col { width: 30%; }
 .small { font-size: 12px; }
 .funnel-money { margin: 12px 0 0; font-size: 14px; }
+.sales-summary .key-row td { font-weight: 650; }
+.sales-summary .key-row td.num { border-bottom: 2px solid var(--status-bad); }

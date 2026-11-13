@@ -964,13 +964,44 @@ def crm_stats(forms: list[dict], calls: list[dict], orders: list[dict]) -> dict:
         "both_orders": len(new_orders) - len(calls_only),  # заказы, пришедшие и с сайта, и звонком
     }
     # общий итог без двойного счёта
-    s["clients_total"] = s["forms_in_1c"] + len({o["lead_id"] or o["order_no"] for o in calls_only})
+    stage = {r["lead_id"]: r["stage"] for r in calls}
+    calls_clients = {o["lead_id"] or o["order_no"]: o["lead_id"] for o in calls_only}
+    s["calls_found"] = len(calls_clients)
+    s["calls_found_target"] = sum(1 for lead_id in calls_clients.values()
+                                  if stage.get(lead_id) not in NONTARGET_STAGES)
+    s["calls_amount"] = float(sum(o["amount"] for o in calls_only))
+    s["calls_closed"] = only_closed
+    s["clients_total"] = s["forms_in_1c"] + s["calls_found"]
+    s["found_target_total"] = s["forms_target_in_1c"] + s["calls_found_target"]
     s["orders_total"] = s["forms_orders"] + len(calls_only)
     s["amount_total"] = s["forms_amount"] + float(sum(o["amount"] for o in calls_only))
     s["closed_total"] = s["forms_closed"] + only_closed
     s["leads_total"] = s["forms"] + s["calls"]
     s["target_total"] = s["forms_target"] + s["calls_target"]
     return s
+
+
+def crm_summary_rows(s: dict) -> list[dict]:
+    """Итог по лидам и заказам новых клиентов — как сводка «лиды с сайта в Б24 против заказов 1С», но по сайту и
+    звонкам вместе. key: главные строки — конверсия целевых и сумма."""
+    def row(label, total, forms, calls, kind="int", key=False):
+        return {"label": label, "total": total, "forms": forms, "calls": calls, "kind": kind, "key": key}
+
+    calls_orders = s["orders_total"] - s["forms_orders"]
+    return [
+        row("Лидов в Б24", s["leads_total"], s["forms"], s["calls"]),
+        row("Нашлись в 1С с заказом после лида (новые клиенты)", s["clients_total"], s["forms_in_1c"], s["calls_found"]),
+        row("Конверсия от всех лидов", _share(s["clients_total"], s["leads_total"]),
+            _share(s["forms_in_1c"], s["forms"]), _share(s["calls_found"], s["calls"]), "pct"),
+        row("Целевых лидов (без «Нецелевое обращение»)", s["target_total"], s["forms_target"], s["calls_target"]),
+        row("Нашлись среди целевых", s["found_target_total"], s["forms_target_in_1c"], s["calls_found_target"]),
+        row("Конверсия целевых", _share(s["found_target_total"], s["target_total"]),
+            _share(s["forms_target_in_1c"], s["forms_target"]), _share(s["calls_found_target"], s["calls_target"]),
+            "pct", True),
+        row("Заказов в 1С по этим клиентам", s["orders_total"], s["forms_orders"], calls_orders),
+        row("Сумма этих заказов, ₽", s["amount_total"], s["forms_amount"], s["calls_amount"], "rub", True),
+        row("из них «Закрыт» / «Готов к закрытию», ₽", s["closed_total"], s["forms_closed"], s["calls_closed"], "rub"),
+    ]
 
 
 def crm_funnel(s: dict, visits: int | None, lead_visits: int | None) -> list[dict]:
@@ -1035,6 +1066,13 @@ def crm_findings(s: dict, prev: dict | None, lead_visits: int | None) -> list[Fi
                     "считается за сайтом") if s["both_orders"] else ""
             out.append(Finding("plus", f"Звонки дали {plural(s['new_sales'], NEW_CLIENTS)} с заказами на "
                                        f"{fmt_int(s['new_amount'])} ₽{both}."))
+    forms_conv = _share(s["forms_target_in_1c"], s["forms_target"])
+    calls_conv = _share(s["calls_found_target"], s["calls_target"])
+    if s["forms_target"] and s["calls_target"] >= 50 and forms_conv >= 3 * max(calls_conv, 0.1):
+        out.append(Finding("minus", f"Целевые звонки становятся новыми клиентами в {fmt_pct(calls_conv)} случаев, заявки "
+                                    f"с сайта — в {fmt_pct(forms_conv)}. Часть разрыва — {plural(s['calls_unprocessed'], CALLS)} "
+                                    "без стадии; часть — сопоставление только по телефону: клиент мог заказать на другой "
+                                    "номер или почту."))
     if s["clients_total"]:
         out.append(Finding("plus", f"Всего новых клиентов с заказом — {s['clients_total']}: "
                                    f"{plural(s['orders_total'], ORDERS)} на {fmt_int(s['amount_total'])} ₽, "

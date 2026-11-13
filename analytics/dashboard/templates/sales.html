@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import tiles as show_tiles, insights, sales_funnel %}
+{% from "macros.html" import tiles as show_tiles, insights, sales_funnel, sales_summary %}
 {% block title %}Продажи{% endblock %}
 
 {% macro calls_table(title, rows, hint, label) %}
@@ -32,6 +32,7 @@
   {{ show_tiles(tiles) }}
   {{ insights(summary) }}
 
+  {{ sales_summary(summary_rows, f.month) }}
   {{ sales_funnel(funnel, stats) }}
   {% if not stats.forms_category_known %}<p class="note">В выгрузке «лиды с сайта» нет признака, заказывал ли клиент раньше, —
     все нашедшиеся в 1С считаются новыми. Добавьте колонку «Категория» («Новый клиент» / «Действующий клиент»), как в

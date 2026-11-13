@@ -149,3 +149,7 @@ def test_new_clients_only_and_no_double_count():
     assert [x["from_prev"] is None for x in funnel] == [True, False, True, False, False, True]  # лиды и заказы — без доли
     assert funnel[-1]["note"] == "1,5 заказа на клиента"
     assert all(0 < x["width"] <= 100 for x in funnel)
+    rows = {r["label"]: r for r in ins.crm_summary_rows(s)}
+    target = rows["Конверсия целевых"]
+    assert target["key"] and (target["total"], target["forms"], round(target["calls"], 1)) == (40.0, 50.0, 33.3)
+    assert (rows["Нашлись среди целевых"]["total"], rows["Сумма этих заказов, ₽"]["calls"]) == (2, 20000.0)

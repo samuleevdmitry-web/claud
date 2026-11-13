@@ -726,7 +726,7 @@ def report_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
         # в «Главном» без «что проверить»: эти пункты собраны в «Что сделать»
         "kpi": kpi, "main": ins.Summary([g for g in main["summary"].groups if g[0] != "check"]),
         "pf": pf, "sections": sections, "recs": recs, "priorities": ins.PRIORITIES, "funnel": sales.get("funnel"),
-        "sales_stats": sales.get("stats"),
+        "sales_stats": sales.get("stats"), "sales_rows": sales.get("summary_rows"),
         "todo": todo[:12], "questions": collect("question")[:10], "caveats": caveats,
         "generated": datetime.now(ZoneInfo("Europe/Moscow")),
     }
@@ -814,9 +814,10 @@ def sales_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
         return sorted(out.values(), key=lambda g: -g["leads"])
 
     funnel = ins.crm_funnel(s, m.get("visits"), m.get("leads"))
+    summary_rows = ins.crm_summary_rows(s)
     findings = ins.crm_findings(s, prev, m.get("leads"))
     return {
-        "stats": s, "tiles": _crm_tiles(f, s, prev), "funnel": funnel,
+        "stats": s, "tiles": _crm_tiles(f, s, prev), "funnel": funnel, "summary_rows": summary_rows,
         "managers": group("responsible")[:25], "lines": group("line")[:15],
         "orders": [o for o in q.crm_call_orders(conn, f.month) if o["category"] == "new"],
         "form_orders": {no for r in q.crm_form_leads(conn, f.month) for no in (r["order_nos"] or [])},

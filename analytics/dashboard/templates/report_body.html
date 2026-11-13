@@ -1,5 +1,5 @@
 {# Тело отчёта за месяц: и для раздела дашборда, и для сохранённого файла #}
-{% from "macros.html" import insights, rec_list, sales_funnel %}
+{% from "macros.html" import insights, rec_list, sales_funnel, sales_summary %}
 <p class="note">Сформирован {{ generated.strftime('%d.%m.%Y %H:%M') }} по Москве из данных дашборда. Выводы собраны по правилам
   (docs/metrics.md) из тех же цифр, что в разделах.</p>
 
@@ -32,6 +32,7 @@
   </table>
 </div>
 
+{% if sales_rows %}{{ sales_summary(sales_rows, f.month) }}{% endif %}
 {% if funnel %}{{ sales_funnel(funnel, sales_stats) }}{% endif %}
 
 <div class="grid-2">

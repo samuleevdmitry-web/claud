@@ -136,3 +136,19 @@
     {% endif %}
   </div>
 {% endmacro %}
+
+{% macro sales_summary(rows, month) %}
+  <div class="card table-card sales-summary">
+    <div class="chart-title">Итог: лиды в Б24 (сайт и звонки) против заказов новых клиентов в 1С, {{ month|month|lower }}</div>
+    <p class="hint">Новые клиенты — без заказов до обращения. Заказ, пришедший и с сайта, и звонком, считается один раз — за сайтом.</p>
+    <table>
+      <thead><tr><th>Показатель</th><th class="num">Всего</th><th class="num">С сайта (формы и почта)</th><th class="num">Звонки</th></tr></thead>
+      <tbody>{% for r in rows %}
+        <tr{% if r.key %} class="key-row"{% endif %}><td{% if r.label.startswith('из них') %} class="indent"{% endif %}>{{ r.label }}</td>
+          {% for v in (r.total, r.forms, r.calls) %}
+          <td class="num">{% if v is none %}—{% elif r.kind == 'pct' %}{{ v|pct(1) }}{% else %}{{ v|int }}{% endif %}</td>
+          {% endfor %}</tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+{% endmacro %}
