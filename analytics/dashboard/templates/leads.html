@@ -27,6 +27,39 @@
     Контакты — клики по телефону, почте и мессенджерам, которые заявками не считаются.</p>
 </div>
 
+{% if shop.cart_visits or shop.products %}
+<h2>Интернет-магазин</h2>
+<div class="card table-card">
+  <div class="chart-title">Корзина → заказ</div>
+  <p class="hint">Визиты с добавлением в корзину и визиты с оформленным заказом (цели электронной коммерции).</p>
+  <table>
+    <thead><tr><th>Шаг</th><th class="num">Визиты</th><th class="num">Доля от корзины</th></tr></thead>
+    <tbody>
+      <tr><td>Добавили в корзину</td><td class="num">{{ shop.cart_visits|int }}</td><td class="num">100%</td></tr>
+      <tr><td>Оформили заказ</td><td class="num">{{ shop.purchase_visits|int }}</td>
+          <td class="num">{% if shop.cart_visits %}{{ (100.0 * (shop.purchase_visits or 0) / shop.cart_visits)|pct }}{% endif %}</td></tr>
+    </tbody>
+  </table>
+  {% if shop.totals and shop.totals.basket_sum %}
+  <p class="note">Добавлено в корзину на {{ shop.totals.basket_sum|int }} ₽, куплено на {{ shop.totals.purchased_sum|int }} ₽.</p>
+  {% endif %}
+</div>
+{% if shop.products %}
+<div class="card table-card">
+  <div class="chart-title">Товары</div>
+  <p class="hint">{{ shop.hint }}</p>
+  <table>
+    <thead><tr><th>Товар</th><th class="num">В корзину, ₽</th><th class="num">кол-во</th><th class="num">Куплено, ₽</th><th class="num">кол-во</th></tr></thead>
+    <tbody>{% for p in shop.products %}
+      <tr><td class="label" title="{{ p.product }}">{{ p.product }}</td><td class="num">{{ p.basket_sum|int }}</td>
+          <td class="num muted">{{ p.basket_qty|dec }}</td><td class="num">{{ p.purchased_sum|int }}</td>
+          <td class="num muted">{{ p.purchased_qty|dec }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+</div>
+{% endif %}
+{% endif %}
+
 <h2>Откуда приходят заявки</h2>
 <div class="grid-2">
   {% for report in cross %}{{ slice_table(report, f, limit=10, compact=True) }}{% endfor %}

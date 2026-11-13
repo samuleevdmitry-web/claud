@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import tiles as show_tiles, chart_block, insights %}
+{% from "macros.html" import tiles as show_tiles, chart_block, insights, rec_list %}
 {% block title %}Обзор{% endblock %}
 {% block content %}
 {% if pf_alert %}
@@ -9,6 +9,10 @@
 <section>
   {{ show_tiles(tiles) }}
 </section>
+{% if todo %}
+<h2>Что сделать в первую очередь <span class="h2-note"><a href="/recs{{ f.query() }}">все рекомендации ({{ todo_total }})</a></span></h2>
+{{ rec_list(todo, priorities) }}
+{% endif %}
 {{ insights(summary, "Главное за месяц") }}
 <section class="grid-2">
   {{ chart_block(charts, 'site_trend', 'Визиты и посетители по месяцам') }}

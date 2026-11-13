@@ -230,3 +230,12 @@ body.report-file .main { margin-left: 0; max-width: 1100px; margin-inline: auto;
   body { background: #fff; }
   .card { break-inside: avoid; box-shadow: none; }
 }
+.hint { margin: 2px 0 8px; font-size: 13px; color: var(--text-secondary); }
+.rec { border-left: 4px solid var(--border); }
+.rec p { margin: 8px 0 0; font-size: 14px; }
+.rec-1 { border-left-color: var(--status-bad); }
+.rec-1 .signal-badge { background: var(--status-bad); color: #fff; }
+.rec-2 { border-left-color: var(--status-warn); }
+.rec-2 .signal-badge { background: var(--status-warn); color: #1a1a1a; }
+.rec-3 { border-left-color: var(--status-info); }
+.insight-group li, .rec p, .signal p { overflow-wrap: anywhere; }

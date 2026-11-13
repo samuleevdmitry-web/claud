@@ -1,6 +1,42 @@
 {% extends "base.html" %}
 {% from "macros.html" import tiles as show_tiles, chart_block, insights, slice_table %}
 {% block title %}Трафик{% endblock %}
+{% macro pages_table(title, rows, hint, label='Адрес', limit=15, first='Просмотры') %}
+  <div class="card table-card">
+    <div class="chart-title">{{ title }}</div>
+    {% if hint %}<p class="hint">{{ hint }}</p>{% endif %}
+    {% if rows %}
+    <table>
+      <thead><tr><th>{{ label }}</th><th class="num">{{ first }}</th><th class="num">Посетители</th><th class="num">к {{ f.prev|month_short }}</th></tr></thead>
+      <tbody>{% for r in rows[:limit] %}
+        <tr><td class="label" title="{{ r.key }}">{{ r.label or r.key or '—' }}</td><td class="num">{{ r.pageviews|int }}</td>
+            <td class="num">{{ r.users|int }}</td><td class="num muted">{{ r.pageviews|change(r.pageviews_prev) }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% else %}<p class="muted">Нет данных за месяц.</p>{% endif %}
+  </div>
+{% endmacro %}
+
+{% macro page_blocks(p) %}
+  {% if not p.available %}
+  <div class="card muted">Отчётов по страницам за этот месяц ещё нет: они загружаются вместе с Метрикой (первый раз — с историей).</div>
+  {% else %}
+  <h2>Страница не найдена (404)
+    <span class="h2-note">{% if p.nf.visits %}{{ p.nf.visits|int }} визитов — {{ p.nf_share|pct }} всех{% else %}не было{% endif %}</span></h2>
+  <div class="grid-2">
+    {{ pages_table('Адреса, которые отдают 404', p.not_found, p.hints.not_found) }}
+    {{ pages_table('Откуда на них переходят', p.not_found_from, 'Страница, с которой перешли на несуществующий адрес. «Без источника» — пришли извне: из поиска, закладок, рекламы.', 'Страница') }}
+  </div>
+  <h2>Поиск по сайту</h2>
+  {{ pages_table('Что ищут на сайте', p.site_search, p.hints.site_search, 'Запрос', 30, 'Поисков') }}
+  <div class="grid-2">
+    {{ pages_table('Популярные страницы', p.popular, p.hints.page) }}
+    {{ pages_table('Заголовки страниц', p.titles, p.hints.title, 'Заголовок') }}
+  </div>
+  <h2>Отчёты по визитам</h2>
+  {% endif %}
+{% endmacro %}
+
 {% block content %}
 <nav class="tabs" aria-label="Отчёты">
   {% for key, title in tabs.items() %}
@@ -19,6 +55,7 @@
   {% for report in reports %}{{ slice_table(report, f) }}{% endfor %}
 {% else %}
   {{ insights(summary) }}
+  {% if pages %}{{ page_blocks(pages) }}{% endif %}
   {% for report in reports %}
     {% if report.chart %}{{ chart_block(charts, 'slice_' ~ report.slice, report.title ~ ': визиты') }}{% endif %}
     {{ slice_table(report, f) }}

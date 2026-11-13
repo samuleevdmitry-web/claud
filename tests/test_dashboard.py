@@ -117,7 +117,8 @@ def test_every_section_renders(client):
         sync_metrika(conn, FakeMetrikaClient(goals, data, humans_share=0.8), 42, frozenset({1}), "lastsign",
                      since=aug, until=date(2026, 9, 30), today=date(2026, 10, 2), log=lambda _: None)
     for path in ("/", "/traffic", "/traffic?tab=geo", "/traffic?tab=time", "/traffic?tab=sources", "/leads",
-                 "/search", "/pf", "/report", "/demand", "/maps", "/status"):
+                 "/search", "/pf", "/recs", "/report", "/demand", "/maps", "/status", "/traffic?tab=content",
+                 "/traffic?tab=audience", "/traffic?tab=tech"):
         page = client.get(path, params={"month": "2026-09"})
         assert page.status_code == 200, path
     geo = client.get("/traffic", params={"month": "2026-09", "tab": "geo", "aud": "all"}).text
@@ -171,7 +172,7 @@ def test_monthly_report_file(client, tmp_path, monkeypatch):
         sync_metrika(conn, FakeMetrikaClient(goals, data), 42, frozenset({1}), "lastsign",
                      since=aug, until=date(2026, 9, 30), today=date(2026, 10, 2), log=lambda _: None)
     page = client.get("/report", params={"month": "2026-09"}).text
-    assert "Показатели" in page and "Что сделать" in page and "1\xa0300" in page
+    assert "Показатели" in page and "Рекомендации" in page and "1\xa0300" in page
 
     from analytics.cli import make_reports
     from analytics.config import load_settings

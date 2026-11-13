@@ -452,3 +452,47 @@ def rabbit_pairs(conn: psycopg.Connection, project: str, now: date, then: date) 
         WHERE n.project = %s AND n.date = %s
         ORDER BY n.frequency DESC, n.query
     """, (then, project, now))
+
+
+# ----- Страницы и товары -----
+
+def pages(conn: psycopg.Connection, counter_id: int, month: date, kind: str, limit: int = 30) -> list[dict]:
+    """Отчёт по просмотрам за месяц с прошлым месяцем: key, pageviews, users, pageviews_prev."""
+    return _all(conn, f"""
+        SELECT p.key, p.pageviews, p.users, prev.pageviews AS pageviews_prev
+        FROM metrika_pages p
+        LEFT JOIN metrika_pages prev ON prev.counter_id = p.counter_id AND prev.kind = p.kind AND prev.key = p.key
+                                    AND prev.month = {PREV}
+        WHERE p.counter_id = %s AND p.month = {MONTH} AND p.kind = %s
+        ORDER BY p.pageviews DESC, p.key
+        LIMIT %s
+    """, (month, counter_id, month, kind, limit))
+
+
+def not_found_visits(conn: psycopg.Connection, counter_id: int, month: date) -> dict:
+    """Визиты, где был хоть один просмотр страницы 404: за месяц и за прошлый."""
+    rows = dict(conn.execute(f"""
+        SELECT month, pageviews FROM metrika_pages
+        WHERE counter_id = %s AND kind = 'not_found_visits' AND month IN ({MONTH}, {PREV})
+    """, (counter_id, month, month)).fetchall())
+    return {"visits": rows.get(month), "visits_prev": rows.get((month.replace(day=1) - timedelta(days=1)).replace(day=1))}
+
+
+def has_pages(conn: psycopg.Connection, counter_id: int, month: date) -> bool:
+    return conn.execute(f"SELECT 1 FROM metrika_pages WHERE counter_id = %s AND month = {MONTH} LIMIT 1",
+                        (counter_id, month)).fetchone() is not None
+
+
+def products(conn: psycopg.Connection, counter_id: int, month: date, limit: int = 30) -> list[dict]:
+    return _all(conn, f"""
+        SELECT product, basket_sum, basket_qty, purchased_sum, purchased_qty
+        FROM metrika_products WHERE counter_id = %s AND month = {MONTH}
+        ORDER BY basket_sum DESC, product LIMIT %s
+    """, (counter_id, month, limit))
+
+
+def products_total(conn: psycopg.Connection, counter_id: int, month: date) -> dict | None:
+    return _one(conn, f"""
+        SELECT sum(basket_sum) AS basket_sum, sum(purchased_sum) AS purchased_sum, count(*) AS products
+        FROM metrika_products WHERE counter_id = %s AND month = {MONTH}
+    """, (counter_id, month))

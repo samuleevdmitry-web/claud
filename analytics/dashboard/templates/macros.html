@@ -51,6 +51,7 @@
   {# compact — только визиты и результат: для узких блоков «Откуда приходят заявки» #}
   <div class="card table-card">
     <div class="chart-title">{{ report.title }}</div>
+    {% if report.hint and not compact %}<p class="hint">{{ report.hint }}</p>{% endif %}
     {% if report.rows %}
     <table>
       <thead><tr>
@@ -95,5 +96,17 @@
 {% macro alerts(items) %}
   {% for a in items %}
   <div class="alert" role="status"><span class="alert-icon" aria-hidden="true">!</span>{{ a }}</div>
+  {% endfor %}
+{% endmacro %}
+
+{% macro rec_list(items, priorities) %}
+  {% for r in items %}
+  <div class="card rec rec-{{ r.priority }}">
+    <div class="signal-head"><span class="signal-badge">{{ priorities[r.priority] }}</span><span class="muted">{{ r.area }}</span> {{ r.title }}</div>
+    <p><b>Что сделать.</b> {{ r.action }}</p>
+    <p class="muted"><b>Почему.</b> {{ r.why }}</p>
+  </div>
+  {% else %}
+  <div class="card muted">Срочных рекомендаций по данным этого месяца нет.</div>
   {% endfor %}
 {% endmacro %}

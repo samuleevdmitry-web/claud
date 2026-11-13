@@ -614,3 +614,297 @@ def pf_findings(signals: list[Signal]) -> list[Finding]:
     """Для сводок: тревоги — в минусы, «внимание» — в «что проверить»."""
     kind = {"alert": "minus", "warn": "check"}
     return [Finding(kind[s.status], f"ПФ: {s.title.lower()} — {s.text}") for s in signals if s.status in kind]
+
+
+# ----- Новые отчёты: 404, поиск по сайту, Директ, лояльность, товары -----
+
+NOT_FOUND_SHARE = 2.0  # % визитов со страницей 404, с которого это уже проблема
+AUTOTARGET = "автотаргетинг"
+
+
+def short_url(url: str, keep: int = 70) -> str:
+    path = url.split("://", 1)[-1].partition("/")[2] if "://" in url else url
+    path = "/" + path.lstrip("/")
+    return path if len(path) <= keep else "…" + path[-(keep - 1):]
+
+
+def referer_hosts(referers: list[dict], domain: str) -> tuple[list[tuple[str, int]], bool]:
+    """Источники переходов на 404: внешние — по сайту (google.com), свои — по странице. Второе — внешних большинство."""
+    from urllib.parse import urlsplit
+
+    grouped: dict[str, int] = {}
+    outside = inside = 0
+    for r in referers:
+        if not r["key"]:
+            continue
+        host = urlsplit(r["key"]).netloc.removeprefix("www.")
+        own = bool(domain) and host.endswith(domain)
+        label = short_url(r["key"], 50) if own else host or r["key"]
+        grouped[label] = grouped.get(label, 0) + r["pageviews"]
+        if own:
+            inside += r["pageviews"]
+        else:
+            outside += r["pageviews"]
+    return sorted(grouped.items(), key=lambda kv: -kv[1]), outside > inside
+
+
+def not_found_findings(nf: dict, total_visits: int, urls: list[dict], referers: list[dict],
+                       domain: str = "") -> list[Finding]:
+    visits = nf.get("visits") or 0
+    if not visits or not total_visits:
+        return []
+    share = visits / total_visits * 100
+    top = "; ".join(f"{short_url(r['key'], 50)} — {fmt_int(r['pageviews'])}" for r in urls[:3])
+    text = (f"«Страница не найдена» была в {plural(visits, VISITS)} — {fmt_pct(share)} всех визитов. "
+            f"Чаще всего: {top}.")
+    if share < NOT_FOUND_SHARE:
+        return [Finding("plus", text + " Это немного.")]
+    out = [Finding("minus", text)]
+    hosts, external = referer_hosts(referers, domain)
+    if hosts:
+        listed = ", ".join(f"{h} {fmt_int(v)}" for h, v in hosts[:4])
+        if external:
+            out.append(Finding("question", f"На несуществующие адреса переходят «с» {listed} — не со страниц сайта. "
+                                           "Похоже на ботов с поддельным источником."))
+        else:
+            out.append(Finding("check", f"Откуда переходят на несуществующие адреса: {listed}. Исправить ссылки на этих "
+                                        "страницах, со старых адресов поставить 301-переадресацию."))
+    out.append(Finding("check", "Посмотреть в Вебвизоре визиты на эти адреса: если это люди — чинить срочно, "
+                                "если боты — включить строгую фильтрацию роботов в настройках счётчика."))
+    return out
+
+
+def site_search_findings(rows: list[dict]) -> list[Finding]:
+    rows = [r for r in rows if r["key"].strip()]
+    if not rows:
+        return []
+    top = ", ".join(f"«{r['key']}» ({fmt_int(r['users'])})" for r in rows[:6])
+    out = [Finding("question", f"Что ищут поиском по сайту чаще всего (посетителей): {top}. Это то, что не нашли "
+                               "в меню: есть ли по этим словам понятные разделы и фильтры?")]
+    grown = [r for r in rows[:30] if r["pageviews_prev"] and r["pageviews"] >= 30
+             and r["pageviews"] >= 2 * r["pageviews_prev"]]
+    if grown:
+        out.append(Finding("check", "Поиск по сайту: интерес вырос вдвое и больше — "
+                                    + ", ".join(f"«{r['key']}» {fmt_int(r['pageviews_prev'])} → {fmt_int(r['pageviews'])}"
+                                                for r in grown[:4]) + ". Проверить наличие и цены."))
+    return out
+
+
+def direct_findings(campaigns: list[dict], phrases: list[dict], site_conv: float) -> list[Finding]:
+    total = sum(r["visits"] for r in campaigns)
+    if total < MIN_VISITS:
+        return []
+    out = []
+    leads = sum(r["leads"] or 0 for r in campaigns)
+    conv = leads / total * 100
+    kind = "plus" if conv >= site_conv else "minus"
+    out.append(Finding(kind, f"Директ: {plural(total, VISITS)}, {plural(leads, LEADS)}, конверсия {fmt_pct(conv, 2)} "
+                             f"(по сайту {fmt_pct(site_conv, 2)})."))
+    auto = [r for r in phrases if AUTOTARGET in r["dim_label"].lower()]
+    auto_visits = sum(r["visits"] for r in auto)
+    if auto_visits >= total * 0.6:
+        auto_leads = sum(r["leads"] or 0 for r in auto)
+        out.append(Finding("check", f"Директ: автотаргетинг — {fmt_pct(auto_visits / total * 100)} визитов из Директа "
+                                    f"({plural(auto_leads, LEADS)}). Посмотреть в Директе поисковые запросы автотаргетинга, "
+                                    "мусорные — в минус-слова, удачные — отдельными фразами."))
+    idle = [r for r in campaigns if r["visits"] >= 100 and not r["leads"]]
+    for r in idle[:2]:
+        out.append(Finding("minus", f"Директ: кампания {r['dim_label']} — {plural(r['visits'], VISITS)} и ни одной заявки."))
+    best = [r for r in phrases if r["leads"] and r["leads"] >= 2 and AUTOTARGET not in r["dim_label"].lower()]
+    if best:
+        out.append(Finding("plus", "Директ: фразы с заявками — " + ", ".join(
+            f"«{r['dim_label']}» ({plural(r['leads'], LEADS)})" for r in sorted(best, key=lambda r: -r["leads"])[:3])
+            + ". Их стоит усилить."))
+    return out
+
+
+def loyalty_findings(rows: list[dict]) -> list[Finding]:
+    """rows — отчёт «какой по счёту визит»: доля заявок с первого визита и с повторных."""
+    first = next((r for r in rows if r["dim_key"] == "1"), None)
+    total_leads = sum(r["leads"] or 0 for r in rows)
+    if not first or total_leads < 10:
+        return []
+    repeat = total_leads - (first["leads"] or 0)
+    share = repeat / total_leads * 100
+    visits = sum(r["visits"] for r in rows)
+    visit_share = (visits - first["visits"]) / visits * 100 if visits else 0
+    if share >= 30:
+        return [Finding("question", f"{fmt_pct(share)} заявок приходят со 2-го визита и позже, хотя повторных визитов "
+                                    f"{fmt_pct(visit_share)}. Решение принимают не сразу — есть ли ретаргетинг в Директе "
+                                    "и способ вернуться (прайс на почту, менеджер)?")]
+    return [Finding("plus", f"{fmt_pct(100 - share)} заявок оставляют в первый же визит.")]
+
+
+def products_findings(products: list[dict], totals: dict | None, cart_visits: int | None,
+                      purchase_visits: int | None) -> list[Finding]:
+    out = []
+    if cart_visits and cart_visits >= 20:
+        conv = (purchase_visits or 0) / cart_visits * 100
+        text = (f"Корзина → заказ: визитов с добавлением в корзину — {fmt_int(cart_visits)}, с оформленным заказом — "
+                f"{fmt_int(purchase_visits or 0)} ({fmt_pct(conv)}).")
+        out.append(Finding("minus" if conv < 10 else "plus", text))
+    if totals and totals.get("basket_sum"):
+        lost = [p for p in products if p["basket_sum"] >= 20000 and not p["purchased_sum"]]
+        if lost:
+            out.append(Finding("check", "Кладут в корзину, но не покупают: " + "; ".join(
+                f"{p['product'][:60]} — в корзине на {fmt_int(p['basket_sum'])} ₽" for p in lost[:3])
+                + ". Проверить цену, наличие, минимальную партию."))
+    return out
+
+
+# ----- Рекомендации: что сделать, чтобы росли трафик и заявки -----
+
+PRIORITIES = {1: "Срочно", 2: "Важно", 3: "Стоит сделать"}
+
+
+@dataclass(frozen=True)
+class Recommendation:
+    priority: int  # 1 — срочно, 2 — важно, 3 — стоит сделать
+    area: str
+    title: str
+    action: str
+    why: str
+
+
+def recommend(d: dict) -> list[Recommendation]:
+    """Рекомендации по данным месяца. d — заготовки разделов (см. pages.recommendations):
+    total, conv, pf, nf, not_found, not_found_from, site_search, source, direct_campaign, direct_phrase,
+    landing_section, device, visit_number, country, shop.
+    """
+    out: list[Recommendation] = []
+    total, conv = d.get("total") or 0, d.get("conv") or 0.0
+
+    nf_visits = (d.get("nf") or {}).get("visits") or 0
+    if total and nf_visits / total * 100 >= NOT_FOUND_SHARE:
+        urls = ", ".join(short_url(r["key"], 60) for r in d.get("not_found", [])[:3])
+        refs, external = referer_hosts(d.get("not_found_from", []), d.get("domain") or "")
+        why = (f"{plural(nf_visits, VISITS)} ({fmt_pct(nf_visits / total * 100)} всех) видели страницу 404. "
+               f"Чаще всего: {urls}.")
+        if refs:
+            why += " Переходят на них с: " + ", ".join(f"{h} {fmt_int(v)}" for h, v in refs[:4]) + "."
+        leads = d.get("leads") or 0
+        if external:
+            clean = leads / (total - nf_visits) * 100 if total > nf_visits else 0
+            out.append(Recommendation(
+                1, "Сайт", "Разобраться с визитами на несуществующие адреса",
+                "Похоже на ботов с поддельным источником: на несуществующие адреса приходят «из» поисковиков и порталов, "
+                "а не со страниц сайта. Открыть в Вебвизоре визиты на эти адреса; если это боты — включить в настройках "
+                "счётчика фильтрацию роботов «по строгим правилам и по поведению» и закрыть эти адреса на сервере; "
+                "если люди — поставить 301-переадресацию на нужные разделы.",
+                why + f" Они искажают отчёты: без них конверсия сайта — около {fmt_pct(clean, 2)}, а не "
+                      f"{fmt_pct(conv, 2)}, и доли каналов другие."))
+        else:
+            out.append(Recommendation(
+                1, "Сайт", "Убрать «Страница не найдена»",
+                "Исправить ссылки на страницах, с которых переходят на несуществующие адреса; со старых адресов "
+                "поставить 301-переадресацию на нужные разделы.", why))
+
+    pf = d.get("pf")
+    if pf and pf["status"] != "ok":
+        out.append(Recommendation(
+            1 if pf["status"] == "alert" else 2, "Поиск", "Решить судьбу накрутки ПФ",
+            "Остановить накрутку или хотя бы убрать из проекта запросы, где сайт уже в ТОП-3, и заходы «запрос + домен».",
+            pf["verdict"]))
+
+    zero = [r for r in d.get("source", []) if not is_undefined(r) and total and r["visits"] / total * 100 >= 5
+            and not r["leads"]]
+    for r in zero[:2]:
+        out.append(Recommendation(
+            2, "Каналы", f"Разобраться с каналом «{r['dim_label']}»",
+            "Посмотреть, какие площадки и страницы дают этот трафик; если это реклама или посевы — перенастроить на "
+            "целевую аудиторию или перераспределить бюджет.",
+            f"{plural(r['visits'], VISITS)} ({fmt_pct(r['visits'] / total * 100)}) и ни одной заявки."))
+
+    campaigns, phrases = d.get("direct_campaign", []), d.get("direct_phrase", [])
+    direct = sum(r["visits"] for r in campaigns)
+    auto = [r for r in phrases if AUTOTARGET in r["dim_label"].lower()]
+    auto_visits, auto_leads = sum(r["visits"] for r in auto), sum(r["leads"] or 0 for r in auto)
+    if direct >= MIN_VISITS and auto_visits >= direct * 0.6:
+        auto_conv = auto_leads / auto_visits * 100 if auto_visits else 0
+        if auto_conv < conv:
+            out.append(Recommendation(
+                2, "Директ", "Сузить автотаргетинг",
+                "В Директе выгрузить поисковые запросы автотаргетинга: нецелевые — в минус-слова, удачные — "
+                "отдельными фразами со своей ставкой.",
+                f"Автотаргетинг — {fmt_pct(auto_visits / direct * 100)} визитов из Директа, конверсия "
+                f"{fmt_pct(auto_conv, 2)} при {fmt_pct(conv, 2)} по сайту."))
+    for r in [c for c in campaigns if c["visits"] >= 100 and not c["leads"]][:2]:
+        out.append(Recommendation(
+            2, "Директ", f"Кампания {r['dim_label']} без заявок",
+            "Проверить посадочные страницы, гео и ключевые фразы кампании; без изменений — отключить.",
+            f"{plural(r['visits'], VISITS)} за месяц и ни одной заявки."))
+
+    weak = [r for r in d.get("landing_section", []) if r["visits"] >= 300 and conv
+            and (r["conversion_pct"] or 0) < conv * 0.5]
+    broken = [r["key"] for r in d.get("not_found", [])[:10]]
+    with_404 = [r for r in weak if any(u.startswith(r["dim_label"]) for u in broken)]
+    if with_404:
+        out.append(Recommendation(
+            2, "Каталог", "Пересчитать разделы без визитов на 404",
+            "Сначала разобраться со «Страница не найдена»: в этих разделах лежат битые адреса, и их визиты занижают "
+            "конверсию раздела. Потом смотреть, нужно ли дорабатывать сам раздел.",
+            "; ".join(f"{short_url(r['dim_label'], 50)} — {plural(r['visits'], VISITS)}, конверсия "
+                      f"{fmt_pct(r['conversion_pct'] or 0, 2)}" for r in with_404[:3]) + "."))
+        weak = [r for r in weak if r not in with_404]
+    if weak:
+        out.append(Recommendation(
+            2, "Каталог", "Доработать разделы с трафиком без заявок",
+            "На этих страницах вывести цены или «от …», наличие, минимальную партию, кнопку «Запросить прайс» "
+            "и телефон на виду; проверить в Вебвизоре и на карте скроллинга, куда доходят посетители.",
+            "; ".join(f"{short_url(r['dim_label'], 50)} — {plural(r['visits'], VISITS)}, конверсия "
+                      f"{fmt_pct(r['conversion_pct'] or 0, 2)}" for r in weak[:3]) + f" (по сайту {fmt_pct(conv, 2)})."))
+
+    devices = {r["dim_key"]: r for r in d.get("device", [])}
+    desktop = devices.get("desktop")
+    mobile = [r for k, r in devices.items() if k in MOBILE_KEYS]
+    m_visits = sum(r["visits"] for r in mobile)
+    m_leads = sum(r["leads"] or 0 for r in mobile)
+    if desktop and total and m_visits / total >= 0.3 and desktop["conversion_pct"]:
+        m_conv = m_leads / m_visits * 100 if m_visits else 0
+        if m_conv < float(desktop["conversion_pct"]) * 0.6:
+            out.append(Recommendation(
+                2, "Сайт", "Упростить путь до заявки с телефона",
+                "Пройти с телефона путь «каталог → товар → заявка/корзина»: кликабельный номер и мессенджеры "
+                "на виду, короткая форма, скорость загрузки каталога.",
+                f"С телефонов {fmt_pct(m_visits / total * 100)} визитов, конверсия {fmt_pct(m_conv, 2)} против "
+                f"{fmt_pct(desktop['conversion_pct'], 2)} с компьютеров."))
+
+    shop = d.get("shop") or {}
+    cart, purchase = shop.get("cart_visits"), shop.get("purchase_visits") or 0
+    if cart and cart >= 20 and purchase / cart * 100 < 10:
+        out.append(Recommendation(
+            2, "Магазин", "Довести корзину до заказа",
+            "Упростить оформление (меньше полей, без обязательной регистрации), показать условия доставки и "
+            "минимальной партии до корзины, настроить письмо о брошенной корзине; проверить корзину с телефона.",
+            f"Визитов с добавлением в корзину — {fmt_int(cart)}, с оформленным заказом — {fmt_int(purchase)} "
+            f"({fmt_pct(purchase / cart * 100)})."))
+
+    searches = [r for r in d.get("site_search", []) if r["key"].strip()]
+    if searches:
+        out.append(Recommendation(
+            3, "Каталог", "Вынести в меню то, что ищут поиском",
+            "Проверить, что поиск находит товары по частым запросам; вынести их в меню и фильтры, под самые частые — "
+            "сделать посадочные страницы (они же пойдут в SEO и Директ).",
+            "Чаще всего ищут: " + ", ".join(f"«{r['key']}»" for r in searches[:8]) + "."))
+
+    visits_by_number = d.get("visit_number", [])
+    first = next((r for r in visits_by_number if r["dim_key"] == "1"), None)
+    all_leads = sum(r["leads"] or 0 for r in visits_by_number)
+    if first and all_leads >= 10 and (all_leads - (first["leads"] or 0)) / all_leads >= 0.3:
+        out.append(Recommendation(
+            3, "Реклама", "Возвращать тех, кто не решился сразу",
+            "Ретаргетинг в Директе на посетителей каталога без заявки (7–30 дней), сбор контактов за прайс или "
+            "образцы, рассылка с новинками.",
+            f"{fmt_pct((all_leads - (first['leads'] or 0)) / all_leads * 100)} заявок — со 2-го визита и позже."))
+
+    foreign = [r for r in d.get("country", []) if r["dim_label"] not in TARGET_COUNTRIES and not is_undefined(r)]
+    f_visits = sum(r["visits"] for r in foreign)
+    if total and f_visits / total * 100 >= MIN_SHARE:
+        out.append(Recommendation(
+            3, "Трафик", "Отсечь нецелевые страны",
+            "Проверить эти визиты в Вебвизоре; если это боты — включить строгую фильтрацию роботов в настройках "
+            "счётчика и исключить страны в рекламе.",
+            f"{plural(f_visits, VISITS)} ({fmt_pct(f_visits / total * 100)}) из стран без продаж: "
+            + ", ".join(f"{r['dim_label']} {fmt_int(r['visits'])}" for r in sorted(foreign, key=lambda r: -r['visits'])[:3])
+            + "."))
+    return sorted(out, key=lambda r: r.priority)

@@ -27,6 +27,7 @@ TZ = ZoneInfo("Europe/Moscow")
 # Меню слева: адрес, название, значок (имя символа в templates/base.html).
 NAV = [
     ("overview", "/", "Обзор", "home"),
+    ("recs", "/recs", "Рекомендации", "check"),
     ("traffic", "/traffic", "Трафик", "chart"),
     ("leads", "/leads", "Заявки и цели", "target"),
     ("search", "/search", "Поиск Яндекса", "search"),
@@ -96,6 +97,11 @@ def search(request: Request, site: int | None = None, month: str | None = None, 
 @app.get("/pf", response_class=HTMLResponse)
 def pf(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
     return render(request, "pf", pages.pf_page, site, month, aud)
+
+
+@app.get("/recs", response_class=HTMLResponse)
+def recs(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
+    return render(request, "recs", pages.recommendations_page, site, month, aud)
 
 
 @app.get("/report", response_class=HTMLResponse)

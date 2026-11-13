@@ -53,6 +53,7 @@ class FakeMetrikaClient:
         self.data = data
         self.name = name
         self.humans_share = humans_share
+        self.pages: dict[tuple[str, str | None], list[tuple[str, list[float]]]] = {}
         self.reports: list[tuple[list[str], list[str], date, date, str | None]] = []
 
     def counter(self, counter_id: int) -> dict:
@@ -63,6 +64,10 @@ class FakeMetrikaClient:
 
     def report(self, counter_id, metrics, dimensions, date1, date2, filters=None, top=None) -> Report:
         self.reports.append((metrics, dimensions, date1, date2, filters))
+        if dimensions[0] not in GRAINS.values() or "ym:pv:" in (filters or ""):  # страницы и товары: {группировка: [(имя, [метрики])]}
+            rows = [{"dimensions": [dim(name)], "metrics": values}
+                    for name, values in self.pages.get((dimensions[0], filters), [])]
+            return Report(rows[:top] if top else rows, sampled=False)
         grain = next(g for g, d in GRAINS.items() if d == dimensions[0])
         slice_ = next(name for name, spec in SLICES.items()
                       if [d.format(attr="lastsign") for d in spec.dims] == dimensions[1:])

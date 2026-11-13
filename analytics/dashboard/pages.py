@@ -10,7 +10,7 @@ import tomllib
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 import psycopg
@@ -29,6 +29,7 @@ from analytics.format import (
     month_name,
     month_short,
 )
+from analytics.guide import GUIDE
 from analytics.keywords import load_keywords
 
 STALE_DAYS = 5  # с какого отставания данных Вебмастера показывать предупреждение
@@ -37,7 +38,8 @@ AUDIENCES = {"humans": "Только люди", "all": "Весь трафик"}
 STREAM_NAMES = {"search": "статистика запросов", "query_analytics": "аналитика запросов",
                 "pages_in_search": "страницы в поиске", "crawl": "обход роботом", "sqi": "ИКС"}
 SOURCE_NAMES = {"metrika": "Метрика: сайты", "maps": "Метрика: Карты", "webmaster": "Вебмастер",
-                "wordstat": "Вордстат", "rabbit": "RabbitSeo", "report": "Отчёт за месяц"}
+                "wordstat": "Вордстат", "rabbit": "RabbitSeo", "report": "Отчёт за месяц",
+                "metrika_backfill": "Метрика: догрузка новых отчётов"}
 
 # Вкладки раздела «Трафик»: отчёты Метрики по группам, как в её интерфейсе.
 TRAFFIC_TABS = {
@@ -46,24 +48,28 @@ TRAFFIC_TABS = {
         ("source", "Каналы"), ("search_engine", "Поисковые системы"), ("adv_engine", "Рекламные системы"),
         ("referrer", "Сайты"), ("social", "Социальные сети"), ("recommendation", "Рекомендательные системы"),
         ("messenger", "Мессенджеры"), ("utm", "UTM-метки"), ("search_phrase", "Поисковые фразы"),
+        ("direct_campaign", "Директ: кампании"), ("direct_phrase", "Директ: фразы и условия показа"),
     ]),
     "geo": ("География", [("country", "Страны"), ("region", "Регионы"), ("city", "Города")]),
     "audience": ("Аудитория", [("gender", "Пол"), ("age", "Возраст"), ("new_user", "Новые и вернувшиеся"),
+                               ("visit_number", "Какой по счёту визит"), ("days_since_first", "Дней с первого визита"),
                                ("interest", "Интересы")]),
-    "tech": ("Технологии", [("device", "Устройства"), ("os", "Операционные системы"), ("browser", "Браузеры")]),
-    "content": ("Содержание", [("landing", "Страницы входа"), ("exit", "Страницы выхода"),
-                               ("depth", "Глубина просмотра"), ("duration", "Время на сайте")]),
+    "tech": ("Технологии", [("device", "Устройства"), ("os", "Операционные системы"), ("browser", "Браузеры"),
+                            ("phone_brand", "Производители телефонов"), ("screen", "Разрешение экрана")]),
+    "content": ("Содержание", [("landing_section", "Разделы входа"), ("landing", "Страницы входа"),
+                               ("exit", "Страницы выхода"), ("depth", "Глубина просмотра"),
+                               ("duration", "Время на сайте")]),
     "time": ("Время", [("hour", "По часам"), ("weekday", "По дням недели")]),
 }
 # Отчёты, где порядок строк задан самим значением (часы, дни недели, интервалы), а не числом визитов.
-ORDERED = {"hour", "weekday", "age", "depth", "duration"}
+ORDERED = {"hour", "weekday", "age", "depth", "duration", "visit_number", "days_since_first"}
 CHARTED = {"hour", "weekday", "age"}  # к этим отчётам — столбики визитов
 # С фильтром роботности Метрика отдаёт эти отчёты не целиком: теряет мелкие строки и большую часть целей.
 # В месяцы без роботов сборщик берёт их из всего трафика, в месяцы с роботами — помечаем.
 FILTER_GAPS = {"city", "landing", "os"}
 # Отчёты по видам источников: строка «Не определено» в них — визиты не из этого источника, её не показываем.
 SUBSOURCE = {"search_engine", "adv_engine", "referrer", "social", "recommendation", "messenger", "utm",
-             "search_phrase"}
+             "search_phrase", "direct_campaign", "direct_phrase"}
 
 
 @dataclass
@@ -263,7 +269,7 @@ def _slice_report(conn: psycopg.Connection, f: Filters, slice_: str, title: str,
         r["share"] = r["visits"] / total * 100 if total else None
         if r["dim_label"].startswith("http"):
             r["dim_label"] = "/" + r["dim_label"].split("://", 1)[1].partition("/")[2]
-    report = {"slice": slice_, "title": title, "rows": rows, "chart": None, "note": None}
+    report = {"slice": slice_, "title": title, "rows": rows, "chart": None, "note": None, "hint": GUIDE.get(slice_)}
     if f.audience == "humans" and slice_ in FILTER_GAPS and (_robots(conn, f)[0] or 0) > 0:
         report["note"] = ("В этом месяце были роботы, а с фильтром «только люди» Метрика отдаёт этот отчёт "
                           "не целиком: мелкие строки и часть заявок по ним потеряны. Для полной картины "
@@ -288,6 +294,7 @@ def overview(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
     maps = maps_page(conn, settings, f)
     findings += search.get("findings", []) + (demand or {}).get("findings", []) + maps.get("findings", [])
     pf = pf_page(conn, settings, f)  # итог — отдельной плашкой над сводкой
+    todo = recommendations(conn, settings, f, pf)
     tiles = [_traffic_tiles(f, m, yoy_partial)[0]] + _lead_tiles(f, m, yoy_partial)[:2]
     if search.get("tiles"):
         tiles += search["tiles"][:2]
@@ -295,6 +302,7 @@ def overview(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
         tiles.append(demand["tiles"][0])
     return {"tiles": tiles, "summary": ins.summarize(findings, limit=5),
             "pf_alert": pf["verdict"] if pf["status"] != "ok" else None, "pf_status": pf["status"],
+            "todo": todo[:3], "todo_total": len(todo), "priorities": ins.PRIORITIES,
             "charts": {"site_trend": charts["site_trend"], "leads_trend": charts["leads_trend"]}, "skipped": skipped}
 
 
@@ -319,9 +327,55 @@ def traffic(conn: psycopg.Connection, settings: Settings, f: Filters, tab: str) 
             findings += more
             if report["chart"]:
                 context["charts"][f"slice_{slice_}"] = report["chart"]
+        rows = {r["slice"]: r["rows"] for r in context["reports"]}
+        if tab == "sources":
+            findings += ins.direct_findings(rows["direct_campaign"], rows["direct_phrase"], conv)
+        elif tab == "audience":
+            findings += ins.loyalty_findings(rows["visit_number"])
+        elif tab == "content":
+            context["pages"] = content_pages(conn, f, total)
+            findings = context["pages"]["findings"] + findings
     context["summary"] = ins.summarize(findings)
     context["site_conv"], context["site_bounce"] = conv, bounce
     return context
+
+
+def content_pages(conn: psycopg.Connection, f: Filters, total_visits: int) -> dict:
+    """Отчёты по просмотрам страниц за месяц: 404 и откуда на них приходят, поиск по сайту, популярное, заголовки."""
+    nf = q.not_found_visits(conn, f.counter_id, f.month)
+    urls = q.pages(conn, f.counter_id, f.month, "not_found", 15)
+    refs = q.pages(conn, f.counter_id, f.month, "not_found_from", 10)
+    search = [r for r in q.pages(conn, f.counter_id, f.month, "site_search", 31) if r["key"].strip()][:30]
+    domain = (f.site.get("site") or "").removeprefix("www.")
+    for r in urls:
+        r["label"] = ins.short_url(r["key"])
+    for r in refs:
+        host = urlsplit(r["key"]).netloc.removeprefix("www.")
+        own = host.endswith(domain) if domain else True
+        r["label"] = "(без источника)" if not r["key"] else ins.short_url(r["key"]) if own else r["key"].split("://")[-1]
+    return {
+        "available": q.has_pages(conn, f.counter_id, f.month),
+        "nf": nf, "nf_share": (nf["visits"] or 0) / total_visits * 100 if total_visits else None,
+        "not_found": urls, "not_found_from": refs, "site_search": search,
+        "popular": q.pages(conn, f.counter_id, f.month, "page", 20),
+        "titles": q.pages(conn, f.counter_id, f.month, "title", 15),
+        "hints": GUIDE,
+        "findings": ins.not_found_findings(nf, total_visits, urls, refs, (f.site.get("site") or "").removeprefix("www."))
+                    + ins.site_search_findings(search),
+    }
+
+
+def shop(conn: psycopg.Connection, f: Filters, goals: list[dict]) -> dict:
+    """Электронная коммерция: путь «корзина → заказ» по целям и товары."""
+    def visits(kind: str) -> int | None:
+        found = [g["visits"] for g in goals if g["type"] == kind]
+        return sum(found) if found else None
+
+    products = q.products(conn, f.counter_id, f.month, 25)
+    totals = q.products_total(conn, f.counter_id, f.month)
+    cart, purchase = visits("e_cart"), visits("e_purchase")
+    return {"products": products, "totals": totals, "cart_visits": cart, "purchase_visits": purchase,
+            "findings": ins.products_findings(products, totals, cart, purchase), "hint": GUIDE["products"]}
 
 
 def leads(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
@@ -341,7 +395,9 @@ def leads(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
                                 key=lambda r: -(r["leads"] or 0))[:15]
         cross.append(report)
         findings += [x for x in more if "конверт" in x.text or "заяв" in x.text]
-    return {"tiles": _lead_tiles(f, m, yoy_partial), "goals": goals, "cross": cross,
+    store = shop(conn, f, goals)
+    findings += store["findings"]
+    return {"tiles": _lead_tiles(f, m, yoy_partial), "goals": goals, "cross": cross, "shop": store,
             "charts": {"leads_trend": charts["leads_trend"]}, "summary": ins.summarize(findings)}
 
 
@@ -648,11 +704,7 @@ def report_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
         return out
 
     todo = collect("check")
-    flagged = [s.title.lower() for s in pf["signals"] if s.status in ("alert", "warn")]
-    if pf["status"] != "ok":
-        todo.insert(0, f"Накрутка ПФ: {pf['verdict']} Сработало: {', '.join(flagged)}. Решить, продолжать ли накрутку; "
-                       "как минимум убрать из проекта запросы, где сайт уже в ТОП-3, и заходы «запрос + домен» — "
-                       "это самые заметные следы (раздел «ПФ и риски»).")
+    recs = recommendations(conn, settings, f, pf)
     caveats = list(search.get("alerts", []))
     if f.month >= f.today.replace(day=1):
         caveats.insert(0, f"{month_name(f.month)} ещё не закончился: цифры за неполный месяц, сравнение с прошлым "
@@ -665,7 +717,35 @@ def report_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
     return {
         # в «Главном» без «что проверить»: эти пункты собраны в «Что сделать»
         "kpi": kpi, "main": ins.Summary([g for g in main["summary"].groups if g[0] != "check"]),
-        "pf": pf, "sections": sections,
+        "pf": pf, "sections": sections, "recs": recs, "priorities": ins.PRIORITIES,
         "todo": todo[:12], "questions": collect("question")[:10], "caveats": caveats,
         "generated": datetime.now(ZoneInfo("Europe/Moscow")),
     }
+
+
+# ----- Рекомендации -----
+
+def recommendations(conn: psycopg.Connection, settings: Settings, f: Filters, pf: dict | None = None) -> list:
+    """Что сделать, чтобы росли трафик и заявки, — по данным месяца (правила — insights.recommend)."""
+    m, _ = _site_basics(conn, f)
+    total, conv = m.get("visits") or 0, float(m.get("conversion_pct") or 0)
+
+    def rows(slice_: str) -> list[dict]:
+        return q.slice_rows(conn, f.counter_id, f.audience, slice_, f.month)
+
+    goals = q.goals(conn, f.counter_id, f.audience, f.month)
+    content = content_pages(conn, f, total)
+    data = {
+        "total": total, "conv": conv, "leads": m.get("leads") or 0, "pf": pf or pf_page(conn, settings, f),
+        "domain": (f.site.get("site") or "").removeprefix("www."),
+        "nf": content["nf"], "not_found": content["not_found"], "not_found_from": content["not_found_from"],
+        "site_search": content["site_search"], "shop": shop(conn, f, goals),
+        **{s: [r for r in rows(s) if not ins.is_undefined(r)] if s in SUBSOURCE else rows(s)
+           for s in ("source", "direct_campaign", "direct_phrase", "landing_section", "device", "visit_number",
+                     "country")},
+    }
+    return ins.recommend(data)
+
+
+def recommendations_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
+    return {"items": recommendations(conn, settings, f), "priorities": ins.PRIORITIES}

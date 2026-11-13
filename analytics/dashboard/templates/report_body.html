@@ -1,5 +1,5 @@
 {# Тело отчёта за месяц: и для раздела дашборда, и для сохранённого файла #}
-{% from "macros.html" import insights %}
+{% from "macros.html" import insights, rec_list %}
 <p class="note">Сформирован {{ generated.strftime('%d.%m.%Y %H:%M') }} по Москве из данных дашборда. Выводы собраны по правилам
   (docs/metrics.md) из тех же цифр, что в разделах.</p>
 
@@ -11,6 +11,9 @@
   {% set flagged = pf.signals|selectattr('status', 'in', ['alert', 'warn'])|list %}
   {% if flagged %}<ul class="plain-list">{% for s in flagged %}<li><b>{{ s.title }}.</b> {{ s.text }}</li>{% endfor %}</ul>{% endif %}
 </div>
+
+<h2>Рекомендации</h2>
+{{ rec_list(recs, priorities) }}
 
 <h2>Показатели</h2>
 <div class="card table-card">
@@ -31,7 +34,7 @@
 
 <div class="grid-2">
   <div class="card">
-    <div class="chart-title">Что сделать</div>
+    <div class="chart-title">Что ещё проверить</div>
     {% if todo %}<ol class="plain-list">{% for t in todo %}<li>{{ t }}</li>{% endfor %}</ol>
     {% else %}<p class="muted">Срочного нет.</p>{% endif %}
   </div>

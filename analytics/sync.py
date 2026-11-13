@@ -13,11 +13,14 @@ from analytics.keywords import KeywordConfig
 from analytics.sources.metrika import (
     AUDIENCES,
     GRAINS,
+    NOT_FOUND_TITLE,
     SLICES,
     GoalRow,
     MetrikaClient,
     TrafficRow,
     fetch_goals,
+    fetch_pages,
+    fetch_products,
     fetch_traffic,
     grain_range,
 )
@@ -46,11 +49,16 @@ def sync_metrika(
     today: date | None = None,
     log: Callable[[str], None] = print,
     kind: str = "site",
+    only: set[str] | None = None,
+    not_found_title: str = NOT_FOUND_TITLE,
+    search_param: str = "q",
 ) -> int:
     """Перегружает цели и отчёты за период в двух вариантах — весь трафик и только люди.
 
-    kind: 'site' — счётчик сайта (все отчёты), 'maps' — счётчик карточки на Картах, который создаёт
-    Яндекс Бизнес (только основные: сводка, источники, UTM, города, устройства).
+    kind: 'site' — счётчик сайта (все отчёты, страницы и товары), 'maps' — счётчик карточки на Картах,
+    который создаёт Яндекс Бизнес (только основные: сводка, источники, UTM, города, устройства).
+    only: загрузить только эти отчёты (имена из SLICES и 'pages') — для догрузки истории новых отчётов;
+    сводка грузится всегда: по ней видно, где были роботы.
     Возвращает число загруженных строк.
     """
     today = today or date.today()
@@ -68,6 +76,8 @@ def sync_metrika(
         robot_free: set[date] = set()
         for slice_, spec in SLICES.items():
             if grain not in spec.grains or not (spec.core or kind == "site"):
+                continue
+            if only is not None and slice_ != "total" and slice_ not in only:
                 continue
             fetched: dict[str, tuple[list[TrafficRow], bool, list[GoalRow]]] = {}
             for audience in AUDIENCES:
@@ -90,6 +100,12 @@ def sync_metrika(
                     f"трафик {len(traffic)}, цели {len(goal_rows)}{note}{how}")
             if slice_ == "total":
                 robot_free = robot_free_periods(fetched["all"][0], fetched["humans"][0])
+    if kind == "site" and (only is None or "pages" in only):
+        for month, month_end in month_ranges(*grain_range("month", since, until, today)):
+            pages = fetch_pages(client, counter_id, month, month_end, not_found_title, search_param)
+            products = fetch_products(client, counter_id, month, month_end)
+            loaded += db.replace_month_pages(conn, counter_id, month, pages, products)
+            log(f"  {'all':<6} month pages          {month:%Y-%m}: страницы {len(pages)}, товары {len(products)}")
     return loaded
 
 

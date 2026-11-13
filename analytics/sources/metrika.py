@@ -49,6 +49,9 @@ SLICES = {
     "adv_engine": SliceSpec(("ym:s:{attr}AdvEngine",)),
     "recommendation": SliceSpec(("ym:s:{attr}RecommendationSystem",)),
     "messenger": SliceSpec(("ym:s:{attr}Messenger",)),
+    # Директ: кампании (номера заказов Директа) и фразы или условия показа, включая автотаргетинг
+    "direct_campaign": SliceSpec(("ym:s:{attr}DirectClickOrder",)),
+    "direct_phrase": SliceSpec(("ym:s:{attr}DirectPhraseOrCond",), top=100),
     # География
     "country": SliceSpec(("ym:s:regionCountry",)),
     "region": SliceSpec(("ym:s:regionArea",), top=100),
@@ -58,12 +61,18 @@ SLICES = {
     "age": SliceSpec(("ym:s:ageInterval",)),
     "new_user": SliceSpec(("ym:s:isNewUser",)),
     "interest": SliceSpec(("ym:s:interest",)),
+    # лояльность: какой по счёту визит посетителя и сколько дней прошло с первого — за сколько касаний решаются
+    "visit_number": SliceSpec(("ym:s:userVisits",), top=30),
+    "days_since_first": SliceSpec(("ym:s:daysSinceFirstVisit",), top=60),
     # Технологии
     "device": SliceSpec(("ym:s:deviceCategory",), ("day", "month"), core=True),
     "os": SliceSpec(("ym:s:operatingSystemRoot",)),
     "browser": SliceSpec(("ym:s:browser",)),
+    "phone_brand": SliceSpec(("ym:s:mobilePhone",), top=30),
+    "screen": SliceSpec(("ym:s:screenResolution",), top=30),
     # Содержание и поведение
     "landing": SliceSpec(("ym:s:startURL",), top=100),
+    "landing_section": SliceSpec(("ym:s:startURLPathLevel3",), top=100),  # раздел: /catalog/tkani/ и т. п.
     "exit": SliceSpec(("ym:s:endURLPath",), top=100),
     "depth": SliceSpec(("ym:s:pageViewsInterval",)),
     "duration": SliceSpec(("ym:s:visitDurationInterval",)),
@@ -434,3 +443,69 @@ def month_split_point(date1: date, date2: date) -> date | None:
         return None
     years, month = divmod(date1.month - 1 + (months + 1) // 2, 12)
     return date(date1.year + years, month + 1, 1)
+
+
+# ----- Страницы и товары: отчёты по просмотрам и электронной коммерции, помесячно -----
+
+NOT_FOUND_TITLE = "Страница не найдена"  # заголовок страницы 404 у 1С-Битрикса
+PAGE_METRICS = ["ym:pv:pageviews", "ym:pv:users"]
+
+
+@dataclass(frozen=True)
+class PageRow:
+    month: date
+    kind: str      # page | title | not_found | not_found_from | site_search | not_found_visits
+    key: str
+    pageviews: int  # у not_found_visits — визиты, где был хоть один просмотр страницы 404
+    users: int
+
+
+@dataclass(frozen=True)
+class ProductRow:
+    month: date
+    product: str
+    basket_sum: float
+    basket_qty: float
+    purchased_sum: float
+    purchased_qty: float
+
+
+def page_reports(not_found_title: str, search_param: str) -> dict[str, tuple[list[str], str, str | None, int]]:
+    """kind → (метрики, группировка, фильтр, сколько строк). Первая метрика — для сортировки."""
+    nf = "ym:pv:title=='" + not_found_title.replace("'", "\\'") + "'"
+    return {
+        "page": (PAGE_METRICS, "ym:pv:URLPath", None, 100),            # популярные страницы
+        "title": (PAGE_METRICS, "ym:pv:title", None, 100),             # заголовки: «Поиск», 404, дубли
+        "not_found": (PAGE_METRICS, "ym:pv:URL", nf, 100),             # какие адреса отдают 404
+        "not_found_from": (PAGE_METRICS, "ym:pv:referer", nf, 50),     # откуда на них переходят
+        "site_search": (PAGE_METRICS, "ym:pv:URLParamValue", f"ym:pv:URLParamName=='{search_param}'", 200),
+        "not_found_visits": (["ym:s:visits", "ym:s:users"], "ym:s:startOfMonth", f"EXISTS({nf})", 1),
+    }
+
+
+def fetch_pages(client: MetrikaClient, counter_id: int, month: date, month_end: date,
+                not_found_title: str = NOT_FOUND_TITLE, search_param: str = "q") -> list[PageRow]:
+    rows: dict[tuple[str, str], list[int]] = {}
+    for kind, (metrics, dim, flt, top) in page_reports(not_found_title, search_param).items():
+        report = client.report(counter_id, metrics, [dim], month, month_end, flt, top)
+        for row in report.rows:
+            key = "" if kind == "not_found_visits" else (row["dimensions"][0].get("name") or "")
+            acc = rows.setdefault((kind, key), [0, 0])
+            acc[0] += int(row["metrics"][0] or 0)
+            acc[1] += int(row["metrics"][1] or 0)
+    return [PageRow(month, kind, key, views, users) for (kind, key), (views, users) in rows.items()]
+
+
+PRODUCT_METRICS = ["ym:s:productBasketsPrice", "ym:s:productBasketsQuantity",
+                   "ym:s:productPurchasedPrice", "ym:s:productPurchasedQuantity"]
+
+
+def fetch_products(client: MetrikaClient, counter_id: int, month: date, month_end: date, top: int = 200) -> list[ProductRow]:
+    """Товары электронной коммерции: добавления в корзину и покупки (сумма и количество) — топ по сумме в корзине."""
+    report = client.report(counter_id, PRODUCT_METRICS, ["ym:s:productName"], month, month_end, None, top)
+    out: dict[str, list[float]] = {}
+    for row in report.rows:
+        acc = out.setdefault(row["dimensions"][0].get("name") or "", [0.0] * 4)
+        for i, v in enumerate(row["metrics"]):
+            acc[i] += float(v or 0)
+    return [ProductRow(month, name, *values) for name, values in out.items() if any(values)]

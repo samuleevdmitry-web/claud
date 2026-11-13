@@ -231,3 +231,27 @@ def replace_rabbit_positions(conn: psycopg.Connection, project: str, date_from: 
             [(project, r.date, r.query, r.frequency, r.position) for r in rows],
         )
     return len(rows)
+
+
+def replace_month_pages(conn: psycopg.Connection, counter_id: int, month: date, pages: list, products: list) -> int:
+    """Страницы и товары счётчика за месяц целиком."""
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM metrika_pages WHERE counter_id = %s AND month = %s", (counter_id, month))
+        cur.execute("DELETE FROM metrika_products WHERE counter_id = %s AND month = %s", (counter_id, month))
+        cur.executemany(
+            "INSERT INTO metrika_pages (counter_id, month, kind, key, pageviews, users) VALUES (%s, %s, %s, %s, %s, %s)",
+            [(counter_id, p.month, p.kind, p.key, p.pageviews, p.users) for p in pages],
+        )
+        cur.executemany(
+            "INSERT INTO metrika_products (counter_id, month, product, basket_sum, basket_qty, purchased_sum,"
+            " purchased_qty) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            [(counter_id, p.month, p.product, p.basket_sum, p.basket_qty, p.purchased_sum, p.purchased_qty)
+             for p in products],
+        )
+    return len(pages) + len(products)
+
+
+def mark_backfilled(conn: psycopg.Connection, counter_id: int, reports: set[str]) -> None:
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany("INSERT INTO report_backfills (counter_id, report) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                        [(counter_id, r) for r in sorted(reports)])

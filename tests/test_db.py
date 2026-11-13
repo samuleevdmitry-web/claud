@@ -46,7 +46,7 @@ def month_data(aug_direct_visits=40):
 def test_schema_is_idempotent(conn):
     assert db.apply_schema(conn) == [
         "001_metrika.sql", "002_metrika_views.sql", "003_webmaster.sql", "004_webmaster_views.sql", "005_maps.sql",
-        "006_dashboard.sql", "007_wordstat.sql", "008_rabbit.sql",
+        "006_dashboard.sql", "007_wordstat.sql", "008_rabbit.sql", "009_metrika_pages.sql",
     ]
 
 
@@ -238,3 +238,22 @@ def test_history_reload_after_lead_definition_change(conn):
     # у счётчика без целей-заявок колонка пустая всегда — перезагружать его каждый день нельзя
     sync_metrika(conn, FakeMetrikaClient(GOALS, data), COUNTER, frozenset(), "lastsign", **kwargs)
     assert missing_history(conn, settings) == set()
+
+
+def test_backfill_only_new_reports(conn):
+    from analytics.cli import BACKFILL_REPORTS, missing_reports
+    from analytics.config import Settings
+
+    settings = Settings("", (COUNTER,), frozenset({1}), "lastsign", (), (), "", "", "", "", "")
+    client = FakeMetrikaClient(GOALS, month_data())
+    sync_metrika(conn, client, COUNTER, frozenset({1}), "lastsign",
+                 since=JUL, until=date(2026, 8, 31), today=date(2026, 9, 3), log=lambda _: None)
+    # данные есть только у total и source: остальные отчёты — без истории
+    assert missing_reports(conn, settings)[COUNTER] == BACKFILL_REPORTS - {"source"}
+    # отчёт без данных (например, Директа на сайте нет) догружается один раз и больше не просится
+    db.mark_backfilled(conn, COUNTER, BACKFILL_REPORTS - {"source"})
+    assert missing_reports(conn, settings) == {}
+    # отчёт, история которого начинается позже сводки больше чем на месяц, — тоже без истории
+    conn.execute("DELETE FROM metrika_traffic WHERE slice = 'source' AND period_start = %s", (JUL,))
+    conn.execute("UPDATE metrika_traffic SET period_start = '2026-10-01' WHERE slice = 'source'")
+    assert missing_reports(conn, settings) == {COUNTER: {"source"}}
