@@ -56,6 +56,9 @@ TRAFFIC_TABS = {
 # Отчёты, где порядок строк задан самим значением (часы, дни недели, интервалы), а не числом визитов.
 ORDERED = {"hour", "weekday", "age", "depth", "duration"}
 CHARTED = {"hour", "weekday", "age"}  # к этим отчётам — столбики визитов
+# С фильтром роботности Метрика отдаёт эти отчёты не целиком: теряет мелкие строки и большую часть целей.
+# В месяцы без роботов сборщик берёт их из всего трафика, в месяцы с роботами — помечаем.
+FILTER_GAPS = {"city", "landing", "os"}
 # Отчёты по видам источников: строка «Не определено» в них — визиты не из этого источника, её не показываем.
 SUBSOURCE = {"search_engine", "adv_engine", "referrer", "social", "recommendation", "messenger", "utm",
              "search_phrase"}
@@ -250,7 +253,11 @@ def _slice_report(conn: psycopg.Connection, f: Filters, slice_: str, title: str,
         r["share"] = r["visits"] / total * 100 if total else None
         if r["dim_label"].startswith("http"):
             r["dim_label"] = "/" + r["dim_label"].split("://", 1)[1].partition("/")[2]
-    report = {"slice": slice_, "title": title, "rows": rows, "chart": None}
+    report = {"slice": slice_, "title": title, "rows": rows, "chart": None, "note": None}
+    if f.audience == "humans" and slice_ in FILTER_GAPS and (_robots(conn, f)[0] or 0) > 0:
+        report["note"] = ("В этом месяце были роботы, а с фильтром «только люди» Метрика отдаёт этот отчёт "
+                          "не целиком: мелкие строки и часть заявок по ним потеряны. Для полной картины "
+                          "переключитесь на «Весь трафик».")
     if slice_ in CHARTED and rows:
         report["chart"] = chart("bar", [r["dim_label"] for r in rows], [("Визиты", [r["visits"] for r in rows])])
     return report, findings
@@ -270,12 +277,14 @@ def overview(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
     demand = demand_page(conn, settings, f)
     maps = maps_page(conn, settings, f)
     findings += search.get("findings", []) + (demand or {}).get("findings", []) + maps.get("findings", [])
+    pf = pf_page(conn, settings, f)  # итог — отдельной плашкой над сводкой
     tiles = [_traffic_tiles(f, m, yoy_partial)[0]] + _lead_tiles(f, m, yoy_partial)[:2]
     if search.get("tiles"):
         tiles += search["tiles"][:2]
     if demand:
         tiles.append(demand["tiles"][0])
     return {"tiles": tiles, "summary": ins.summarize(findings, limit=5),
+            "pf_alert": pf["verdict"] if pf["status"] != "ok" else None, "pf_status": pf["status"],
             "charts": {"site_trend": charts["site_trend"], "leads_trend": charts["leads_trend"]}, "skipped": skipped}
 
 
@@ -525,3 +534,67 @@ def status_page(conn: psycopg.Connection, settings: Settings, f: Filters | None)
     if f:
         robots = [r for r in q.robots_by_month(conn, f.counter_id).values() if r["month"] < f.today.replace(day=1)]
     return {"status": status, "robots": robots}
+
+
+# ----- ПФ и риски -----
+
+def _brand_words(settings: Settings, domain: str) -> set[str]:
+    """Слова бренда: имя домена и первые слова брендовых фраз Вордстата («олдос», «oldos»)."""
+    words = {domain.split(".")[0].lower()} if domain else set()
+    try:
+        config = load_keywords(settings.wordstat_keywords_path)
+    except (FileNotFoundError, tomllib.TOMLDecodeError):
+        return words
+    return words | {k.phrase.split()[0].lower() for k in config.keywords if k.kind == "brand"}
+
+
+def pf_page(conn: psycopg.Connection, settings: Settings, f: Filters, benefit_days: int = 21) -> dict:
+    """Следы накрутки ПФ и признаки санкций — по последним данным, независимо от выбранного месяца."""
+    domain = (f.site.get("site") or "").removeprefix("www.")
+    host_id = q.host_for_site(conn, f.counter_id)
+    window = q.pf_window(conn, host_id, domain) if host_id else None
+    brand = _brand_words(settings, domain)
+    domain_rows = [r for r in (q.pf_domain_queries(conn, host_id, domain, domain) if host_id and domain else [])
+                   if ins.brand_free(r["query"], domain, brand)]
+    weeks = q.engine_weekly(conn, f.counter_id, f.audience)
+
+    daily = q.rabbit_daily(conn, domain)
+    now = daily[-1] if daily else None
+    week_ago = now and next((d for d in reversed(daily) if d["date"] <= now["date"] - timedelta(days=7)), daily[0])
+    start = now and next((d for d in reversed(daily) if d["date"] <= now["date"] - timedelta(days=benefit_days)),
+                         daily[0])
+    week_rows = q.rabbit_pairs(conn, domain, now["date"], week_ago["date"]) if now and week_ago is not now else []
+    pairs = q.rabbit_pairs(conn, domain, now["date"], start["date"]) if now else []
+
+    signals = [
+        ins.pf_far_ctr(window), ins.pf_full_ctr(window), ins.pf_domain(domain_rows, domain),
+        ins.pf_engine_share(weeks),
+        ins.pf_rabbit_drop(week_rows, now, week_ago),
+        ins.pf_benefit(pairs, start if start is not now else None),
+    ]
+    status, verdict = ins.pf_verdict(signals)
+
+    charts = {}
+    if weeks:
+        labels = [w["week"].strftime("%d.%m") for w in weeks[-26:]]
+        charts["pf_engines"] = chart("line", labels, [("Яндекс", [w["yandex"] for w in weeks[-26:]]),
+                                                      ("Google", [w["google"] for w in weeks[-26:]])])
+        charts["pf_share"] = chart("line", labels, [("Доля Яндекса, %", [
+            round(ins.ratio_pct(w["yandex"], w["yandex"] + w["google"]), 1) for w in weeks[-26:]])], fmt=fmt_pct)
+    clicks = q.pf_daily(conn, host_id, domain, domain) if host_id and domain else []
+    if clicks:
+        charts["pf_clicks"] = chart("bar", [d["date"].strftime("%d.%m") for d in clicks], [
+            ("Запросы проекта RabbitSeo", [d["boosted"] for d in clicks]),
+            (f"«запрос + {domain}»", [d["domain"] for d in clicks]),
+        ])
+    return {
+        "status": status, "verdict": verdict, "signals": signals, "signal_names": ins.SIGNAL_NAMES,
+        "window": window, "domain": domain, "domain_rows": domain_rows[:30], "domain_total": len(domain_rows),
+        # частотные запросы, которые хоть раз были в выдаче; не найденные — только числом
+        "frequent": [r for r in pairs if r["frequency"] >= ins.FREQUENT
+                     and (r["position"] is not None or r["position_prev"] is not None)],
+        "frequent_absent": sum(1 for r in pairs if r["frequency"] >= ins.FREQUENT
+                               and r["position"] is None and r["position_prev"] is None),
+        "benefit_from": start and start["date"],
+        "weeks": weeks, "charts": charts, "findings": ins.pf_findings(signals),
+    }

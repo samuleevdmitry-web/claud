@@ -2,6 +2,10 @@
 {% from "macros.html" import tiles as show_tiles, chart_block, insights %}
 {% block title %}Обзор{% endblock %}
 {% block content %}
+{% if pf_alert %}
+<div class="alert{% if pf_status == 'alert' %} alert-bad{% endif %}" role="status"><span class="alert-icon" aria-hidden="true">!</span>
+  <span>ПФ: {{ pf_alert }} <a href="/pf{{ f.query() }}">Подробнее</a></span></div>
+{% endif %}
 <section>
   {{ show_tiles(tiles) }}
 </section>

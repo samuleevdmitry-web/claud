@@ -71,6 +71,33 @@ def test_sync_builds_monthly_kpi(conn):
     assert [(k, leads, float(c)) for k, leads, c in by_source] == [("direct", 0, 0.0), ("organic", 6, 3.75)]
 
 
+def test_humans_without_robots_reuse_all_traffic(conn):
+    # роботы были только в июле: фильтр нужен только для июля, август «только людей» — копия всего трафика
+    data = month_data()
+    data[("month", "source")].append((JUL, [ORGANIC], [80, 70, 200, 10.0, 2.5, 120.0], {1: (2, 2)}))
+    client = FakeMetrikaClient(GOALS, data, humans_share={JUL: 0.5})
+    sync_metrika(conn, client, COUNTER, frozenset({1}), "lastsign",
+                 since=JUL, until=date(2026, 8, 31), today=date(2026, 9, 3), log=lambda _: None)
+
+    filtered = {(dims[1] if len(dims) > 1 else "total", d1, d2)
+                for _, dims, d1, d2, filters in client.reports if filters and dims[0] == "ym:s:startOfMonth"}
+    assert filtered == {("total", JUL, date(2026, 8, 31)), ("ym:s:lastsignTrafficSource", JUL, date(2026, 7, 31))}
+
+    rows = conn.execute(
+        "SELECT audience, period_start, dim_key, visits FROM metrika_traffic WHERE grain = 'month' AND slice = 'source' "
+        "ORDER BY audience, period_start, dim_key"
+    ).fetchall()
+    assert rows == [
+        ("all", JUL, "organic", 80), ("all", AUG, "direct", 40), ("all", AUG, "organic", 160),
+        ("humans", JUL, "organic", 40), ("humans", AUG, "direct", 40), ("humans", AUG, "organic", 160),
+    ]
+    visits = conn.execute(
+        "SELECT month, visits FROM metrika_monthly WHERE counter_id = %s AND audience = 'humans' ORDER BY month",
+        (COUNTER,),
+    ).fetchall()
+    assert visits == [(JUL, 50), (AUG, 200)]
+
+
 def test_resync_replaces_period_and_drops_stale_rows(conn):
     def run(data):
         client = FakeMetrikaClient(GOALS, data)

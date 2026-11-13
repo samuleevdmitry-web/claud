@@ -88,6 +88,7 @@
     {% else %}
     <p class="muted">Нет данных за месяц.</p>
     {% endif %}
+    {% if report.note %}<p class="note">{{ report.note }}</p>{% endif %}
   </div>
 {% endmacro %}
 

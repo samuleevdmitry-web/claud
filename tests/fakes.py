@@ -43,15 +43,16 @@ def dim(name, id_=None) -> dict:
 class FakeMetrikaClient:
     """Отвечает на отчёты по таблице {(grain, slice): [(period, [dims], traffic, {goal_id: (reaches, visits)})]}.
 
-    С фильтром «только люди» количества умножаются на humans_share.
+    С фильтром «только люди» количества умножаются на humans_share — общий или по периодам {период: доля}.
     """
 
-    def __init__(self, goals: list[dict], data: dict, name: str = "example.ru", humans_share: float = 1.0):
+    def __init__(self, goals: list[dict], data: dict, name: str = "example.ru",
+                 humans_share: float | dict[date, float] = 1.0):
         self._goals = goals
         self.data = data
         self.name = name
         self.humans_share = humans_share
-        self.reports: list[tuple[list[str], list[str], date, date]] = []
+        self.reports: list[tuple[list[str], list[str], date, date, str | None]] = []
 
     def counter(self, counter_id: int) -> dict:
         return {"id": counter_id, "name": self.name, "site2": {"site": "example.ru"}}
@@ -60,15 +61,16 @@ class FakeMetrikaClient:
         return self._goals
 
     def report(self, counter_id, metrics, dimensions, date1, date2, filters=None, top=None) -> Report:
-        self.reports.append((metrics, dimensions, date1, date2))
+        self.reports.append((metrics, dimensions, date1, date2, filters))
         grain = next(g for g, d in GRAINS.items() if d == dimensions[0])
         slice_ = next(name for name, spec in SLICES.items()
                       if [d.format(attr="lastsign") for d in spec.dims] == dimensions[1:])
-        share = self.humans_share if filters else 1.0
         rows = []
         for period, dims, traffic, goals in self.data.get((grain, slice_), []):
             if not date1 <= period <= date2:
                 continue
+            share = self.humans_share if isinstance(self.humans_share, float) else self.humans_share.get(period, 1.0)
+            share = share if filters else 1.0
             values = []
             for m in metrics:
                 if m in TRAFFIC_METRICS:

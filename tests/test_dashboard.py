@@ -1,7 +1,7 @@
 """Страница дашборда на настоящем PostgreSQL с синтетическими данными (нужен TEST_DATABASE_URL)."""
 
 import os
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -117,7 +117,7 @@ def test_every_section_renders(client):
         sync_metrika(conn, FakeMetrikaClient(goals, data, humans_share=0.8), 42, frozenset({1}), "lastsign",
                      since=aug, until=date(2026, 9, 30), today=date(2026, 10, 2), log=lambda _: None)
     for path in ("/", "/traffic", "/traffic?tab=geo", "/traffic?tab=time", "/traffic?tab=sources", "/leads",
-                 "/search", "/demand", "/maps", "/status"):
+                 "/search", "/pf", "/demand", "/maps", "/status"):
         page = client.get(path, params={"month": "2026-09"})
         assert page.status_code == 200, path
     geo = client.get("/traffic", params={"month": "2026-09", "tab": "geo", "aud": "all"}).text
@@ -126,3 +126,36 @@ def test_every_section_renders(client):
     assert "960" in humans  # 1200 визитов × 0,8 — «только люди» читаются отдельно
     status = client.get("/status", params={"month": "2026-09"}).text
     assert "Роботы в трафике" in status and "20,0%" in status
+
+
+@needs_db
+def test_pf_section_flags_bot_traces(client):
+    sep, oct_ = date(2026, 9, 1), date(2026, 10, 1)
+    days = [date(2026, 9, 1) + timedelta(days=i) for i in range(42)]
+    yandex, google = dim("Яндекс", "yandex"), dim("Google", "google")
+    data = {
+        ("month", "total"): [(sep, [], [1000, 800, 2500, 20.0, 2.5, 150.0], {}), (oct_, [], [900, 700, 2200, 20.0, 2.5, 150.0], {})],
+        ("day", "total"): [(d, [], [60, 50, 150, 20.0, 2.5, 150.0], {}) for d in days],
+        # последнюю неделю Яндекс проседает вдвое, Google — нет
+        ("day", "search_engine"): [(d, [yandex], [15 if d >= days[-7] else 30, 25, 60, 10.0, 2.5, 150.0], {}) for d in days]
+                                  + [(d, [google], [30, 25, 60, 10.0, 2.5, 150.0], {}) for d in days],
+    }
+    with db.connect(TEST_DATABASE_URL) as conn:
+        sync_metrika(conn, FakeMetrikaClient([], data), 42, frozenset(), "lastsign",
+                     since=sep, until=days[-1], today=days[-1] + timedelta(days=1), log=lambda _: None)
+        host = "https:example.ru:443"
+        conn.execute("INSERT INTO webmaster_summary (host_id, snapshot_date) VALUES (%s, %s)", (host, days[-1]))
+        rows = [(host, date(2026, 10, 5), "ткань для тюбингов", 1, 1, 12.0),
+                (host, date(2026, 10, 5), "ленточная фурнитура", 9, 9, 11.0),
+                (host, date(2026, 10, 6), "ткань для тюбингов example.ru", 3, 2, 1.0),
+                (host, date(2026, 10, 6), "обычный запрос", 500, 4, 14.0)]
+        conn.cursor().executemany("INSERT INTO webmaster_query_daily (host_id, date, query, impressions, clicks, position) "
+                         "VALUES (%s, %s, %s, %s, %s, %s)", rows)
+        conn.cursor().executemany("INSERT INTO rabbit_positions (project, date, query, frequency, position) VALUES (%s, %s, %s, %s, %s)",
+                         [("example.ru", date(2026, 10, 6), q, 5, p) for q, p in (("ткань для тюбингов", 12),
+                                                                                  ("ленточная фурнитура", 1))])
+    page = client.get("/pf", params={"month": "2026-10", "aud": "all"}).text
+    assert "Тревога" in page and "Похоже на санкции Яндекса" in page
+    assert "ткань для тюбингов example.ru" in page
+    overview = client.get("/", params={"month": "2026-10", "aud": "all"}).text
+    assert "ПФ: Похоже на санкции" in overview

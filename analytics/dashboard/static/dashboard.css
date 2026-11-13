@@ -197,3 +197,21 @@ ul.plain { margin: 0; padding-left: 18px; font-size: 14px; }
   .chart { height: 240px; }
   h1 { font-size: 20px; }
 }
+
+/* ПФ и риски */
+.signals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.signal { border-left: 4px solid var(--border); }
+.signal p, .verdict p { margin: 8px 0 0; font-size: 14px; }
+.signal-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; flex-wrap: wrap; }
+.signal-badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: var(--surface-2, rgba(127,127,127,.12)); }
+.signal-alert { border-left-color: var(--status-bad); }
+.signal-alert .signal-badge { background: var(--status-bad); color: #fff; }
+.signal-warn { border-left-color: var(--status-warn); }
+.signal-warn .signal-badge { background: var(--status-warn); color: #1a1a1a; }
+.signal-ok { border-left-color: var(--status-good); }
+.verdict { border-left: 4px solid var(--status-good); }
+.verdict-warn { border-left-color: var(--status-warn); }
+.verdict-alert { border-left-color: var(--status-bad); }
+.verdict-title { font-weight: 650; font-size: 15px; }
+.alert-bad { border-color: var(--status-bad); }
+.alert-bad .alert-icon { background: var(--status-bad); color: #fff; }

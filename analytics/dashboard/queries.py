@@ -5,7 +5,7 @@ audience — 'all' (весь трафик) или 'humans' (только люд�
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import psycopg
 
@@ -344,3 +344,98 @@ def rabbit_compare(conn: psycopg.Connection, project: str, now: date, then: date
     for key in ("lost", "new", "never"):
         out[key].sort(key=lambda r: -r["frequency"])
     return out
+
+
+# ----- ПФ и риски -----
+
+def engine_weekly(conn: psycopg.Connection, counter_id: int, audience: str) -> list[dict]:
+    """Визиты и отказы из Яндекса и Google по полным неделям (с понедельника) — из отчёта по дням."""
+    return _all(conn, """
+        SELECT date_trunc('week', period_start)::date AS week,
+               count(DISTINCT period_start) AS days,
+               coalesce(sum(visits) FILTER (WHERE dim_key = 'yandex'), 0) AS yandex,
+               coalesce(sum(visits) FILTER (WHERE dim_key = 'google'), 0) AS google,
+               round(sum(bounce_rate * visits) FILTER (WHERE dim_key = 'yandex')
+                     / nullif(sum(visits) FILTER (WHERE dim_key = 'yandex'), 0), 1) AS yandex_bounce,
+               round(sum(bounce_rate * visits) FILTER (WHERE dim_key = 'google')
+                     / nullif(sum(visits) FILTER (WHERE dim_key = 'google'), 0), 1) AS google_bounce
+        FROM metrika_traffic
+        WHERE counter_id = %s AND audience = %s AND grain = 'day' AND slice = 'search_engine'
+        GROUP BY 1 HAVING count(DISTINCT period_start) = 7
+        ORDER BY 1
+    """, (counter_id, audience))
+
+
+_PF_WINDOW = """
+    WITH last AS (SELECT max(date) AS d FROM webmaster_query_daily WHERE host_id = %(host)s),
+    project AS (SELECT DISTINCT lower(query) AS q FROM rabbit_positions WHERE project = %(project)s),
+    q AS (
+        SELECT w.query, lower(w.query) IN (SELECT q FROM project) AS boosted,
+               sum(w.impressions) AS impressions, sum(w.clicks) AS clicks,
+               round(sum(w.position * w.impressions) / nullif(sum(w.impressions) FILTER (WHERE w.position IS NOT NULL), 0), 1)
+                   AS position,
+               coalesce(sum(w.impressions) FILTER (WHERE w.position > 10), 0) AS impressions_far,
+               coalesce(sum(w.clicks) FILTER (WHERE w.position > 10), 0) AS clicks_far,
+               min(w.date) FILTER (WHERE w.impressions > 0) AS first_seen
+        FROM webmaster_query_daily w, last
+        WHERE w.host_id = %(host)s AND w.date > last.d - %(days)s
+        GROUP BY w.query HAVING sum(w.impressions) > 0
+    )
+"""
+
+
+def pf_window(conn: psycopg.Connection, host_id: str, project: str, days: int = 14) -> dict | None:
+    """Аналитика запросов Вебмастера за последние дни: запросы проекта RabbitSeo против остальных."""
+    period = _one(conn, "SELECT max(date) AS last_day FROM webmaster_query_daily WHERE host_id = %s", (host_id,))
+    if not period or not period["last_day"]:
+        return None
+    params = {"host": host_id, "project": project, "days": days}
+    groups = {r["boosted"]: r for r in _all(conn, _PF_WINDOW + """
+        SELECT boosted, count(*) AS queries, sum(impressions) AS impressions, sum(clicks) AS clicks,
+               sum(impressions_far) AS impressions_far, sum(clicks_far) AS clicks_far
+        FROM q GROUP BY boosted
+    """, params)}
+    # кликов почти столько же, сколько показов, и не на первых местах — так ведут себя боты
+    full_ctr = _all(conn, _PF_WINDOW + """
+        SELECT query, boosted, impressions, clicks, position FROM q
+        WHERE impressions >= 3 AND clicks >= 0.8 * impressions AND position >= 4
+        ORDER BY boosted DESC, clicks DESC, query
+    """, params)
+    return {"first_day": period["last_day"] - timedelta(days=days - 1), "last_day": period["last_day"],
+            "boosted": groups.get(True), "others": groups.get(False), "full_ctr": full_ctr}
+
+
+def pf_domain_queries(conn: psycopg.Connection, host_id: str, project: str, domain: str, days: int = 14) -> list[dict]:
+    """Запросы вида «товарный запрос + домен сайта»: живые люди так почти не ищут, а боты — когда не нашли сайт."""
+    pattern = r"\s" + domain.replace(".", r"\.") + "$"
+    return _all(conn, _PF_WINDOW + """
+        SELECT query, boosted, impressions, clicks, position, first_seen,
+               regexp_replace(lower(query), %(pattern)s, '') IN (SELECT q FROM project) AS from_project
+        FROM q WHERE query ~* %(pattern)s
+        ORDER BY clicks DESC, impressions DESC, query
+    """, {"host": host_id, "project": project, "days": days, "pattern": pattern})
+
+
+def pf_daily(conn: psycopg.Connection, host_id: str, project: str, domain: str) -> list[dict]:
+    """По дням: клики по запросам проекта RabbitSeo, по «запрос + домен» и все остальные."""
+    pattern = r"\s" + domain.replace(".", r"\.") + "$"
+    return _all(conn, """
+        WITH project AS (SELECT DISTINCT lower(query) AS q FROM rabbit_positions WHERE project = %(project)s)
+        SELECT date,
+               coalesce(sum(clicks) FILTER (WHERE lower(query) IN (SELECT q FROM project)), 0) AS boosted,
+               coalesce(sum(clicks) FILTER (WHERE query ~* %(pattern)s), 0) AS domain,
+               sum(clicks) AS total
+        FROM webmaster_query_daily WHERE host_id = %(host)s
+        GROUP BY date ORDER BY date
+    """, {"host": host_id, "project": project, "pattern": pattern})
+
+
+def rabbit_pairs(conn: psycopg.Connection, project: str, now: date, then: date) -> list[dict]:
+    """Все запросы проекта RabbitSeo: позиция на два съёма, частые — первыми."""
+    return _all(conn, """
+        SELECT n.query, n.frequency, n.position, t.position AS position_prev
+        FROM rabbit_positions n
+        LEFT JOIN rabbit_positions t ON t.project = n.project AND t.query = n.query AND t.date = %s
+        WHERE n.project = %s AND n.date = %s
+        ORDER BY n.frequency DESC, n.query
+    """, (then, project, now))

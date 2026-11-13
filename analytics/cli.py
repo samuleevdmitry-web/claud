@@ -185,15 +185,17 @@ def missing_history(conn: psycopg.Connection, settings: Settings) -> set[str]:
 
     Так бывает после обновления, добавившего отчёты: обычная ежедневная загрузка берёт только последние дни,
     поэтому таким источникам расписание один раз загружает историю с начала, как пустой базе.
-    Признак — нет ни одной месячной строки «только люди» в отчёте, который появился последним из нужных.
+    Признак — нет ни одной строки «только люди» в отчёте, который появился последним из нужных
+    (у сайта — поисковые системы по дням, для слежения за долей Яндекса).
     """
-    checks = {"metrika": (settings.metrika_counters, "hour"), "maps": (settings.metrika_maps_counters, "total")}
+    checks = {"metrika": (settings.metrika_counters, "day", "search_engine"),
+              "maps": (settings.metrika_maps_counters, "month", "total")}
     missing = set()
-    for source, (counters, slice_) in checks.items():
+    for source, (counters, grain, slice_) in checks.items():
         for counter_id in counters:
             found = conn.execute(
-                "SELECT 1 FROM metrika_traffic WHERE counter_id = %s AND audience = 'humans' AND grain = 'month'"
-                " AND slice = %s LIMIT 1", (counter_id, slice_),
+                "SELECT 1 FROM metrika_traffic WHERE counter_id = %s AND audience = 'humans' AND grain = %s"
+                " AND slice = %s LIMIT 1", (counter_id, grain, slice_),
             ).fetchone()
             if found is None:
                 missing.add(source)

@@ -14,7 +14,9 @@ from analytics.sources.metrika import (
     AUDIENCES,
     GRAINS,
     SLICES,
+    GoalRow,
     MetrikaClient,
+    TrafficRow,
     fetch_goals,
     fetch_traffic,
     grain_range,
@@ -58,26 +60,78 @@ def sync_metrika(
     goal_ids = [g["id"] for g in goals]
     log(f"Счётчик {counter_id}: {len(goals)} целей, из них заявки: {sorted(lead_goals & set(goal_ids))}")
 
+    assert next(iter(SLICES)) == "total", "сводка нужна первой: по ней видно, в какие периоды были роботы"
     loaded = 0
-    for audience in AUDIENCES:
-        for grain in GRAINS:
-            date_from, date_to = grain_range(grain, since, until, today)
-            for slice_, spec in SLICES.items():
-                if grain not in spec.grains or not (spec.core or kind == "site"):
-                    continue
-                traffic, sampled = fetch_traffic(
-                    client, counter_id, grain, slice_, date_from, date_to, attribution, audience
-                )
-                goal_rows = fetch_goals(
-                    client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution, audience
-                )
+    for grain in GRAINS:
+        date_from, date_to = grain_range(grain, since, until, today)
+        robot_free: set[date] = set()
+        for slice_, spec in SLICES.items():
+            if grain not in spec.grains or not (spec.core or kind == "site"):
+                continue
+            fetched: dict[str, tuple[list[TrafficRow], bool, list[GoalRow]]] = {}
+            for audience in AUDIENCES:
+                if audience == "all" or slice_ == "total":
+                    fetched[audience] = _fetch_slice(
+                        client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution, audience
+                    )
+                    how = ""
+                else:
+                    fetched[audience], how = _humans_slice(
+                        client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution,
+                        fetched["all"], robot_free,
+                    )
+                traffic, sampled, goal_rows = fetched[audience]
                 loaded += db.replace_metrika_slice(
                     conn, counter_id, audience, grain, slice_, date_from, date_to, traffic, sampled, goal_rows
                 )
                 note = " (данные семплированы)" if sampled else ""
                 log(f"  {audience:<6} {grain:<5} {slice_:<14} {date_from}…{date_to}: "
-                    f"трафик {len(traffic)}, цели {len(goal_rows)}{note}")
+                    f"трафик {len(traffic)}, цели {len(goal_rows)}{note}{how}")
+            if slice_ == "total":
+                robot_free = robot_free_periods(fetched["all"][0], fetched["humans"][0])
     return loaded
+
+
+def _fetch_slice(client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution, audience):
+    traffic, sampled = fetch_traffic(client, counter_id, grain, slice_, date_from, date_to, attribution, audience)
+    goal_rows = fetch_goals(client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution, audience)
+    return traffic, sampled, goal_rows
+
+
+def robot_free_periods(all_rows: list[TrafficRow], humans_rows: list[TrafficRow]) -> set[date]:
+    """Периоды сводки, где визитов «только людей» столько же, сколько всего: роботов не было."""
+    humans = {r.period_start: r.visits for r in humans_rows}
+    return {r.period_start for r in all_rows if humans.get(r.period_start, 0) == r.visits}
+
+
+def _humans_slice(client, counter_id, grain, slice_, goal_ids, date_from, date_to, attribution, all_data,
+                  robot_free):
+    """Отчёт «только люди»: где роботов не было, это тот же отчёт без фильтра.
+
+    С фильтром роботности Метрика отдаёт отчёты по городам, страницам входа и ОС не целиком — теряет
+    мелкие строки и большую часть целей. Поэтому фильтр нужен только там, где роботы правда были:
+    за остальные периоды берутся строки всего трафика (точные и без лишних запросов к API).
+    """
+    all_traffic, all_sampled, all_goals = all_data
+    periods = {r.period_start for r in all_traffic}
+    with_robots = periods - robot_free
+    if not with_robots:
+        return all_data, " — роботов не было, как весь трафик"
+    # с фильтром запрашивается только отрезок, где роботы были
+    first, last = min(with_robots), max(with_robots)
+    if grain == "month":
+        last = (last + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    traffic, sampled, goal_rows = _fetch_slice(
+        client, counter_id, grain, slice_, goal_ids, max(first, date_from), min(last, date_to), attribution,
+        "humans",
+    )
+    traffic = [r for r in traffic if r.period_start not in robot_free]
+    traffic += [r for r in all_traffic if r.period_start in robot_free]
+    goal_rows = [r for r in goal_rows if r.period_start not in robot_free]
+    goal_rows += [r for r in all_goals if r.period_start in robot_free]
+    clean = len(periods & robot_free)
+    how = f" — {clean} из {len(periods)} периодов без роботов взяты из всего трафика" if clean else ""
+    return (traffic, sampled or all_sampled, goal_rows), how
 
 
 def month_ranges(since: date, until: date) -> Iterator[tuple[date, date]]:

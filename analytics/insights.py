@@ -432,3 +432,180 @@ def rabbit_findings(compare: dict[str, list[dict]], now: dict, then: dict) -> li
                                        f"(суммарная частотность {fmt_int(demand)}), например {top}. Есть ли под них "
                                        "страницы и нужны ли они в проекте?"))
     return out
+
+
+# ----- ПФ и риски -----
+#
+# Две группы сигналов. «Следы накрутки» — то, что Яндекс видит в поведении на выдаче и чем отличает ботов
+# от людей: живые люди почти не кликают по второй странице и не дописывают домен к товарному запросу.
+# «Признаки санкций» — то, как выглядит фильтр за накрутку: проседает именно Яндекс (Google — контроль)
+# и позиции падают у многих запросов сразу.
+
+FAR_CTR_ALERT = 20.0       # % CTR на позициях 11+ у запросов проекта; у живых людей там около 1 %
+FAR_CTR_RATIO = 5.0        # во столько раз выше, чем у остальных запросов сайта
+FAR_MIN_IMPRESSIONS = 10
+FULL_CTR_WARN, FULL_CTR_ALERT = 3, 8      # запросов, где кликов почти столько же, сколько показов
+DOMAIN_ALERT = 5           # запросов «запрос + домен»
+SHARE_DROP_WARN, SHARE_DROP_ALERT = 5.0, 8.0   # п.п. доли Яндекса за неделю против 4 прошлых
+ENGINE_FALL = -25.0        # % визитов из Яндекса за неделю — уже провал
+MASS_DROP_WARN, MASS_DROP_ALERT = 15.0, 30.0   # % запросов RabbitSeo из ТОП-30, выпавших или упавших на 10+
+DROP_FROM = 30             # ниже 30-го места запросы и так то появляются, то пропадают — не считаем
+FREQUENT = 100             # частотность, с которой запрос проекта считается частотным
+MICRO = 20                 # и ниже которой — микрочастотным
+
+SIGNAL_NAMES = {"alert": "Тревога", "warn": "Внимание", "ok": "В норме", "nodata": "Нет данных"}
+
+
+@dataclass(frozen=True)
+class Signal:
+    status: str  # alert | warn | ok | nodata
+    group: str   # traces — следы накрутки, sanctions — признаки санкций, benefit — отдача
+    title: str
+    text: str
+
+
+def ratio_pct(clicks, impressions) -> float:
+    return float(clicks or 0) / float(impressions) * 100 if impressions else 0.0
+
+
+def pf_far_ctr(window: dict | None) -> Signal:
+    title = "CTR запросов проекта на второй странице"
+    if not window:
+        return Signal("nodata", "traces", title, "Нет аналитики запросов Вебмастера.")
+    b, o = window["boosted"] or {}, window["others"] or {}
+    period = f"{window['first_day']:%d.%m}–{window['last_day']:%d.%m}"
+    if (b.get("impressions_far") or 0) < FAR_MIN_IMPRESSIONS:
+        return Signal("ok", "traces", title, f"За {period} у запросов проекта RabbitSeo почти нет показов на позициях 11+ — "
+                                             "сравнивать нечего.")
+    ctr_b, ctr_o = ratio_pct(b["clicks_far"], b["impressions_far"]), ratio_pct(o.get("clicks_far"), o.get("impressions_far"))
+    text = (f"За {period} на позициях 11+ запросы проекта RabbitSeo получили CTR {fmt_pct(ctr_b)} "
+            f"({fmt_int(b['clicks_far'])} кликов из {fmt_int(b['impressions_far'])} показов), остальные запросы сайта — "
+            f"{fmt_pct(ctr_o, 2)}.")
+    if ctr_b >= FAR_CTR_ALERT and ctr_b >= FAR_CTR_RATIO * max(ctr_o, 0.1):
+        return Signal("alert", "traces", title, text + " Живые люди так по второй странице не кликают: для Яндекса это "
+                                                       "прямой признак накрутки.")
+    if ctr_b >= 2 * ctr_o and ctr_b >= 5:
+        return Signal("warn", "traces", title, text + " Заметно выше обычного — стоит следить.")
+    return Signal("ok", "traces", title, text)
+
+
+def pf_full_ctr(window: dict | None) -> Signal:
+    title = "Кликов столько же, сколько показов"
+    if not window:
+        return Signal("nodata", "traces", title, "Нет аналитики запросов Вебмастера.")
+    rows = window["full_ctr"]
+    n, boosted = len(rows), sum(1 for r in rows if r["boosted"])
+    if not n:
+        return Signal("ok", "traces", title, "Нет запросов, где почти каждый показ ниже 3-го места заканчивается кликом.")
+    top = ", ".join(f"«{r['query']}» {r['clicks']}/{r['impressions']}" for r in rows[:3])
+    text = (f"{plural(n, QUERIES).capitalize()} с CTR от 80% на позициях ниже 3-й (из них {boosted} — из проекта RabbitSeo), "
+            f"например {top}. У живых людей CTR там 2–10%; почти каждый показ — это сам бот, который ищет и кликает.")
+    status = "alert" if n >= FULL_CTR_ALERT else "warn" if n >= FULL_CTR_WARN else "ok"
+    return Signal(status, "traces", title, text)
+
+
+def brand_free(query: str, domain: str, brand_words: Iterable[str]) -> bool:
+    """Запрос «… домен» без бренда: к брендовому запросу домен иногда дописывают и люди."""
+    rest = query.lower().replace(domain.lower(), "")
+    return not any(w in rest for w in brand_words)
+
+
+def pf_domain(rows: list[dict], domain: str) -> Signal:
+    title = f"Запросы «запрос + {domain}»"
+    if not rows:
+        return Signal("ok", "traces", title, f"Нет товарных запросов с дописанным доменом {domain}.")
+    clicks, project = sum(r["clicks"] for r in rows), sum(1 for r in rows if r["from_project"])
+    first = min(r["first_seen"] for r in rows)
+    text = (f"{plural(len(rows), QUERIES).capitalize()} вида «{rows[0]['query']}» — {fmt_int(clicks)} кликов, "
+            f"первые с {first:%d.%m}; {project} из них — запросы проекта RabbitSeo с дописанным доменом. Клиенты так "
+            "не ищут: так добирается до сайта бот, который не нашёл его в выдаче.")
+    return Signal("alert" if len(rows) >= DOMAIN_ALERT else "warn", "traces", title, text)
+
+
+def pf_engine_share(weeks: list[dict]) -> Signal:
+    title = "Доля Яндекса против Google"
+    if len(weeks) < 5:
+        return Signal("nodata", "sanctions", title, "Нужно минимум 5 полных недель визитов по поисковым системам.")
+    last, base = weeks[-1], weeks[-5:-1]
+    total = last["yandex"] + last["google"]
+    share = ratio_pct(last["yandex"], total)
+    base_share = ratio_pct(sum(w["yandex"] for w in base), sum(w["yandex"] + w["google"] for w in base))
+    y_change = _pct_change(last["yandex"], sum(w["yandex"] for w in base) / 4) or 0.0
+    g_change = _pct_change(last["google"], sum(w["google"] for w in base) / 4) or 0.0
+    drop = base_share - share
+    text = (f"Неделя с {last['week']:%d.%m}: Яндекс {fmt_int(last['yandex'])} визитов ({_signed(y_change)} к среднему "
+            f"4 прошлых недель), Google {fmt_int(last['google'])} ({_signed(g_change)}); доля Яндекса {fmt_pct(share)} "
+            f"против {fmt_pct(base_share)}.")
+    if drop >= SHARE_DROP_ALERT and y_change <= ENGINE_FALL and g_change > -10:
+        return Signal("alert", "sanctions", title, text + " Проседает только Яндекс — так выглядит фильтр за накрутку ПФ. "
+                                                          "Проверить позиции и сообщения в Вебмастере.")
+    if y_change <= ENGINE_FALL and g_change <= ENGINE_FALL:
+        return Signal("warn", "sanctions", title, text + " Упали оба поисковика — это не санкции Яндекса, а сезон, "
+                                                         "праздники или проблема сайта.")
+    if drop >= SHARE_DROP_WARN:
+        return Signal("warn", "sanctions", title, text + " Яндекс теряет долю быстрее обычного — следить.")
+    return Signal("ok", "sanctions", title, text + " Резких расхождений нет.")
+
+
+def pf_rabbit_drop(rows: list[dict], now: dict | None, then: dict | None) -> Signal:
+    """rows — запросы проекта с позицией на последний съём и неделей раньше."""
+    title = "Массовая просадка позиций"
+    base = [r for r in rows if r["position_prev"] is not None and r["position_prev"] <= DROP_FROM]
+    if not now or not then or not base:
+        return Signal("nodata", "sanctions", title, "Нет позиций RabbitSeo в ТОП-30 минимум за два съёма.")
+    severe = [r for r in base if r["position"] is None or r["position"] - r["position_prev"] >= 10]
+    top10 = sum(1 for r in rows if r["position"] is not None and r["position"] <= 10)
+    top10_prev = sum(1 for r in base if r["position_prev"] <= 10)
+    pct = len(severe) / len(base) * 100
+    text = (f"{then['date']:%d.%m} → {now['date']:%d.%m}: в ТОП-{DROP_FROM} было {plural(len(base), QUERIES)}, "
+            f"выпали или упали на 10+ позиций — {len(severe)} ({fmt_pct(pct)}); в ТОП-10 {top10} (было {top10_prev}).")
+    if severe:
+        text += " " + ", ".join(f"«{r['query']}» {r['position_prev']} → {r['position'] or '—'}" for r in severe[:3]) + "."
+    if (pct >= MASS_DROP_ALERT and len(severe) >= 5) or (top10_prev >= 4 and top10 <= top10_prev / 2):
+        return Signal("alert", "sanctions", title, text + " Так проседают позиции под фильтром — проверить Вебмастер "
+                                                          "(«Безопасность и нарушения»).")
+    if pct >= MASS_DROP_WARN and len(severe) >= 3:
+        return Signal("warn", "sanctions", title, text)
+    return Signal("ok", "sanctions", title, text + " Обычные колебания.")
+
+
+def pf_benefit(rows: list[dict], then: dict | None) -> Signal:
+    title = "Отдача по частотным запросам"
+    frequent = [r for r in rows if r["frequency"] >= FREQUENT]
+    if not frequent or not then:
+        return Signal("nodata", "benefit", title, f"В проекте RabbitSeo нет запросов с частотностью от {FREQUENT}.")
+    top10 = [r for r in frequent if r["position"] is not None and r["position"] <= 10]
+    both = [r for r in frequent if r["position"] is not None and r["position_prev"] is not None]
+    better = sum(1 for r in both if r["position"] < r["position_prev"])
+    worse = sum(1 for r in both if r["position"] > r["position_prev"])
+    absent = sum(1 for r in frequent if r["position"] is None)
+    micro_top = [r for r in rows if r["frequency"] < MICRO and r["position"] is not None and r["position"] <= 3]
+    leaders = ", ".join(f"«{r['query']}» — {r['position']}" for r in top10[:3]) or "нет ни одного"
+    text = (f"Запросов проекта с частотностью от {FREQUENT} — {len(frequent)}, в ТОП-10 из них: {leaders}. "
+            f"С {then['date']:%d.%m}: лучше — {better}, хуже — {worse}, не найдены — {absent}.")
+    if micro_top:
+        text += (f" В ТОП-3 зато {plural(len(micro_top), QUERIES)} с частотностью меньше {MICRO} в месяц — "
+                 "трафика и заявок они не дают.")
+    weak = len(top10) * 3 < len(frequent) and better <= worse
+    return Signal("warn" if weak else "ok", "benefit", title, text)
+
+
+def pf_verdict(signals: list[Signal]) -> tuple[str, str]:
+    """Итог одной фразой: (статус, текст)."""
+    sanctions = [s for s in signals if s.group == "sanctions" and s.status == "alert"]
+    traces = [s for s in signals if s.group == "traces" and s.status in ("alert", "warn")]
+    if sanctions:
+        return "alert", ("Похоже на санкции Яндекса: " + "; ".join(s.title.lower() for s in sanctions)
+                         + ". Остановить накрутку и проверить Вебмастер.")
+    if traces:
+        return "warn", (f"Санкций пока не видно, но следы накрутки заметны ({len(traces)} из 3 сигналов): "
+                        "Яндекс отличает такое поведение от живого. Чем дольше оно продолжается, тем выше риск фильтра "
+                        "на весь сайт.")
+    return "ok", "Следов накрутки и признаков санкций не видно."
+
+
+
+def pf_findings(signals: list[Signal]) -> list[Finding]:
+    """Для сводок: тревоги — в минусы, «внимание» — в «что проверить»."""
+    kind = {"alert": "minus", "warn": "check"}
+    return [Finding(kind[s.status], f"ПФ: {s.title.lower()} — {s.text}") for s in signals if s.status in kind]

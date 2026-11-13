@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "macros.html" import chart_block, insights %}
+{% block title %}ПФ и риски{% endblock %}
+
+{% macro signal_card(s) %}
+  <div class="card signal signal-{{ s.status }}">
+    <div class="signal-head"><span class="signal-badge">{{ signal_names[s.status] }}</span>{{ s.title }}</div>
+    <p>{{ s.text }}</p>
+  </div>
+{% endmacro %}
+
+{% block content %}
+  <div class="card verdict verdict-{{ status }}">
+    <div class="verdict-title">Итог</div>
+    <p>{{ verdict }}</p>
+    <p class="note">По последним данным, независимо от выбранного месяца. Проверяется каждый день после сбора данных;
+      тревоги дублируются в «Обзоре».</p>
+  </div>
+
+  <h2>Следы накрутки <span class="h2-note">что Яндекс видит в поведении на выдаче</span></h2>
+  <div class="signals">{% for s in signals if s.group == 'traces' %}{{ signal_card(s) }}{% endfor %}</div>
+
+  <h2>Признаки санкций <span class="h2-note">Google — контрольная группа: накрутка на него не влияет</span></h2>
+  <div class="signals">{% for s in signals if s.group == 'sanctions' %}{{ signal_card(s) }}{% endfor %}</div>
+  <section class="grid-2">
+    {{ chart_block(charts, 'pf_engines', 'Визиты из Яндекса и Google по неделям') }}
+    {{ chart_block(charts, 'pf_share', 'Доля Яндекса в визитах из двух поисковиков') }}
+  </section>
+
+  <h2>Отдача</h2>
+  <div class="signals">{% for s in signals if s.group == 'benefit' %}{{ signal_card(s) }}{% endfor %}</div>
+
+  {{ chart_block(charts, 'pf_clicks', 'Клики по дням: запросы проекта RabbitSeo и «запрос + домен» (Вебмастер)') }}
+
+  <div class="grid-2">
+    <div class="card table-card">
+      <div class="chart-title">Кликов почти столько же, сколько показов
+        {% if window %}<span class="h2-note">{{ window.first_day.strftime('%d.%m') }}–{{ window.last_day.strftime('%d.%m') }}</span>{% endif %}</div>
+      {% if window and window.full_ctr %}
+      <table>
+        <thead><tr><th>Запрос</th><th class="num">Показы</th><th class="num">Клики</th><th class="num">Позиция</th><th>RabbitSeo</th></tr></thead>
+        <tbody>{% for r in window.full_ctr[:30] %}
+          <tr><td>{{ r.query }}</td><td class="num">{{ r.impressions|int }}</td><td class="num">{{ r.clicks|int }}</td>
+              <td class="num">{{ r.position|dec }}</td><td>{{ 'да' if r.boosted else '' }}</td></tr>
+        {% endfor %}</tbody>
+      </table>
+      {% else %}<p class="muted">Таких запросов нет.</p>{% endif %}
+    </div>
+    <div class="card table-card">
+      <div class="chart-title">Запросы «запрос + {{ domain }}» <span class="h2-note">{{ domain_total }}</span></div>
+      {% if domain_rows %}
+      <table>
+        <thead><tr><th>Запрос</th><th class="num">Показы</th><th class="num">Клики</th><th class="num">С</th></tr></thead>
+        <tbody>{% for r in domain_rows %}
+          <tr><td>{{ r.query }}</td><td class="num">{{ r.impressions|int }}</td><td class="num">{{ r.clicks|int }}</td>
+              <td class="num muted">{{ r.first_seen.strftime('%d.%m') }}</td></tr>
+        {% endfor %}</tbody>
+      </table>
+      {% else %}<p class="muted">Таких запросов нет.</p>{% endif %}
+    </div>
+  </div>
+
+  {% if frequent %}
+  <div class="card table-card">
+    <div class="chart-title">Частотные запросы проекта RabbitSeo <span class="h2-note">позиция сейчас и {{ benefit_from.strftime('%d.%m') }}</span></div>
+    <table>
+      <thead><tr><th>Запрос</th><th class="num">Частота</th><th class="num">Позиция</th><th class="num">была</th></tr></thead>
+      <tbody>{% for r in frequent %}
+        <tr><td>{{ r.query }}</td><td class="num muted">{{ r.frequency|int }}</td>
+            <td class="num">{{ r.position if r.position is not none else '—' }}</td>
+            <td class="num muted">{{ r.position_prev if r.position_prev is not none else '—' }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% if frequent_absent %}<p class="note">Ещё {{ frequent_absent }} частотных запросов проекта сайт не находит в проверяемой части выдачи.</p>{% endif %}
+  </div>
+  {% endif %}
+  <p class="note">Как считается — docs/metrics.md, раздел «ПФ и риски». Аналитика запросов Вебмастера хранит 14 дней,
+    сборщик копит историю с первого запуска; данные Вебмастера бывают с задержкой.</p>
+{% endblock %}

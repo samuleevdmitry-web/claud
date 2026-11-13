@@ -41,7 +41,8 @@ SLICES = {
     "total": SliceSpec((), ("day", "month"), core=True),
     "source": SliceSpec(("ym:s:{attr}TrafficSource",), ("day", "month"), core=True),
     "utm": SliceSpec(("ym:s:{attr}UTMSource", "ym:s:{attr}UTMMedium", "ym:s:{attr}UTMCampaign"), ("day", "month"), core=True),
-    "search_engine": SliceSpec(("ym:s:{attr}SearchEngineRoot",)),
+    # по дням — чтобы видеть долю Яндекса против Google: резкое падение только в Яндексе — признак санкций
+    "search_engine": SliceSpec(("ym:s:{attr}SearchEngineRoot",), ("day", "month")),
     "search_phrase": SliceSpec(("ym:s:{attr}SearchPhrase",), top=100),
     "referrer": SliceSpec(("ym:s:{attr}ReferalSource",), top=100),
     "social": SliceSpec(("ym:s:{attr}SocialNetwork",)),

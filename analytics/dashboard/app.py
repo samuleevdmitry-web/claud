@@ -30,6 +30,7 @@ NAV = [
     ("traffic", "/traffic", "Трафик", "chart"),
     ("leads", "/leads", "Заявки и цели", "target"),
     ("search", "/search", "Поиск Яндекса", "search"),
+    ("pf", "/pf", "ПФ и риски", "shield"),
     ("demand", "/demand", "Спрос", "trend"),
     ("maps", "/maps", "Карты", "pin"),
     ("status", "/status", "Данные", "db"),
@@ -89,6 +90,11 @@ def leads(request: Request, site: int | None = None, month: str | None = None, a
 @app.get("/search", response_class=HTMLResponse)
 def search(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
     return render(request, "search", pages.search_page, site, month, aud)
+
+
+@app.get("/pf", response_class=HTMLResponse)
+def pf(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
+    return render(request, "pf", pages.pf_page, site, month, aud)
 
 
 @app.get("/demand", response_class=HTMLResponse)
