@@ -25,7 +25,7 @@ from analytics.sources.metrika import (
     fetch_traffic,
     grain_range,
 )
-from analytics.sources import crm_files
+from analytics.sources import crm_files, semantics
 from analytics.sources.rabbit import MAX_DAYS, RabbitClient, parse_positions
 from analytics.sources.wordstat import WordstatClient, WordstatError
 from analytics.sources.webmaster import (
@@ -272,7 +272,8 @@ def sync_rabbit(conn: psycopg.Connection, client: RabbitClient, until: date,
 
 
 def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], None] = print) -> list:
-    """Загружает из папки новые выгрузки Битрикс24 и 1С (*.xlsx); уже загруженные (по содержимому) пропускает.
+    """Загружает из папки новые выгрузки (*.xlsx): Битрикс24 и 1С, таблицу семантики; уже загруженные (по содержимому)
+    пропускает.
 
     Возвращает разобранные файлы — по ним видно, за какие месяцы появились данные.
     """
@@ -286,8 +287,15 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
         if sha in done:
             continue
         try:
+            sheets = semantics.read_workbook(path)
+            if semantics.is_semantics(sheets):
+                sem = semantics.parse_sheets(sheets)
+                db.save_semantics(conn, sha, path.name, sem, crm_files.PARSER_VERSION)
+                log(f"  {path.name}: семантика — {sem.rows} фраз, {len(sem.positions)} позиций")
+                out.append(sem)
+                continue
             parsed = crm_files.parse_file(path)
-        except (crm_files.CrmFileError, ValueError, KeyError, OSError) as exc:
+        except (crm_files.CrmFileError, semantics.SemanticsError, ValueError, KeyError, OSError) as exc:
             log(f"  {path.name}: не загружен — {exc}")
             db.skip_crm_file(conn, sha, path.name)
             continue

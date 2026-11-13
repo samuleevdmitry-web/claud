@@ -313,3 +313,21 @@ def skip_crm_file(conn: psycopg.Connection, sha: str, file_name: str) -> None:
     """Файл не распознан: запоминаем, чтобы не разбирать его снова при каждой проверке."""
     conn.execute("INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded) VALUES (%s, %s, 'unknown',"
                  " '1970-01-01', 0) ON CONFLICT DO NOTHING", (sha, file_name))
+
+
+def save_semantics(conn: psycopg.Connection, sha: str, file_name: str, sem, version: int = 1) -> int:
+    """Семантика целиком: новая выгрузка таблицы заменяет прежнюю."""
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM semantic_keywords")
+        cur.execute("DELETE FROM semantic_positions")
+        cur.executemany("INSERT INTO semantic_keywords (norm, phrase, frequency) VALUES (%s, %s, %s)",
+                        [(norm, phrase, freq) for norm, (phrase, freq) in sem.keywords.items()])
+        cur.executemany("INSERT INTO semantic_positions (norm, engine, date, position) VALUES (%s, %s, %s, %s)",
+                        sem.positions)
+        cur.execute(
+            "INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded, parser_version)"
+            " VALUES (%s, %s, 'semantics', date_trunc('month', now())::date, %s, %s)"
+            " ON CONFLICT (sha256) DO UPDATE SET imported_at = now(), parser_version = EXCLUDED.parser_version",
+            (sha, file_name, sem.rows, version),
+        )
+    return sem.rows

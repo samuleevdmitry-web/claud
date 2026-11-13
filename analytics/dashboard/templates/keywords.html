@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Ключи{% endblock %}
+
+{% macro sort_link(key, title, num=True) %}
+  {% set active = kf.sort == key %}
+  {% set next_dir = 'asc' if active and kf.dir == 'desc' else 'desc' %}
+  <th class="{{ 'num' if num else '' }}"><a class="sort{% if active %} active{% endif %}" href="/keywords?{{ (base | dictsort | list | urlencode_pairs(sort=key, dir=next_dir)) }}">{{ title }}{% if active %} {{ '↓' if kf.dir == 'desc' else '↑' }}{% endif %}</a></th>
+{% endmacro %}
+
+{% block content %}
+{% if not host %}
+  <div class="card muted">Сайт не подключён к Вебмастеру.</div>
+{% else %}
+<form class="card kw-filters" method="get" action="/keywords">
+  <input type="hidden" name="site" value="{{ f.counter_id }}">
+  <label class="wide">Поиск по фразе <input type="search" name="search" value="{{ kf.search }}" placeholder="например, оксфорд"></label>
+  <label>С <input type="date" name="d1" value="{{ kf.d1.isoformat() }}"></label>
+  <label>По <input type="date" name="d2" value="{{ kf.d2.isoformat() }}"></label>
+  <label>Какие запросы
+    <select name="scope">
+      <option value="keys" {% if kf.scope == 'keys' %}selected{% endif %}>Семантика и проект RabbitSeo</option>
+      <option value="all" {% if kf.scope == 'all' %}selected{% endif %}>Все запросы Вебмастера</option>
+    </select></label>
+  <label>RabbitSeo
+    <select name="rabbit">
+      <option value="" {% if not kf.rabbit %}selected{% endif %}>все</option>
+      <option value="yes" {% if kf.rabbit == 'yes' %}selected{% endif %}>в проекте</option>
+      <option value="no" {% if kf.rabbit == 'no' %}selected{% endif %}>не в проекте</option>
+    </select></label>
+  <label>Частотность от <input type="number" name="min_freq" value="{{ kf.min_freq if kf.min_freq is not none else '' }}" min="0"></label>
+  <label>до <input type="number" name="max_freq" value="{{ kf.max_freq if kf.max_freq is not none else '' }}" min="0"></label>
+  <label>Показов от <input type="number" name="min_shows" value="{{ kf.min_shows if kf.min_shows is not none else '' }}" min="0"></label>
+  <label>CTR от, % <input type="number" step="0.1" name="ctr_min" value="{{ kf.ctr_min if kf.ctr_min is not none else '' }}"></label>
+  <label>до, % <input type="number" step="0.1" name="ctr_max" value="{{ kf.ctr_max if kf.ctr_max is not none else '' }}"></label>
+  <input type="hidden" name="sort" value="{{ kf.sort }}"><input type="hidden" name="dir" value="{{ kf.dir }}">
+  <div class="kw-actions">
+    <button type="submit">Показать</button>
+    <a href="/keywords?site={{ f.counter_id }}">Сбросить</a>
+    <a href="/keywords.csv?{{ base | dictsort | list | urlencode_pairs }}">Скачать CSV</a>
+  </div>
+</form>
+
+<p class="note">
+  Показы, клики, CTR и средняя позиция — из аналитики запросов Вебмастера за {{ kf.d1.strftime('%d.%m.%Y') }}–{{ kf.d2.strftime('%d.%m.%Y') }}
+  {% if days and days.first %}(в базе есть с {{ days.first.strftime('%d.%m.%Y') }} по {{ days.last.strftime('%d.%m.%Y') }}; Вебмастер хранит 14 дней, сборщик копит историю){% endif %}.
+  Частотность и позиции Я / G — из таблицы семантики{% if sheet_dates.yandex %} (последний срез {{ sheet_dates.yandex[-1].strftime('%d.%m.%Y') }}){% endif %}.
+  {% if coverage %}Из {{ coverage.keys_total|int }} ключей показы за период были у {{ coverage.keys_with_shows|int }}; запросов Вебмастера с показами — {{ coverage.queries|int }}, из них вне ключей {{ coverage.queries_outside|int }}.{% endif %}
+</p>
+
+<div class="card table-card">
+  <div class="chart-title">Найдено {{ total|int }}{% if pages > 1 %} · страница {{ kf.page }} из {{ pages }}{% endif %}</div>
+  <table class="kw-table">
+    <thead><tr>
+      {{ sort_link('phrase', 'Фраза', False) }}{{ sort_link('frequency', 'Частотность, год') }}{{ sort_link('shows', 'Показы') }}
+      {{ sort_link('clicks', 'Клики') }}{{ sort_link('ctr', 'CTR') }}{{ sort_link('position', 'Ср. позиция') }}
+      {{ sort_link('demand', 'Спрос') }}{{ sort_link('pos_yandex', 'Я') }}{{ sort_link('pos_google', 'G') }}{{ sort_link('rabbit', 'RabbitSeo') }}
+    </tr></thead>
+    <tbody>{% for r in rows %}
+      <tr>
+        <td class="label" title="{{ r.phrase }}"><a href="/keywords/detail?{{ base | dictsort | list | urlencode_pairs(k=r.phrase) }}">{{ r.phrase }}</a>{% if not r.is_key %} <span class="muted small">не в ключах</span>{% endif %}</td>
+        <td class="num muted">{{ r.frequency|int if r.frequency is not none else '—' }}</td>
+        <td class="num">{{ r.shows|int if r.shows is not none else '—' }}</td>
+        <td class="num">{{ r.clicks|int if r.clicks is not none else '—' }}</td>
+        <td class="num">{{ r.ctr|pct(1) if r.ctr is not none else '—' }}</td>
+        <td class="num">{{ r.position|dec if r.position is not none else '—' }}</td>
+        <td class="num muted">{{ r.demand|int if r.demand is not none else '—' }}</td>
+        <td class="num">{{ r.pos_yandex if r.pos_yandex is not none else '—' }}</td>
+        <td class="num">{{ r.pos_google if r.pos_google is not none else '—' }}</td>
+        <td class="num">{% if r.in_rabbit %}{{ r.rabbit_position if r.rabbit_position is not none else 'нет в выдаче' }}{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="10" class="muted">Ничего не найдено — ослабьте фильтры.</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% if pages > 1 %}
+  <div class="kw-pager">
+    {% if kf.page > 1 %}<a href="/keywords?{{ base | dictsort | list | urlencode_pairs(page=kf.page - 1) }}">← назад</a>{% endif %}
+    {% if kf.page < pages %}<a href="/keywords?{{ base | dictsort | list | urlencode_pairs(page=kf.page + 1) }}">дальше →</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+<p class="note">Спрос — сколько раз запрос задавали в Яндексе за день по данным Вебмастера (в среднем за дни периода).
+  Я / G — позиции из таблицы семантики; RabbitSeo — последний съём по запросам проекта. Фразы сравниваются без учёта
+  регистра, «ё» и лишних пробелов.</p>
+{% endif %}
+{% endblock %}

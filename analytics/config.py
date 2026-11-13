@@ -23,6 +23,7 @@ class Settings:
     database_url: str
     reports_dir: str = "reports"  # куда сборщик сохраняет ежемесячные отчёты
     imports_dir: str = "imports"  # куда кладутся выгрузки из Битрикс24 и 1С (Excel)
+    semantics_url: str = ""  # ссылка на Google Таблицу семантики: скачивается раз в неделю
     site_search_param: str = "q"  # параметр адреса с запросом поиска по сайту (oldos.ru: /catalog/?q=…)
     not_found_title: str = "Страница не найдена"  # заголовок страницы 404 на сайте
 
@@ -48,6 +49,7 @@ def load_settings() -> Settings:
         database_url=os.environ.get("DATABASE_URL", "").strip() or DEFAULT_DATABASE_URL,
         reports_dir=os.environ.get("REPORTS_DIR", "").strip() or "reports",
         imports_dir=os.environ.get("IMPORTS_DIR", "").strip() or "imports",
+        semantics_url=os.environ.get("SEMANTICS_URL", "").strip(),
         site_search_param=os.environ.get("SITE_SEARCH_PARAM", "").strip() or "q",
         not_found_title=os.environ.get("NOT_FOUND_TITLE", "").strip() or "Страница не найдена",
     )

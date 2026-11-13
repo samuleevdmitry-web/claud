@@ -8,11 +8,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import psycopg
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -32,6 +33,7 @@ NAV = [
     ("leads", "/leads", "Заявки и цели", "target"),
     ("sales", "/sales", "Продажи", "cart"),
     ("search", "/search", "Поиск Яндекса", "search"),
+    ("keywords", "/keywords", "Ключи", "key"),
     ("pf", "/pf", "ПФ и риски", "shield"),
     ("report", "/report", "Отчёт за месяц", "doc"),
     ("demand", "/demand", "Спрос", "trend"),
@@ -42,7 +44,14 @@ NAV = [
 app = FastAPI(title="Аналитика", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
+def urlencode_pairs(pairs, **override) -> str:
+    """Параметры адреса из пар (ключ, значение) с заменой части: для сортировки, листания и ссылок таблицы ключей."""
+    params = dict(pairs) | override
+    return urlencode({k: v.isoformat() if isinstance(v, date) else v for k, v in params.items() if v not in (None, "")})
+
+
 templates.env.filters.update(
+    urlencode_pairs=urlencode_pairs,
     int=fmt_int, dec=fmt_dec, pct=fmt_pct, duration=fmt_duration, month=month_name, month_short=month_short, month_with=month_with,
     change=fmt_change, local=lambda dt: dt.astimezone(TZ).strftime("%d.%m.%Y %H:%M") if dt else "—",
 )
@@ -93,6 +102,26 @@ def leads(request: Request, site: int | None = None, month: str | None = None, a
 @app.get("/sales", response_class=HTMLResponse)
 def sales(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
     return render(request, "sales", pages.sales_page, site, month, aud)
+
+
+@app.get("/keywords", response_class=HTMLResponse)
+def keywords(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
+    return render(request, "keywords", pages.keywords_page, site, month, aud, params=dict(request.query_params))
+
+
+@app.get("/keywords/detail", response_class=HTMLResponse)
+def keyword(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
+    return render(request, "keyword", pages.keyword_detail, site, month, aud, params=dict(request.query_params))
+
+
+@app.get("/keywords.csv")
+def keywords_csv(request: Request, site: int | None = None) -> Response:
+    settings = load_settings()
+    with db.connect(settings.database_url) as conn:
+        f = pages.resolve_filters(conn, settings, site, None, None, date.today())
+        body = pages.keywords_csv(conn, settings, f, dict(request.query_params)) if f else "\ufeff"
+    return Response(body, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="keywords.csv"'})
 
 
 @app.get("/search", response_class=HTMLResponse)

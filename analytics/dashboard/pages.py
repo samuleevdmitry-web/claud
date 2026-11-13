@@ -40,7 +40,7 @@ STREAM_NAMES = {"search": "статистика запросов", "query_analyt
                 "pages_in_search": "страницы в поиске", "crawl": "обход роботом", "sqi": "ИКС"}
 SOURCE_NAMES = {"metrika": "Метрика: сайты", "maps": "Метрика: Карты", "webmaster": "Вебмастер",
                 "wordstat": "Вордстат", "rabbit": "RabbitSeo", "report": "Отчёт за месяц",
-                "metrika_backfill": "Метрика: догрузка новых отчётов"}
+                "metrika_backfill": "Метрика: догрузка новых отчётов", "semantics": "Семантика"}
 
 # Вкладки раздела «Трафик»: отчёты Метрики по группам, как в её интерфейсе.
 TRAFFIC_TABS = {
@@ -824,3 +824,119 @@ def sales_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
         "files": q.crm_files(conn, f.month),
         "summary": ins.summarize(findings), "findings": findings, "folder": settings.imports_dir,
     }
+
+
+# ----- Ключи -----
+
+KEYWORD_PAGE = 100
+
+
+def _int_or_none(v) -> int | None:
+    try:
+        return int(str(v).replace(" ", "")) if v not in (None, "") else None
+    except ValueError:
+        return None
+
+
+def _float_or_none(v) -> float | None:
+    try:
+        return float(str(v).replace(",", ".")) if v not in (None, "") else None
+    except ValueError:
+        return None
+
+
+def keyword_filters(params: dict, days: dict | None) -> dict:
+    """Фильтры таблицы ключей из адреса страницы; период по умолчанию — последние 14 дней с данными."""
+    last = days["last"] if days and days["last"] else date.today()
+    first = days["first"] if days and days["first"] else last
+    d2 = parse_day(params.get("d2")) or last
+    d1 = parse_day(params.get("d1")) or max(first, d2 - timedelta(days=13))
+    if d1 > d2:
+        d1, d2 = d2, d1
+    sort = params.get("sort") if params.get("sort") in q.KEYWORD_SORTS else "frequency"
+    return {
+        "d1": d1, "d2": d2, "search": (params.get("search") or "").strip(),
+        "scope": "all" if params.get("scope") == "all" else "keys",
+        "rabbit": params.get("rabbit") if params.get("rabbit") in ("yes", "no") else "",
+        "min_freq": _int_or_none(params.get("min_freq")), "max_freq": _int_or_none(params.get("max_freq")),
+        "min_shows": _int_or_none(params.get("min_shows")),
+        "ctr_min": _float_or_none(params.get("ctr_min")), "ctr_max": _float_or_none(params.get("ctr_max")),
+        "sort": sort, "dir": "asc" if params.get("dir") == "asc" else "desc",
+        "page": max(1, _int_or_none(params.get("page")) or 1),
+    }
+
+
+def parse_day(value: str | None) -> date | None:
+    try:
+        return date.fromisoformat(value) if value else None
+    except ValueError:
+        return None
+
+
+def _keyword_rows(conn: psycopg.Connection, f: Filters, kf: dict, limit: int | None, offset: int = 0):
+    host_id = q.host_for_site(conn, f.counter_id)
+    project = (f.site.get("site") or "").removeprefix("www.")
+    return q.keywords(conn, host_id, project, kf["d1"], kf["d2"], search=kf["search"],
+                      scope="all" if kf["scope"] == "all" else "semantics", min_freq=kf["min_freq"],
+                      max_freq=kf["max_freq"], min_shows=kf["min_shows"], ctr_min=kf["ctr_min"], ctr_max=kf["ctr_max"],
+                      rabbit=kf["rabbit"], sort=kf["sort"], desc=kf["dir"] == "desc", limit=limit, offset=offset)
+
+
+def keywords_page(conn: psycopg.Connection, settings: Settings, f: Filters, params: dict | None = None) -> dict:
+    host_id = q.host_for_site(conn, f.counter_id)
+    if not host_id:
+        return {"host": None}
+    days = q.query_days(conn, host_id)
+    kf = keyword_filters(params or {}, days)
+    rows, total = _keyword_rows(conn, f, kf, KEYWORD_PAGE, (kf["page"] - 1) * KEYWORD_PAGE)
+    project = (f.site.get("site") or "").removeprefix("www.")
+    base = {k: v for k, v in kf.items() if k not in ("page",) and v not in (None, "")}
+    base["site"] = f.counter_id
+    return {
+        "host": host_id, "kf": kf, "rows": rows, "total": total, "days": days,
+        "pages": (total + KEYWORD_PAGE - 1) // KEYWORD_PAGE, "base": base,
+        "coverage": q.keyword_coverage(conn, host_id, project, kf["d1"], kf["d2"]),
+        "sheet_dates": q.semantic_dates(conn), "sorts": q.KEYWORD_SORTS,
+    }
+
+
+def keywords_csv(conn: psycopg.Connection, settings: Settings, f: Filters, params: dict) -> str:
+    """Таблица ключей с текущими фильтрами целиком — CSV для Excel (точка с запятой, BOM)."""
+    import csv
+    import io
+
+    host_id = q.host_for_site(conn, f.counter_id)
+    kf = keyword_filters(params, q.query_days(conn, host_id) if host_id else None)
+    rows, _ = _keyword_rows(conn, f, kf, None) if host_id else ([], 0)
+    buf = io.StringIO()
+    out = csv.writer(buf, delimiter=";")
+    out.writerow(["Фраза", "Частотность (год)", "В семантике", "Показы", "Клики", "CTR, %", "Средняя позиция",
+                  "Дней с показами", "Спрос (Вебмастер)", "Позиция Яндекс (таблица)", "Позиция Google (таблица)",
+                  "В проекте RabbitSeo", "Позиция RabbitSeo", f"Период: {kf['d1']:%d.%m.%Y}–{kf['d2']:%d.%m.%Y}"])
+    for r in rows:
+        out.writerow([r["phrase"], r["frequency"], "да" if r["in_semantics"] else "", r["shows"], r["clicks"],
+                      str(r["ctr"]).replace(".", ",") if r["ctr"] is not None else "",
+                      str(r["position"]).replace(".", ",") if r["position"] is not None else "", r["days"], r["demand"],
+                      r["pos_yandex"], r["pos_google"], "да" if r["in_rabbit"] else "", r["rabbit_position"]])
+    return "\ufeff" + buf.getvalue()
+
+
+def keyword_detail(conn: psycopg.Connection, settings: Settings, f: Filters, params: dict | None = None) -> dict:
+    from analytics.sources.semantics import normalize
+
+    params = params or {}
+    host_id = q.host_for_site(conn, f.counter_id)
+    norm = normalize(params.get("k") or "")
+    days = q.query_days(conn, host_id) if host_id else None
+    kf = keyword_filters(params, days)
+    project = (f.site.get("site") or "").removeprefix("www.")
+    daily = q.keyword_days(conn, host_id, norm, kf["d1"], kf["d2"]) if host_id and norm else []
+    for d in daily:
+        d["ctr"] = round(100.0 * d["clicks"] / d["shows"], 1) if d["shows"] else None
+    charts = {}
+    if daily:
+        charts["kw_daily"] = chart("bar", [d["date"].strftime("%d.%m") for d in daily],
+                                   [("Показы", [d["shows"] for d in daily]), ("Клики", [d["clicks"] for d in daily])])
+    return {"norm": norm, "kf": kf, "daily": daily, "charts": charts,
+            "positions": q.keyword_positions(conn, norm, project), "days": days,
+            "back": {k: v for k, v in params.items() if k != "k"}}

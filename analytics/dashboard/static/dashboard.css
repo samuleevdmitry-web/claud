@@ -246,3 +246,16 @@ td.indent { padding-left: 24px; color: var(--text-secondary); }
 .funnel-money { margin: 12px 0 0; font-size: 14px; }
 .sales-summary .key-row td { font-weight: 650; }
 .sales-summary .key-row td.num { border-bottom: 2px solid var(--status-bad); }
+
+/* Ключи */
+.kw-filters { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+.kw-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-secondary); }
+.kw-filters label.wide { flex: 1 1 260px; }
+.kw-filters input, .kw-filters select { font: inherit; font-size: 14px; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); color: var(--text-primary); min-width: 0; }
+.kw-filters input[type=number] { width: 110px; }
+.kw-actions { display: flex; gap: 14px; align-items: center; }
+.kw-actions button { font: inherit; font-size: 14px; padding: 7px 16px; border-radius: 8px; border: 0; background: var(--series-1); color: #fff; cursor: pointer; }
+.kw-table a.sort { color: inherit; text-decoration: none; }
+.kw-table a.sort.active { color: var(--text-primary); font-weight: 600; }
+.kw-pager { display: flex; justify-content: space-between; margin-top: 10px; }

@@ -17,18 +17,20 @@ from analytics.schedule import HISTORY_START, RETRY_AFTER, TZ, due_sources, mont
 from analytics.sources.metrika import SLICES, MetrikaClient, MetrikaError, dimensions_for
 from analytics.keywords import KeywordConfig, load_keywords
 from analytics.sources.rabbit import RabbitClient, RabbitError
+from analytics.sources.semantics import SemanticsError
+from analytics.sources.semantics import download as semantics_download
 from analytics.sources.webmaster import WebmasterClient, WebmasterError, parse_search_history
 from analytics.sources.wordstat import WordstatClient, WordstatError
 from analytics.sync import import_crm_folder, sync_metrika, sync_rabbit, sync_webmaster, sync_wordstat
 
 # Сколько последних дней перезагружать при плановом сборе: неделя и запас. Вебмастер отдаёт данные с задержкой
 # в несколько дней и уточняет их, поэтому у него окно больше.
-DEFAULT_DAYS = {"metrika": 14, "maps": 14, "webmaster": 30, "wordstat": 7, "rabbit": 14}
-SOURCE_ERRORS = (MetrikaError, WebmasterError, WordstatError, RabbitError)
+DEFAULT_DAYS = {"metrika": 14, "maps": 14, "webmaster": 30, "wordstat": 7, "rabbit": 14, "semantics": 7}
+SOURCE_ERRORS = (MetrikaError, WebmasterError, WordstatError, RabbitError, SemanticsError)
 WORDSTAT_SINCE = date(2023, 1, 1)  # три полных года — чтобы видеть сезонность
 # Метрика, Карты, Вебмастер и RabbitSeo — раз в неделю, в понедельник: прошедшая неделя закрыта целиком.
 # Аналитика запросов Вебмастера хранит 14 дней, так что пропустить можно не больше одного понедельника.
-WEEKLY_ON = {"metrika": 0, "maps": 0, "webmaster": 0, "rabbit": 0}
+WEEKLY_ON = {"metrika": 0, "maps": 0, "webmaster": 0, "rabbit": 0, "semantics": 0}
 # Вордстат обновляет данные раз в месяц: загружаем 5-го числа.
 MONTHLY_ON = {"wordstat": 5}
 # Отчёт за прошлый месяц — 6-го: Метрика закрыла месяц, Вордстат загружен накануне, Вебмастер догнал задержку.
@@ -208,8 +210,21 @@ def _sync_rabbit(conn: psycopg.Connection, settings: Settings, since: date, unti
     return sync_rabbit(conn, RabbitClient(settings.rabbit_guest_url), until)
 
 
+def _sync_semantics(conn: psycopg.Connection, settings: Settings, since: date, until: date) -> int:
+    """Таблица семантики по ссылке → папка imports → база (как любая выгрузка, которую кладут руками)."""
+    if not settings.semantics_url:
+        raise SemanticsError("Не задан SEMANTICS_URL — ссылка на Google Таблицу семантики")
+    folder = Path(settings.imports_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    semantics_download(settings.semantics_url, folder / "semantics.xlsx")
+    loaded = import_crm_folder(conn, folder)
+    rows = conn.execute("SELECT count(*) FROM semantic_keywords").fetchone()[0]
+    print(f"  семантика: {rows} фраз" + ("" if loaded else " (таблица не менялась)"))
+    return rows
+
+
 SYNCS = {"metrika": _sync_metrika, "maps": _sync_maps, "webmaster": _sync_webmaster, "wordstat": _sync_wordstat,
-         "rabbit": _sync_rabbit}
+         "rabbit": _sync_rabbit, "semantics": _sync_semantics}
 
 # Что должно быть настроено, чтобы `sync` загружал источник; явный `sync-<источник>` объяснит, чего не хватает.
 CONFIGURED = {
@@ -218,6 +233,7 @@ CONFIGURED = {
     "webmaster": lambda s: bool(s.webmaster_hosts),
     "wordstat": lambda s: bool(s.wordstat_folder_id),
     "rabbit": lambda s: bool(s.rabbit_guest_url),
+    "semantics": lambda s: bool(s.semantics_url),
 }
 
 
@@ -297,7 +313,7 @@ def import_crm(settings: Settings, today: date) -> list:
         db.apply_schema(conn)
         parsed = import_crm_folder(conn, Path(settings.imports_dir))
     current = today.replace(day=1)
-    for month in sorted({p.month for p in parsed if p.month < current}):
+    for month in sorted({p.month for p in parsed if getattr(p, "month", None) and p.month < current}):
         reports = Path(settings.reports_dir)
         if any(reports.glob(f"{month:%Y-%m} *.html")):  # отчёт за месяц уже был — обновить с продажами
             print(f"=== отчёт за {month:%m.%Y} пересобирается: пришли выгрузки CRM")
@@ -392,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
         ("sync-webmaster", "загрузить данные Вебмастера"),
         ("sync-wordstat", "загрузить спрос из Вордстата по ключам wordstat.toml"),
         ("sync-rabbit", "загрузить позиции из RabbitSeo по гостевой ссылке"),
+        ("sync-semantics", "скачать таблицу семантики по ссылке SEMANTICS_URL и загрузить её"),
     ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("--since", type=date.fromisoformat,

@@ -527,3 +527,137 @@ def goal_visits_by_type(conn: psycopg.Connection, counter_id: int, audience: str
         GROUP BY g.type
     """, (counter_id, audience, month))
     return {r["type"]: int(r["visits"] or 0) for r in rows}
+
+
+# ----- Ключи: семантика и Вебмастер -----
+
+NORM = r"regexp_replace(replace(lower(w.query), 'ё', 'е'), '\s+', ' ', 'g')"
+KEYWORD_SORTS = {
+    "phrase": "phrase", "frequency": "frequency", "shows": "shows", "clicks": "clicks", "ctr": "ctr",
+    "position": "position", "demand": "demand", "pos_yandex": "pos_yandex", "pos_google": "pos_google",
+    "rabbit": "rabbit_position",
+}
+
+
+def query_days(conn: psycopg.Connection, host_id: str) -> dict | None:
+    return _one(conn, "SELECT min(date) AS first, max(date) AS last FROM webmaster_query_daily WHERE host_id = %s",
+                (host_id,))
+
+
+def semantic_dates(conn: psycopg.Connection) -> dict[str, list[date]]:
+    rows = _all(conn, "SELECT engine, array_agg(DISTINCT date ORDER BY date) AS dates FROM semantic_positions GROUP BY 1")
+    return {r["engine"]: r["dates"] for r in rows}
+
+
+def keywords(conn: psycopg.Connection, host_id: str, project: str, date_from: date, date_to: date, *,
+             search: str = "", scope: str = "semantics", min_freq: int | None = None, max_freq: int | None = None,
+             min_shows: int | None = None, ctr_min: float | None = None, ctr_max: float | None = None,
+             rabbit: str = "", sort: str = "frequency", desc: bool = True, limit: int | None = 100,
+             offset: int = 0) -> tuple[list[dict], int]:
+    """Ключи с показами и кликами Вебмастера за период. scope: semantics — только фразы семантики,
+    all — ещё и запросы Вебмастера, которых в семантике нет. Возвращает строки страницы и сколько их всего."""
+    params: dict = {"host": host_id, "d1": date_from, "d2": date_to, "project": project}
+    where = []
+    if search:
+        where.append("k.phrase ILIKE %(search)s")
+        params["search"] = f"%{search.strip()}%"
+    for cond, key, value in (("k.frequency >= %(min_freq)s", "min_freq", min_freq),
+                             ("k.frequency <= %(max_freq)s", "max_freq", max_freq),
+                             ("coalesce(k.shows, 0) >= %(min_shows)s", "min_shows", min_shows),
+                             ("k.ctr >= %(ctr_min)s", "ctr_min", ctr_min), ("k.ctr <= %(ctr_max)s", "ctr_max", ctr_max)):
+        if value is not None:
+            where.append(cond)
+            params[key] = value
+    if rabbit == "yes":
+        where.append("k.in_rabbit")
+    elif rabbit == "no":
+        where.append("NOT k.in_rabbit")
+    join = "LEFT JOIN" if scope == "semantics" else "FULL JOIN"
+    order = KEYWORD_SORTS.get(sort, "frequency")
+    sql = f"""
+        -- MATERIALIZED: каждый подзапрос считается один раз; иначе планировщик выбирает вложенные циклы
+        -- и пересчитывает агрегат Вебмастера для каждой фразы (секунды вместо долей секунды)
+        WITH w AS MATERIALIZED (
+            SELECT {NORM} AS norm, min(w.query) AS query,
+                   sum(w.impressions) AS shows, sum(w.clicks) AS clicks,
+                   round(sum(w.position * w.impressions) / nullif(sum(w.impressions) FILTER (WHERE w.position IS NOT NULL), 0), 1)
+                       AS position,
+                   round(avg(w.demand)) AS demand, count(*) FILTER (WHERE w.impressions > 0) AS days
+            FROM webmaster_query_daily w
+            WHERE w.host_id = %(host)s AND w.date BETWEEN %(d1)s AND %(d2)s
+            GROUP BY 1
+        ), pos AS MATERIALIZED (
+            SELECT DISTINCT ON (norm, engine) norm, engine, position, date FROM semantic_positions
+            ORDER BY norm, engine, date DESC
+        ), rb AS MATERIALIZED (
+            SELECT DISTINCT ON (lower(query)) lower(query) AS q, position FROM rabbit_positions
+            WHERE project = %(project)s ORDER BY lower(query), date DESC
+        ), base AS MATERIALIZED (
+            -- ключи: семантика и запросы проекта RabbitSeo, которых в семантике нет
+            SELECT norm, phrase, frequency, true AS in_semantics FROM semantic_keywords
+            UNION ALL
+            SELECT r.q, r.query, r.frequency, false FROM (
+                SELECT lower(query) AS q, min(query) AS query, max(frequency) AS frequency FROM rabbit_positions
+                WHERE project = %(project)s GROUP BY lower(query)
+            ) r LEFT JOIN semantic_keywords s ON s.norm = r.q
+            WHERE s.norm IS NULL
+        ), k0 AS MATERIALIZED (
+            SELECT coalesce(s.norm, w.norm) AS norm, coalesce(s.phrase, w.query) AS phrase, s.frequency,
+                   coalesce(s.in_semantics, false) AS in_semantics, s.norm IS NOT NULL AS is_key,
+                   w.shows, w.clicks, w.position, w.demand, w.days,
+                   round(100.0 * w.clicks / nullif(w.shows, 0), 1) AS ctr
+            FROM base s
+            {join} w ON w.norm = s.norm
+        ), k AS (
+            SELECT k0.*, py.position AS pos_yandex, pg.position AS pos_google,
+                   rb.q IS NOT NULL AS in_rabbit, rb.position AS rabbit_position
+            FROM k0
+            LEFT JOIN pos py ON py.norm = k0.norm AND py.engine = 'yandex'
+            LEFT JOIN pos pg ON pg.norm = k0.norm AND pg.engine = 'google'
+            LEFT JOIN rb ON rb.q = k0.norm
+        )
+        SELECT *, count(*) OVER () AS total FROM k
+        {"WHERE " + " AND ".join(where) if where else ""}
+        ORDER BY {order} {"DESC" if desc else "ASC"} NULLS LAST, phrase
+        {"LIMIT %(limit)s OFFSET %(offset)s" if limit else ""}
+    """
+    if limit:
+        params.update(limit=limit, offset=offset)
+    rows = _all(conn, sql, params)
+    return rows, (rows[0]["total"] if rows else 0)
+
+
+def keyword_days(conn: psycopg.Connection, host_id: str, norm: str, date_from: date, date_to: date) -> list[dict]:
+    return _all(conn, f"""
+        SELECT w.date, sum(w.impressions) AS shows, sum(w.clicks) AS clicks,
+               round(sum(w.position * w.impressions) / nullif(sum(w.impressions), 0), 1) AS position,
+               max(w.demand) AS demand, string_agg(DISTINCT w.query, ', ') AS queries
+        FROM webmaster_query_daily w
+        WHERE w.host_id = %s AND {NORM} = %s AND w.date BETWEEN %s AND %s
+        GROUP BY w.date ORDER BY w.date
+    """, (host_id, norm, date_from, date_to))
+
+
+def keyword_positions(conn: psycopg.Connection, norm: str, project: str) -> dict:
+    sheet = _all(conn, "SELECT engine, date, position FROM semantic_positions WHERE norm = %s ORDER BY date", (norm,))
+    rabbit = _all(conn, "SELECT date, position, frequency FROM rabbit_positions WHERE project = %s AND lower(query) = %s"
+                        " ORDER BY date", (project, norm))
+    return {"sheet": sheet, "rabbit": rabbit}
+
+
+def keyword_coverage(conn: psycopg.Connection, host_id: str, project: str, date_from: date, date_to: date) -> dict:
+    """Сколько ключей вообще получали показы за период и сколько запросов Вебмастера — вне списка ключей."""
+    return _one(conn, f"""
+        WITH w AS (
+            SELECT DISTINCT {NORM} AS norm FROM webmaster_query_daily w
+            WHERE w.host_id = %(host)s AND w.date BETWEEN %(d1)s AND %(d2)s AND w.impressions > 0
+        ), keys AS (
+            SELECT norm FROM semantic_keywords
+            UNION SELECT lower(query) FROM rabbit_positions WHERE project = %(project)s
+        )
+        SELECT (SELECT count(*) FROM semantic_keywords) AS semantics,
+               (SELECT count(*) FROM keys) AS keys_total,
+               (SELECT count(*) FROM keys JOIN w USING (norm)) AS keys_with_shows,
+               (SELECT count(*) FROM w) AS queries,
+               (SELECT count(*) FROM w WHERE norm NOT IN (SELECT norm FROM keys)) AS queries_outside
+    """, {"host": host_id, "project": project, "d1": date_from, "d2": date_to})

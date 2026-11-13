@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "macros.html" import chart_block %}
+{% block title %}{{ norm }}{% endblock %}
+{% block content %}
+<p><a href="/keywords?{{ back | dictsort | list | urlencode_pairs }}">← к таблице ключей</a></p>
+<p class="note">Вебмастер, по дням за {{ kf.d1.strftime('%d.%m.%Y') }}–{{ kf.d2.strftime('%d.%m.%Y') }}. Период меняется в таблице ключей.</p>
+{{ chart_block(charts, 'kw_daily', 'Показы и клики по дням') }}
+<div class="card table-card">
+  <div class="chart-title">По дням</div>
+  {% if daily %}
+  <table>
+    <thead><tr><th>День</th><th class="num">Показы</th><th class="num">Клики</th><th class="num">CTR</th><th class="num">Позиция</th><th class="num">Спрос</th><th>Как записан запрос</th></tr></thead>
+    <tbody>{% for d in daily %}
+      <tr><td>{{ d.date.strftime('%d.%m.%Y') }}</td><td class="num">{{ d.shows|int }}</td><td class="num">{{ d.clicks|int }}</td>
+          <td class="num">{{ d.ctr|pct(1) if d.ctr is not none else '—' }}</td><td class="num">{{ d.position|dec if d.position is not none else '—' }}</td>
+          <td class="num muted">{{ d.demand|int if d.demand is not none else '—' }}</td><td class="muted small">{{ d.queries }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted">За этот период в аналитике запросов Вебмастера по этой фразе ничего нет.</p>{% endif %}
+</div>
+<div class="grid-2">
+  <div class="card table-card">
+    <div class="chart-title">Позиции из таблицы семантики</div>
+    {% if positions.sheet %}
+    <table><thead><tr><th>Дата</th><th>Система</th><th class="num">Позиция</th></tr></thead>
+      <tbody>{% for p in positions.sheet %}<tr><td>{{ p.date.strftime('%d.%m.%Y') }}</td><td>{{ 'Яндекс' if p.engine == 'yandex' else 'Google' if p.engine == 'google' else p.engine }}</td>
+        <td class="num">{{ p.position if p.position is not none else '—' }}</td></tr>{% endfor %}</tbody></table>
+    {% else %}<p class="muted">Фразы нет в таблице семантики.</p>{% endif %}
+  </div>
+  <div class="card table-card">
+    <div class="chart-title">Позиции RabbitSeo</div>
+    {% if positions.rabbit %}
+    <table><thead><tr><th>Съём</th><th class="num">Позиция</th></tr></thead>
+      <tbody>{% for p in positions.rabbit %}<tr><td>{{ p.date.strftime('%d.%m.%Y') }}</td><td class="num">{{ p.position if p.position is not none else 'нет в выдаче' }}</td></tr>{% endfor %}</tbody></table>
+    {% else %}<p class="muted">Фразы нет в проекте RabbitSeo.</p>{% endif %}
+  </div>
+</div>
+{% endblock %}
