@@ -18,19 +18,20 @@ from analytics.sources.metrika import SLICES, MetrikaClient, MetrikaError, dimen
 from analytics.keywords import KeywordConfig, load_keywords
 from analytics.sources.rabbit import RabbitClient, RabbitError
 from analytics.sources.semantics import SemanticsError
+from analytics.sources.unisender import UnisenderClient, UnisenderError
 from analytics.sources.semantics import download as semantics_download
 from analytics.sources.webmaster import WebmasterClient, WebmasterError, parse_search_history
 from analytics.sources.wordstat import WordstatClient, WordstatError
-from analytics.sync import import_crm_folder, sync_metrika, sync_rabbit, sync_webmaster, sync_wordstat
+from analytics.sync import import_crm_folder, sync_metrika, sync_rabbit, sync_unisender, sync_webmaster, sync_wordstat
 
 # Сколько последних дней перезагружать при плановом сборе: неделя и запас. Вебмастер отдаёт данные с задержкой
 # в несколько дней и уточняет их, поэтому у него окно больше.
-DEFAULT_DAYS = {"metrika": 14, "maps": 14, "webmaster": 30, "wordstat": 7, "rabbit": 14, "semantics": 7}
-SOURCE_ERRORS = (MetrikaError, WebmasterError, WordstatError, RabbitError, SemanticsError)
+DEFAULT_DAYS = {"metrika": 14, "maps": 14, "webmaster": 30, "wordstat": 7, "rabbit": 14, "semantics": 7, "unisender": 14}
+SOURCE_ERRORS = (MetrikaError, WebmasterError, WordstatError, RabbitError, SemanticsError, UnisenderError)
 WORDSTAT_SINCE = date(2023, 1, 1)  # три полных года — чтобы видеть сезонность
 # Метрика, Карты, Вебмастер и RabbitSeo — раз в неделю, в понедельник: прошедшая неделя закрыта целиком.
 # Аналитика запросов Вебмастера хранит 14 дней, так что пропустить можно не больше одного понедельника.
-WEEKLY_ON = {"metrika": 0, "maps": 0, "webmaster": 0, "rabbit": 0, "semantics": 0}
+WEEKLY_ON = {"metrika": 0, "maps": 0, "webmaster": 0, "rabbit": 0, "semantics": 0, "unisender": 0}
 # Вордстат обновляет данные раз в месяц: загружаем 5-го числа.
 MONTHLY_ON = {"wordstat": 5}
 # Отчёт за прошлый месяц — 6-го: Метрика закрыла месяц, Вордстат загружен накануне, Вебмастер догнал задержку.
@@ -108,9 +109,27 @@ def check_wordstat(settings: Settings) -> None:
     print(f"Пробный запрос «{phrase}»: " + "; ".join(f"{q} {c}" for q, c in top))
 
 
+def check_unisender(settings: Settings) -> None:
+    if not settings.unisender_api_key:
+        print("Не настроен (UNISENDER_API_KEY пуст) — пропускаю")
+        return
+    client = UnisenderClient(settings.unisender_api_key)
+    lists = client.lists()
+    print(f"Списков: {len(lists)} — " + ", ".join(f"{t} ({i})" for i, t in list(lists.items())[:5]))
+    campaigns = client.campaigns(date.today() - timedelta(days=30), date.today())
+    print(f"Рассылок за 30 дней: {len(campaigns)}")
+    if campaigns:
+        c = campaigns[-1]
+        st = client.stats(c.campaign_id)
+        when = f" ({c.start_time:%d.%m})" if c.start_time else ""
+        print(f"  последняя {c.campaign_id}{when}: доставлено {st.delivered}, открыли {st.read_unique},"
+              f" кликнули {st.clicked_unique}")
+
+
 def cmd_check(settings: Settings) -> int:
     ok = True
-    for title, check in (("Метрика", check_metrika), ("Вебмастер", check_webmaster), ("Вордстат", check_wordstat)):
+    for title, check in (("Метрика", check_metrika), ("Вебмастер", check_webmaster), ("Вордстат", check_wordstat),
+                         ("UniSender", check_unisender)):
         print(f"=== {title}")
         try:
             check(settings)
@@ -223,8 +242,12 @@ def _sync_semantics(conn: psycopg.Connection, settings: Settings, since: date, u
     return rows
 
 
+def _sync_unisender(conn: psycopg.Connection, settings: Settings, since: date, until: date) -> int:
+    return sync_unisender(conn, UnisenderClient(settings.unisender_api_key), since, until)
+
+
 SYNCS = {"metrika": _sync_metrika, "maps": _sync_maps, "webmaster": _sync_webmaster, "wordstat": _sync_wordstat,
-         "rabbit": _sync_rabbit, "semantics": _sync_semantics}
+         "rabbit": _sync_rabbit, "semantics": _sync_semantics, "unisender": _sync_unisender}
 
 # Что должно быть настроено, чтобы `sync` загружал источник; явный `sync-<источник>` объяснит, чего не хватает.
 CONFIGURED = {
@@ -234,6 +257,7 @@ CONFIGURED = {
     "wordstat": lambda s: bool(s.wordstat_folder_id),
     "rabbit": lambda s: bool(s.rabbit_guest_url),
     "semantics": lambda s: bool(s.semantics_url),
+    "unisender": lambda s: bool(s.unisender_api_key),
 }
 
 
@@ -409,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         ("sync-wordstat", "загрузить спрос из Вордстата по ключам wordstat.toml"),
         ("sync-rabbit", "загрузить позиции из RabbitSeo по гостевой ссылке"),
         ("sync-semantics", "скачать таблицу семантики по ссылке SEMANTICS_URL и загрузить её"),
+        ("sync-unisender", "загрузить рассылки UniSender, их статистику и базу (отпечатки почты и телефона)"),
     ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("--since", type=date.fromisoformat,

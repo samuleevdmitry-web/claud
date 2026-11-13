@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlencode
@@ -32,6 +33,7 @@ NAV = [
     ("traffic", "/traffic", "Трафик", "chart"),
     ("leads", "/leads", "Заявки и цели", "target"),
     ("sales", "/sales", "Продажи", "cart"),
+    ("email", "/email", "E-mail", "mail"),
     ("search", "/search", "Поиск Яндекса", "search"),
     ("keywords", "/keywords", "Ключи", "key"),
     ("pf", "/pf", "ПФ и риски", "shield"),
@@ -41,7 +43,19 @@ NAV = [
     ("status", "/status", "Данные", "db"),
 ]
 
-app = FastAPI(title="Аналитика", docs_url=None, redoc_url=None, openapi_url=None)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """При запуске дашборд обновляет схему базы: после обновления кода таблицы и представления нужны сразу,
+    не дожидаясь сборщика. Если базы ещё нет, страницы сами объяснят это."""
+    try:
+        with db.connect(load_settings().database_url) as conn:
+            db.apply_schema(conn)
+    except psycopg.OperationalError:
+        pass
+    yield
+
+
+app = FastAPI(title="Аналитика", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 def urlencode_pairs(pairs, **override) -> str:
@@ -122,6 +136,11 @@ def keywords_csv(request: Request, site: int | None = None) -> Response:
         body = pages.keywords_csv(conn, settings, f, dict(request.query_params)) if f else "\ufeff"
     return Response(body, media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": 'attachment; filename="keywords.csv"'})
+
+
+@app.get("/email", response_class=HTMLResponse)
+def email(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
+    return render(request, "email", pages.email_page, site, month, aud)
 
 
 @app.get("/search", response_class=HTMLResponse)

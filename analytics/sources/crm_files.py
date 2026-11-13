@@ -5,7 +5,8 @@
 - calls — «продажи с входящих звонков»: листы «Итог», «Все входящие лиды» и «Заказы со звонков».
 
 Колонки ищутся по названиям, поэтому порядок колонок и лишние колонки не мешают. Персональные данные
-(имена, телефоны, почта, названия клиентов, тексты обращений) не читаются вовсе.
+(имена, названия клиентов, тексты обращений) не читаются вовсе; почта и телефон сразу превращаются в отпечатки
+(analytics.privacy) — по ним лиды сводятся с базой рассылок, а сами адреса не сохраняются.
 """
 
 from __future__ import annotations
@@ -18,13 +19,16 @@ from pathlib import Path
 
 import openpyxl
 
+from analytics import privacy
+
 KINDS = {
     "forms": {"Совпадения", "Все лиды"},
     "calls": {"Итог", "Все входящие лиды"},
 }
 KIND_NAMES = {"forms": "лиды с сайта (формы)", "calls": "входящие звонки"}
 # Версия разбора: файлы, загруженные прежней версией, загружаются заново, если ещё лежат в папке.
-PARSER_VERSION = 2
+# 3 — отпечатки почты и телефона лидов для сведения с базой рассылок.
+PARSER_VERSION = 3
 
 
 class CrmFileError(Exception):
@@ -45,6 +49,8 @@ class FormLead:
     manager_1c: str | None = None
     order_nos: tuple[str, ...] = ()  # номера заказов 1С — чтобы не считать дважды заказ, пришедший и звонком
     category: str | None = None      # new | existing, если выгрузка различает; иначе неизвестно
+    email_hashes: tuple[str, ...] = ()  # отпечатки почты (analytics.privacy), сами адреса не хранятся
+    phone_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +62,7 @@ class CallLead:
     responsible: str | None
     line: str | None
     in_1c: bool
+    phone_hash: str | None = None  # отпечаток номера звонившего
 
 
 @dataclass(frozen=True)
@@ -219,7 +226,8 @@ def _parse_forms(sheets: dict[str, list[tuple]]) -> CrmFile:
                               _yes(r.get("Найден в 1С")) or lead_id in matched,
                               extra.get("orders", 0), extra.get("amount", _num(r.get("Сумма заказов в 1С"))),
                               extra.get("closed", 0.0), extra.get("first_order"), extra.get("match"),
-                              extra.get("manager_1c"), extra.get("order_nos", ()), extra.get("category")))
+                              extra.get("manager_1c"), extra.get("order_nos", ()), extra.get("category"),
+                              tuple(privacy.email_hashes(r.get("Email"))), privacy.phone_hash(r.get("Телефон"))))
     return CrmFile("forms", _month([lead.created_at for lead in leads if lead.created_at]), _summary(sheets["Совпадения"]),
                    form_leads=leads)
 
@@ -232,7 +240,7 @@ def _parse_calls(sheets: dict[str, list[tuple]]) -> CrmFile:
             continue
         leads.append(CallLead(lead_id, called, _text(r.get("Тип звонка")) or "—", _text(r.get("Стадия лида")) or "—",
                               _text(r.get("Ответственный Б24")), _text(r.get("Линия (куда звонили)")),
-                              _yes(r.get("Найден в 1С"))))
+                              _yes(r.get("Найден в 1С")), privacy.phone_hash(r.get("Телефон"))))
     orders = []
     for r in _table(sheets.get("Заказы со звонков", []), "Категория"):
         order_no = _text(r.get("Номер заказа"))

@@ -25,7 +25,7 @@ from analytics.sources.metrika import (
     fetch_traffic,
     grain_range,
 )
-from analytics.sources import crm_files, semantics
+from analytics.sources import crm_files, semantics, unisender
 from analytics.sources.rabbit import MAX_DAYS, RabbitClient, parse_positions
 from analytics.sources.wordstat import WordstatClient, WordstatError
 from analytics.sources.webmaster import (
@@ -303,3 +303,28 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
         log(f"  {path.name}: {crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
         out.append(parsed)
     return out
+
+
+def sync_unisender(conn: psycopg.Connection, client, since: date, until: date,
+                   log: Callable[[str], None] = print, refresh_days: int = 60, base: bool = True) -> int:
+    """Рассылки UniSender за период и их статистика, затем база контактов (отпечатки).
+
+    Открытия и клики по рассылке копятся неделями, поэтому статистика рассылок последних refresh_days дней
+    перечитывается при каждой загрузке.
+    """
+    since = min(since, until - timedelta(days=refresh_days))
+    lists = client.lists()
+    campaigns = client.campaigns(since, until)
+    stats = []
+    for c in campaigns:
+        try:
+            stats.append(client.stats(c.campaign_id))
+        except unisender.UnisenderError as exc:  # запланированная или черновая рассылка — статистики ещё нет
+            log(f"  рассылка {c.campaign_id}: {exc}")
+    loaded = db.save_unisender(conn, lists, campaigns, stats)
+    log(f"  unisender: списков {len(lists)}, рассылок {len(campaigns)} ({since}…{until}), статистика {len(stats)}")
+    if base:
+        contacts = client.export_contacts()
+        loaded += db.replace_email_base(conn, contacts)
+        log(f"  unisender: база — {len(contacts)} контактов (сохранены только отпечатки почты и телефона)")
+    return loaded

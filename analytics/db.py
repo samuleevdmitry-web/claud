@@ -29,6 +29,8 @@ def apply_schema(conn: psycopg.Connection) -> list[str]:
         key=lambda f: f.name,
     )
     with conn.transaction():
+        # схему применяют и сборщик, и дашборд при запуске — по очереди, а не одновременно
+        conn.execute("SELECT pg_advisory_xact_lock(4207731)")
         for f in files:
             conn.execute(f.read_text(encoding="utf-8"))
     return [f.name for f in files]
@@ -274,24 +276,27 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
             cur.execute("DELETE FROM crm_form_leads WHERE month = %s", (month,))
             cur.executemany(
                 "INSERT INTO crm_form_leads (lead_id, month, created_at, stage, in_1c, orders, amount, closed, first_order,"
-                " match, manager_1c, order_nos, category) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                " match, manager_1c, order_nos, category, email_hashes, phone_hash)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                 " ON CONFLICT (lead_id) DO UPDATE SET month = EXCLUDED.month, created_at = EXCLUDED.created_at,"
                 " stage = EXCLUDED.stage, in_1c = EXCLUDED.in_1c, orders = EXCLUDED.orders, amount = EXCLUDED.amount,"
                 " closed = EXCLUDED.closed, first_order = EXCLUDED.first_order, match = EXCLUDED.match,"
-                " manager_1c = EXCLUDED.manager_1c, order_nos = EXCLUDED.order_nos, category = EXCLUDED.category",
+                " manager_1c = EXCLUDED.manager_1c, order_nos = EXCLUDED.order_nos, category = EXCLUDED.category,"
+                " email_hashes = EXCLUDED.email_hashes, phone_hash = EXCLUDED.phone_hash",
                 [(x.lead_id, month, x.created_at, x.stage, x.in_1c, x.orders, x.amount, x.closed, x.first_order, x.match,
-                  x.manager_1c, list(x.order_nos), x.category) for x in parsed.form_leads],
+                  x.manager_1c, list(x.order_nos), x.category, list(x.email_hashes), x.phone_hash)
+                 for x in parsed.form_leads],
             )
         else:
             cur.execute("DELETE FROM crm_call_leads WHERE month = %s", (month,))
             cur.execute("DELETE FROM crm_call_orders WHERE month = %s", (month,))
             cur.executemany(
-                "INSERT INTO crm_call_leads (lead_id, month, called_at, call_type, stage, responsible, line, in_1c)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+                "INSERT INTO crm_call_leads (lead_id, month, called_at, call_type, stage, responsible, line, in_1c,"
+                " phone_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
                 " ON CONFLICT (lead_id) DO UPDATE SET month = EXCLUDED.month, called_at = EXCLUDED.called_at,"
                 " call_type = EXCLUDED.call_type, stage = EXCLUDED.stage, responsible = EXCLUDED.responsible,"
-                " line = EXCLUDED.line, in_1c = EXCLUDED.in_1c",
-                [(x.lead_id, month, x.called_at, x.call_type, x.stage, x.responsible, x.line, x.in_1c)
+                " line = EXCLUDED.line, in_1c = EXCLUDED.in_1c, phone_hash = EXCLUDED.phone_hash",
+                [(x.lead_id, month, x.called_at, x.call_type, x.stage, x.responsible, x.line, x.in_1c, x.phone_hash)
                  for x in parsed.call_leads],
             )
             cur.executemany(
@@ -331,3 +336,34 @@ def save_semantics(conn: psycopg.Connection, sha: str, file_name: str, sem, vers
             (sha, file_name, sem.rows, version),
         )
     return sem.rows
+
+
+def save_unisender(conn: psycopg.Connection, lists: dict[int, str], campaigns: list, stats: list) -> int:
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany("INSERT INTO unisender_lists (list_id, title) VALUES (%s, %s)"
+                        " ON CONFLICT (list_id) DO UPDATE SET title = EXCLUDED.title", list(lists.items()))
+        cur.executemany(
+            "INSERT INTO unisender_campaigns (campaign_id, start_time, status, list_id, message_id, subject)"
+            " VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (campaign_id) DO UPDATE SET start_time = EXCLUDED.start_time,"
+            " status = EXCLUDED.status, list_id = EXCLUDED.list_id, message_id = EXCLUDED.message_id,"
+            " subject = EXCLUDED.subject",
+            [(c.campaign_id, c.start_time, c.status, c.list_id, c.message_id, c.subject) for c in campaigns])
+        cur.executemany(
+            "INSERT INTO unisender_stats (campaign_id, total, sent, delivered, read_unique, read_all, clicked_unique,"
+            " clicked_all, unsubscribed, spam) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            " ON CONFLICT (campaign_id) DO UPDATE SET total = EXCLUDED.total, sent = EXCLUDED.sent,"
+            " delivered = EXCLUDED.delivered, read_unique = EXCLUDED.read_unique, read_all = EXCLUDED.read_all,"
+            " clicked_unique = EXCLUDED.clicked_unique, clicked_all = EXCLUDED.clicked_all,"
+            " unsubscribed = EXCLUDED.unsubscribed, spam = EXCLUDED.spam, updated_at = now()",
+            [(x.campaign_id, x.total, x.sent, x.delivered, x.read_unique, x.read_all, x.clicked_unique, x.clicked_all,
+              x.unsubscribed, x.spam) for x in stats])
+    return len(campaigns) + len(stats)
+
+
+def replace_email_base(conn: psycopg.Connection, contacts: list) -> int:
+    """База рассылок целиком: каждая выгрузка заменяет прежнюю."""
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM email_base")
+        cur.executemany("INSERT INTO email_base (email_hash, phone_hash, status, list_ids) VALUES (%s, %s, %s, %s)",
+                        [(c.email_hash, c.phone_hash, c.status, list(c.list_ids)) for c in contacts])
+    return len(contacts)

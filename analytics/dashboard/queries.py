@@ -661,3 +661,90 @@ def keyword_coverage(conn: psycopg.Connection, host_id: str, project: str, date_
                (SELECT count(*) FROM w) AS queries,
                (SELECT count(*) FROM w WHERE norm NOT IN (SELECT norm FROM keys)) AS queries_outside
     """, {"host": host_id, "project": project, "d1": date_from, "d2": date_to})
+
+
+# ----- E-mail: UniSender, Метрика и база -----
+
+# Метрика: utm_source=Unisender, utm_medium=email, utm_campaign=номер рассылки — ключ отчёта UTM «источник|канал|кампания».
+_EMAIL_UTM = "lower(split_part(t.dim_key, '|', 2)) = 'email' AND split_part(t.dim_key, '|', 3) ~ '^[0-9]+$'"
+
+
+def email_campaigns(conn: psycopg.Connection, counter_id: int, audience: str, month: date) -> list[dict]:
+    """Рассылки, отправленные в месяце: статистика UniSender и визиты и заявки по их меткам за всё время."""
+    return _all(conn, f"""
+        WITH m AS (
+            SELECT split_part(t.dim_key, '|', 3)::bigint AS campaign_id, sum(t.visits) AS visits,
+                   sum(k.leads) AS leads, round(avg(t.bounce_rate), 1) AS bounce_rate
+            FROM metrika_traffic t
+            JOIN metrika_kpi k USING (counter_id, audience, grain, period_start, slice, dim_key)
+            WHERE t.counter_id = %(c)s AND t.audience = %(a)s AND t.grain = 'day' AND t.slice = 'utm' AND {_EMAIL_UTM}
+            GROUP BY 1
+        )
+        SELECT c.campaign_id, c.start_time, c.subject, l.title AS list_title, s.sent, s.delivered, s.read_unique,
+               s.clicked_unique, s.unsubscribed, s.spam, coalesce(m.visits, 0) AS visits, coalesce(m.leads, 0) AS leads,
+               m.bounce_rate
+        FROM unisender_campaigns c
+        LEFT JOIN unisender_stats s USING (campaign_id)
+        LEFT JOIN unisender_lists l ON l.list_id = c.list_id
+        LEFT JOIN m USING (campaign_id)
+        WHERE c.start_time >= %(m)s AND c.start_time < (%(m)s::date + interval '1 month')
+        ORDER BY c.start_time
+    """, {"c": counter_id, "a": audience, "m": month})
+
+
+def email_trend(conn: psycopg.Connection, counter_id: int, audience: str) -> list[dict]:
+    """По месяцам: письма UniSender и визиты и заявки канала «Переходы с почтовых рассылок» в Метрике."""
+    return _all(conn, """
+        WITH u AS (
+            SELECT date_trunc('month', c.start_time)::date AS month, count(*) AS campaigns, sum(s.delivered) AS delivered,
+                   sum(s.read_unique) AS opened, sum(s.clicked_unique) AS clicked, sum(s.unsubscribed) AS unsubscribed
+            FROM unisender_campaigns c JOIN unisender_stats s USING (campaign_id)
+            GROUP BY 1
+        ), m AS (
+            SELECT period_start AS month, visits, leads FROM metrika_kpi
+            WHERE counter_id = %s AND audience = %s AND grain = 'month' AND slice = 'source' AND dim_key = 'email'
+        )
+        SELECT coalesce(u.month, m.month) AS month, u.campaigns, u.delivered, u.opened, u.clicked, u.unsubscribed,
+               m.visits, m.leads
+        FROM u FULL JOIN m USING (month)
+        ORDER BY 1
+    """, (counter_id, audience))
+
+
+def email_base(conn: psycopg.Connection) -> dict | None:
+    return _one(conn, """
+        SELECT count(*) AS contacts, count(*) FILTER (WHERE status = 'active') AS active,
+               count(email_hash) AS emails, count(phone_hash) AS phones, max(loaded_at) AS loaded_at
+        FROM email_base
+    """)
+
+
+def base_leads(conn: psycopg.Connection, month: date) -> dict:
+    """Лиды месяца, чья почта или телефон есть в базе рассылок: лиды с форм и входящие звонки."""
+    forms = _all(conn, f"""
+        SELECT f.*, EXISTS (
+            SELECT 1 FROM email_base b
+            WHERE b.email_hash = ANY (f.email_hashes) OR (f.phone_hash IS NOT NULL AND b.phone_hash = f.phone_hash)
+        ) AS in_base
+        FROM crm_form_leads f WHERE f.month = {MONTH}
+    """, (month,))
+    calls = _all(conn, f"""
+        SELECT c.*, (c.phone_hash IS NOT NULL AND EXISTS (SELECT 1 FROM email_base b WHERE b.phone_hash = c.phone_hash))
+                    AS in_base
+        FROM crm_call_leads c WHERE c.month = {MONTH}
+    """, (month,))
+    return {"forms": forms, "calls": calls}
+
+
+def email_utm_month(conn: psycopg.Connection, counter_id: int, audience: str, month: date) -> list[dict]:
+    """Рассылки по меткам Метрики за месяц: номер рассылки (utm_campaign), визиты, заявки — даже без UniSender."""
+    return _all(conn, f"""
+        SELECT split_part(t.dim_key, '|', 3)::bigint AS campaign_id, split_part(t.dim_key, '|', 1) AS source,
+               t.visits, k.leads, k.conversion_pct, t.bounce_rate, c.subject, c.start_time
+        FROM metrika_traffic t
+        JOIN metrika_kpi k USING (counter_id, audience, grain, period_start, slice, dim_key)
+        LEFT JOIN unisender_campaigns c ON c.campaign_id = split_part(t.dim_key, '|', 3)::bigint
+        WHERE t.counter_id = %s AND t.audience = %s AND t.grain = 'month' AND t.slice = 'utm'
+          AND t.period_start = {MONTH} AND {_EMAIL_UTM}
+        ORDER BY t.visits DESC
+    """, (counter_id, audience, month))

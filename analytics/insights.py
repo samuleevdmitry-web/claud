@@ -1126,3 +1126,123 @@ def crm_recommend(s: dict | None) -> list[Recommendation]:
             f"Нецелевых {fmt_pct(_share(nontarget, total))}: с форм и почты {s['forms_nontarget']}, звонков "
             f"{s['calls_nontarget']} — менеджеры тратят на них время."))
     return out
+
+
+# ----- E-mail: UniSender, Метрика, база -----
+
+UNSUB_RATE = 0.5      # % отписок от доставленных за рассылку — уже много
+DELIVERY_RATE = 95.0  # % доставленных от отправленных — ниже значит, в базе много мёртвых адресов
+EMAIL_VISITS_NO_LEADS = 30
+
+
+def email_stats(campaigns: list[dict], source_row: dict | None) -> dict:
+    def total(key):
+        return sum(c[key] or 0 for c in campaigns)
+
+    s = {k: total(k) for k in ("sent", "delivered", "read_unique", "clicked_unique", "unsubscribed", "spam",
+                               "visits", "leads")}
+    s["campaigns"] = len(campaigns)
+    s["delivery_rate"] = _share(s["delivered"], s["sent"])
+    s["open_rate"] = _share(s["read_unique"], s["delivered"])
+    s["click_rate"] = _share(s["clicked_unique"], s["delivered"])
+    s["ctor"] = _share(s["clicked_unique"], s["read_unique"])
+    s["unsub_rate"] = _share(s["unsubscribed"], s["delivered"])
+    s["channel_visits"] = (source_row or {}).get("visits")
+    s["channel_leads"] = (source_row or {}).get("leads")
+    return s
+
+
+def base_stats(forms: list[dict], calls: list[dict], orders: list[dict]) -> dict:
+    """Лиды из базы рассылок против остальных: конверсия в новых клиентов с заказом (только новые)."""
+    def part(rows):
+        target = [r for r in rows if r["stage"] not in NONTARGET_STAGES]
+        sold = [r for r in rows if r["in_1c"] and r.get("category") != "existing"]
+        return {"leads": len(rows), "target": len(target), "sold": len(sold),
+                "amount": float(sum(r["amount"] or 0 for r in sold)), "conv": _share(len(sold), len(target))}
+
+    in_base_calls = {r["lead_id"] for r in calls if r["in_base"]}
+    new_orders = [o for o in orders if o["category"] == "new"]
+    base_call_orders = [o for o in new_orders if o["lead_id"] in in_base_calls]
+    return {
+        "forms_base": part([r for r in forms if r["in_base"]]),
+        "forms_other": part([r for r in forms if not r["in_base"]]),
+        "calls_base": sum(1 for r in calls if r["in_base"]), "calls": len(calls),
+        "calls_base_sales": len({o["lead_id"] for o in base_call_orders}),
+        "calls_base_amount": float(sum(o["amount"] for o in base_call_orders)),
+    }
+
+
+def email_findings(s: dict, prev: dict | None, campaigns: list[dict], base: dict | None) -> list[Finding]:
+    out = []
+    if s["campaigns"]:
+        text = (f"Рассылок: {s['campaigns']}, доставлено {fmt_int(s['delivered'])} писем; открыли {fmt_pct(s['open_rate'])}, "
+                f"перешли по ссылкам {fmt_pct(s['click_rate'], 2)} (из открывших — {fmt_pct(s['ctor'])}).")
+        if prev and prev.get("campaigns"):
+            diff = s["open_rate"] - prev["open_rate"]
+            text += f" Открываемость {_signed(diff, 1, ' п.п.')} к прошлому месяцу."
+            out.append(Finding("plus" if diff >= 0 else "minus", text))
+        else:
+            out.append(Finding("plus", text))
+        if s["sent"] and s["delivery_rate"] < DELIVERY_RATE:
+            out.append(Finding("minus", f"Доставлено {fmt_pct(s['delivery_rate'])} отправленных: в базе много "
+                                        "недействительных адресов — это бьёт по репутации отправителя."))
+        if s["delivered"] and s["unsub_rate"] >= UNSUB_RATE:
+            out.append(Finding("minus", f"Отписались {fmt_int(s['unsubscribed'])} ({fmt_pct(s['unsub_rate'], 2)} доставленных) — "
+                                        "много: письма слишком частые или не про то."))
+        with_leads = sorted((c for c in campaigns if c["leads"]), key=lambda c: -c["leads"])
+        if with_leads:
+            out.append(Finding("plus", "Рассылки с заявками: " + "; ".join(
+                f"«{(c['subject'] or str(c['campaign_id']))[:50]}» — {plural(c['leads'], LEADS)}" for c in with_leads[:3]) + "."))
+        idle = [c for c in campaigns if c["visits"] >= EMAIL_VISITS_NO_LEADS and not c["leads"]]
+        if idle:
+            out.append(Finding("check", "Переходы есть, заявок нет: " + "; ".join(
+                f"«{(c['subject'] or str(c['campaign_id']))[:50]}» — {plural(c['visits'], VISITS)}" for c in idle[:3])
+                + ". Проверить страницы, куда ведут ссылки письма."))
+        lost = [c for c in campaigns if (c["clicked_unique"] or 0) >= 20 and not c["visits"]]
+        if lost:
+            out.append(Finding("question", f"По {plural(len(lost), ('рассылке', 'рассылкам', 'рассылкам'))} есть клики в UniSender, "
+                                           "но нет визитов с её меткой в Метрике: стоят ли UTM-метки на ссылках?"))
+    if s["channel_visits"] is not None:
+        out.append(Finding("plus" if s["channel_leads"] else "minus",
+                           f"Метрика, канал «почтовые рассылки»: {plural(s['channel_visits'], VISITS)}, "
+                           f"{plural(s['channel_leads'] or 0, LEADS)}."))
+    if base and base["forms_base"]["leads"]:
+        b, o = base["forms_base"], base["forms_other"]
+        out.append(Finding("question" if b["conv"] <= o["conv"] else "plus",
+                           f"Из лидов с сайта {b['leads']} — подписчики базы рассылок; заказ в 1С сделали {b['sold']} "
+                           f"({fmt_pct(b['conv'])} целевых) против {fmt_pct(o['conv'])} у остальных."))
+    return out
+
+
+def email_recommend(s: dict | None, campaigns: list[dict], base: dict | None) -> list[Recommendation]:
+    if not s or not s["campaigns"]:
+        return []
+    out = []
+    if s["sent"] and s["delivery_rate"] < DELIVERY_RATE:
+        out.append(Recommendation(
+            2, "E-mail", "Почистить базу рассылок",
+            "Удалить или отключить адреса с недоставкой, перед массовой рассылкой проверять базу валидатором.",
+            f"Доставлено {fmt_pct(s['delivery_rate'])} отправленных писем."))
+    if s["delivered"] and s["unsub_rate"] >= UNSUB_RATE:
+        out.append(Recommendation(
+            2, "E-mail", "Снизить отписки",
+            "Разделить базу по направлениям (ткани, ПВХ, фурнитура) и слать каждому своё; неактивным за 3 месяца — "
+            "реже и с отдельным предложением.",
+            f"Отписались {fmt_int(s['unsubscribed'])} ({fmt_pct(s['unsub_rate'], 2)} доставленных)."))
+    idle = [c for c in campaigns if c["visits"] >= EMAIL_VISITS_NO_LEADS and not c["leads"]]
+    if idle:
+        out.append(Recommendation(
+            3, "E-mail", "Доработать страницы, куда ведут письма",
+            "Ссылка из письма должна вести сразу на товар или подборку из письма с ценой и кнопкой заявки, а не на главную.",
+            "; ".join(f"«{(c['subject'] or str(c['campaign_id']))[:40]}» — {plural(c['visits'], VISITS)} без заявок"
+                      for c in idle[:3]) + "."))
+    if base:
+        b, o = base["forms_base"], base["forms_other"]
+        if b["target"] >= 5 and b["conv"] >= 1.5 * max(o["conv"], 0.1):
+            out.append(Recommendation(
+                3, "E-mail", "Чаще работать с подписчиками",
+                "Подписчики покупают лучше остальных: регулярная рассылка с новинками и остатками, отдельный сегмент "
+                "«оставили заявку, но не купили».",
+                f"Целевые лиды из базы рассылок становятся клиентами в {fmt_pct(b['conv'])} случаев, остальные — "
+                f"в {fmt_pct(o['conv'])}."))
+    return out

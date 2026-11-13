@@ -40,7 +40,8 @@ STREAM_NAMES = {"search": "статистика запросов", "query_analyt
                 "pages_in_search": "страницы в поиске", "crawl": "обход роботом", "sqi": "ИКС"}
 SOURCE_NAMES = {"metrika": "Метрика: сайты", "maps": "Метрика: Карты", "webmaster": "Вебмастер",
                 "wordstat": "Вордстат", "rabbit": "RabbitSeo", "report": "Отчёт за месяц",
-                "metrika_backfill": "Метрика: догрузка новых отчётов", "semantics": "Семантика"}
+                "metrika_backfill": "Метрика: догрузка новых отчётов", "semantics": "Семантика",
+                "unisender": "UniSender"}
 
 # Вкладки раздела «Трафик»: отчёты Метрики по группам, как в её интерфейсе.
 TRAFFIC_TABS = {
@@ -696,7 +697,10 @@ def report_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
     sales = sales_page(conn, settings, f)
     if sales["stats"]:
         kpi.insert(1, ("Продажи: новые клиенты (Битрикс24 и 1С)", sales["tiles"]))
-    sections += [("Продажи (Битрикс24 и 1С)", sales.get("summary")),
+    email = email_page(conn, settings, f)
+    if email["stats"]["campaigns"]:
+        kpi.append(("E-mail (UniSender и Метрика)", email["tiles"]))
+    sections += [("Продажи (Битрикс24 и 1С)", sales.get("summary")), ("E-mail", email.get("summary")),
                  ("Заявки и цели", leads(conn, settings, f)["summary"]), ("Поиск Яндекса", search.get("summary")),
                  ("Спрос", demand and demand["summary"]), ("Карты", maps["summary"])]
     sections = [(title, s) for title, s in sections if s]
@@ -754,7 +758,10 @@ def recommendations(conn: psycopg.Connection, settings: Settings, f: Filters, pf
                      "country")},
     }
     sales = sales_page(conn, settings, f)  # выгрузки CRM — по основному сайту
-    return sorted(ins.recommend(data) + ins.crm_recommend(sales["stats"]), key=lambda r: r.priority)
+    email = email_data(conn, settings, f)
+    recs = ins.recommend(data) + ins.crm_recommend(sales["stats"]) + ins.email_recommend(
+        email["stats"], email["campaigns"], email["base"])
+    return sorted(recs, key=lambda r: r.priority)
 
 
 def recommendations_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
@@ -940,3 +947,57 @@ def keyword_detail(conn: psycopg.Connection, settings: Settings, f: Filters, par
     return {"norm": norm, "kf": kf, "daily": daily, "charts": charts,
             "positions": q.keyword_positions(conn, norm, project), "days": days,
             "back": {k: v for k, v in params.items() if k != "k"}}
+
+
+# ----- E-mail -----
+
+def email_data(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
+    campaigns = q.email_campaigns(conn, f.counter_id, f.audience, f.month)
+    source = next((r for r in q.slice_rows(conn, f.counter_id, f.audience, "source", f.month) if r["dim_key"] == "email"),
+                  None)
+    prev_campaigns = q.email_campaigns(conn, f.counter_id, f.audience, f.prev)
+    s = ins.email_stats(campaigns, source)
+    prev = ins.email_stats(prev_campaigns, None) if prev_campaigns else None
+    primary = not settings.metrika_counters or f.counter_id == settings.metrika_counters[0]
+    base_info = q.email_base(conn) if primary else None
+    base = None
+    if base_info and base_info["contacts"]:
+        leads = q.base_leads(conn, f.month)
+        if leads["forms"] or leads["calls"]:
+            base = ins.base_stats(leads["forms"], leads["calls"], q.crm_call_orders(conn, f.month))
+    return {"stats": s, "prev": prev, "campaigns": campaigns, "base_info": base_info, "base": base}
+
+
+def email_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
+    d = email_data(conn, settings, f)
+    s, prev = d["stats"], d["prev"]
+    trend, _ = trend_months([{**r, "days_with_data": 1, "days_in_month": 1} for r in q.email_trend(conn, f.counter_id, f.audience)],
+                            f.today.replace(day=1), coverage=False)
+    labels = [month_short(r["month"]) for r in trend]
+    charts = {}
+    if any(r.get("delivered") for r in trend):
+        charts["email_letters"] = chart("bar", labels, [("Доставлено", [r.get("delivered") for r in trend]),
+                                                        ("Открыли", [r.get("opened") for r in trend]),
+                                                        ("Перешли", [r.get("clicked") for r in trend])], selected=month_short(f.month))
+    if any(r.get("visits") for r in trend):
+        charts["email_metrika"] = chart("line", labels, [("Визиты с рассылок", [r.get("visits") for r in trend]),
+                                                         ("Заявки", [r.get("leads") for r in trend])], selected=month_short(f.month))
+
+    def tile(label, value, key, kind="pct", note=""):
+        was = prev.get(key) if prev else None
+        return Tile(label, value, delta(s[key], was, kind) if was is not None else None, note)
+
+    metrika_tile = Tile("Визиты с рассылок (Метрика)", fmt_int(s["channel_visits"]), None,
+                        f"заявок {fmt_int(s['channel_leads'])}" if s["channel_visits"] is not None else "")
+    tiles = [metrika_tile] if not s["campaigns"] else [
+        tile("Рассылок", fmt_int(s["campaigns"]), "campaigns", "pct", f"доставлено {fmt_int(s['delivered'])} писем"),
+        tile("Открываемость", fmt_pct(s["open_rate"]), "open_rate", "pp", f"открыли {fmt_int(s['read_unique'])}"),
+        tile("Переходы по ссылкам", fmt_pct(s["click_rate"], 2), "click_rate", "pp",
+             f"{fmt_int(s['clicked_unique'])} человек, из открывших {fmt_pct(s['ctor'])}"),
+        tile("Отписки", fmt_pct(s["unsub_rate"], 2), "unsub_rate", "pp", f"{fmt_int(s['unsubscribed'])} человек"),
+        metrika_tile,
+    ]
+    findings = ins.email_findings(s, prev, d["campaigns"], d["base"])
+    return {**d, "tiles": tiles, "charts": charts, "summary": ins.summarize(findings), "findings": findings,
+            "utm": q.email_utm_month(conn, f.counter_id, f.audience, f.month),
+            "configured": bool(settings.unisender_api_key) or bool(d["campaigns"])}

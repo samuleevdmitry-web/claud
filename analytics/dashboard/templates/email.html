@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% from "macros.html" import tiles as show_tiles, chart_block, insights %}
+{% block title %}E-mail{% endblock %}
+{% block content %}
+{% if not configured %}
+  <div class="card">
+    <div class="chart-title">UniSender не подключён</div>
+    <p>Добавьте в <code>.env</code> строку <code>UNISENDER_API_KEY=</code> с ключом API (UniSender → «Настройки аккаунта» →
+      «Интеграции и API») и перезапустите сборщик. Рассылки, их статистика и база подтянутся при следующей загрузке
+      (по понедельникам) или сразу: <code>docker compose exec collector python -m analytics sync-unisender</code>.</p>
+  </div>
+{% endif %}
+{{ show_tiles(tiles) }}
+{{ insights(summary) }}
+<section class="grid-2">
+  {{ chart_block(charts, 'email_letters', 'Письма по месяцам: доставлено, открыли, перешли (UniSender)') }}
+  {{ chart_block(charts, 'email_metrika', 'Визиты и заявки с рассылок по месяцам (Метрика)') }}
+</section>
+
+{% if configured %}
+<div class="card table-card">
+  <div class="chart-title">Рассылки за {{ f.month|month|lower }}</div>
+  <p class="hint">Открыли и перешли — от доставленных, уникальные контакты (UniSender). Визиты и заявки — по меткам письма
+    (utm_campaign = номер рассылки) за всё время после отправки (Метрика).</p>
+  {% if campaigns %}
+  <table>
+    <thead><tr><th>Дата</th><th>Тема</th><th>Список</th><th class="num">Доставлено</th><th class="num">Открыли</th>
+      <th class="num">Перешли</th><th class="num">Отписки</th><th class="num">Визиты</th><th class="num">Заявки</th></tr></thead>
+    <tbody>{% for c in campaigns %}
+      <tr><td>{{ c.start_time.strftime('%d.%m') if c.start_time else '—' }}</td>
+          <td class="label" title="{{ c.subject or '' }}">{{ c.subject or c.campaign_id }}</td>
+          <td class="muted">{{ c.list_title or '—' }}</td>
+          <td class="num">{{ c.delivered|int if c.delivered is not none else '—' }}</td>
+          <td class="num">{% if c.delivered %}{{ (100.0 * c.read_unique / c.delivered)|pct }}{% else %}—{% endif %}</td>
+          <td class="num">{% if c.delivered %}{{ (100.0 * c.clicked_unique / c.delivered)|pct(2) }}{% else %}—{% endif %}</td>
+          <td class="num">{{ c.unsubscribed|int if c.unsubscribed is not none else '—' }}</td>
+          <td class="num">{{ c.visits|int }}</td><td class="num">{{ c.leads|int }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted">Рассылок в этом месяце нет.</p>{% endif %}
+</div>
+{% endif %}
+
+{% if utm %}
+<div class="card table-card">
+  <div class="chart-title">Рассылки по меткам Метрики за {{ f.month|month|lower }}</div>
+  <p class="hint">Визиты и заявки в этом месяце по ссылкам из писем (utm_medium=email, utm_campaign = номер рассылки
+    UniSender), включая рассылки прошлых месяцев.</p>
+  <table>
+    <thead><tr><th>Рассылка</th><th>Отправлена</th><th class="num">Визиты</th><th class="num">Отказы</th>
+      <th class="num">Заявки</th><th class="num">Конверсия</th></tr></thead>
+    <tbody>{% for r in utm[:30] %}
+      <tr><td class="label" title="{{ r.subject or '' }}">{{ r.subject or ('№ ' ~ r.campaign_id) }}</td>
+          <td class="muted">{{ r.start_time.strftime('%d.%m.%Y') if r.start_time else '—' }}</td>
+          <td class="num">{{ r.visits|int }}</td><td class="num">{{ r.bounce_rate|pct }}</td>
+          <td class="num">{{ r.leads|int }}</td><td class="num">{{ r.conversion_pct|pct(2) }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% if utm|length > 30 %}<p class="note">Показаны 30 рассылок с наибольшим числом визитов из {{ utm|length }}.</p>{% endif %}
+</div>
+{% endif %}
+
+<h2>База рассылок и продажи</h2>
+<div class="card">
+  {% if base_info and base_info.contacts %}
+  <p>В базе UniSender {{ base_info.contacts|int }} контактов, активных {{ base_info.active|int }}
+    (с почтой {{ base_info.emails|int }}, с телефоном {{ base_info.phones|int }}); выгружена {{ base_info.loaded_at|local }}.</p>
+  {% if base %}
+  <table>
+    <thead><tr><th>Лиды с сайта (формы и почта)</th><th class="num">Лидов</th><th class="num">Целевых</th>
+      <th class="num">Новых клиентов с заказом</th><th class="num">Конверсия целевых</th><th class="num">Сумма, ₽</th></tr></thead>
+    <tbody>
+      {% for label, p in (('Из базы рассылок', base.forms_base), ('Остальные', base.forms_other)) %}
+      <tr><td>{{ label }}</td><td class="num">{{ p.leads|int }}</td><td class="num">{{ p.target|int }}</td>
+          <td class="num">{{ p.sold|int }}</td><td class="num">{{ p.conv|pct(1) }}</td><td class="num">{{ p.amount|int }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="note">Входящих звонков с номеров из базы — {{ base.calls_base|int }} из {{ base.calls|int }};
+    новых продаж с них — {{ base.calls_base_sales|int }} на {{ base.calls_base_amount|int }} ₽.</p>
+  {% else %}<p class="muted">Выгрузок Битрикс24 за этот месяц нет — сводить базу не с чем.</p>{% endif %}
+  <p class="note">Лиды сравниваются с базой по отпечаткам почты и телефона: сами адреса и номера в базе дашборда не хранятся.
+    «Из базы» — адрес лида есть в базе сейчас; когда он туда попал — до заявки или после, — выгрузка UniSender не говорит.</p>
+  {% else %}
+  <p class="muted">База рассылок ещё не выгружена: она загружается вместе с рассылками, когда задан ключ UniSender.</p>
+  {% endif %}
+</div>
+{% endblock %}
