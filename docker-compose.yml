@@ -28,6 +28,7 @@ services:
     volumes:
       - ./wordstat.toml:/app/wordstat.toml:ro  # ключи Вордстата: правки подхватываются без пересборки
       - ./reports:/app/reports  # ежемесячные отчёты: папка reports рядом с этим файлом
+      - ./imports:/app/imports  # выгрузки из Битрикс24 и 1С (Excel) — сборщик загружает их сам
     depends_on:
       db:
         condition: service_healthy

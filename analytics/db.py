@@ -255,3 +255,58 @@ def mark_backfilled(conn: psycopg.Connection, counter_id: int, reports: set[str]
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany("INSERT INTO report_backfills (counter_id, report) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                         [(counter_id, r) for r in sorted(reports)])
+
+
+def imported_files(conn: psycopg.Connection) -> set[str]:
+    return {sha for (sha,) in conn.execute("SELECT sha256 FROM crm_imports")}
+
+
+def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed) -> int:
+    """Заменяет данные месяца этого вида выгрузки содержимым файла; повторная выгрузка за месяц — новая версия."""
+    month, kind = parsed.month, parsed.kind
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM crm_summary WHERE month = %s AND kind = %s", (month, kind))
+        cur.executemany("INSERT INTO crm_summary (month, kind, metric, value, note) VALUES (%s, %s, %s, %s, %s)"
+                        " ON CONFLICT DO NOTHING", [(month, kind, m, v, n) for m, v, n in parsed.summary])
+        if kind == "forms":
+            cur.execute("DELETE FROM crm_form_leads WHERE month = %s", (month,))
+            cur.executemany(
+                "INSERT INTO crm_form_leads (lead_id, month, created_at, stage, in_1c, orders, amount, closed, first_order,"
+                " match, manager_1c) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                " ON CONFLICT (lead_id) DO UPDATE SET month = EXCLUDED.month, created_at = EXCLUDED.created_at,"
+                " stage = EXCLUDED.stage, in_1c = EXCLUDED.in_1c, orders = EXCLUDED.orders, amount = EXCLUDED.amount,"
+                " closed = EXCLUDED.closed, first_order = EXCLUDED.first_order, match = EXCLUDED.match,"
+                " manager_1c = EXCLUDED.manager_1c",
+                [(x.lead_id, month, x.created_at, x.stage, x.in_1c, x.orders, x.amount, x.closed, x.first_order, x.match,
+                  x.manager_1c) for x in parsed.form_leads],
+            )
+        else:
+            cur.execute("DELETE FROM crm_call_leads WHERE month = %s", (month,))
+            cur.execute("DELETE FROM crm_call_orders WHERE month = %s", (month,))
+            cur.executemany(
+                "INSERT INTO crm_call_leads (lead_id, month, called_at, call_type, stage, responsible, line, in_1c)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+                " ON CONFLICT (lead_id) DO UPDATE SET month = EXCLUDED.month, called_at = EXCLUDED.called_at,"
+                " call_type = EXCLUDED.call_type, stage = EXCLUDED.stage, responsible = EXCLUDED.responsible,"
+                " line = EXCLUDED.line, in_1c = EXCLUDED.in_1c",
+                [(x.lead_id, month, x.called_at, x.call_type, x.stage, x.responsible, x.line, x.in_1c)
+                 for x in parsed.call_leads],
+            )
+            cur.executemany(
+                "INSERT INTO crm_call_orders (month, order_no, category, order_date, amount, status_1c, lead_id, manager_1c)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                [(month, x.order_no, x.category, x.order_date, x.amount, x.status_1c, x.lead_id, x.manager_1c)
+                 for x in parsed.call_orders],
+            )
+        cur.execute(
+            "INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded) VALUES (%s, %s, %s, %s, %s)"
+            " ON CONFLICT (sha256) DO UPDATE SET imported_at = now()",
+            (sha, file_name, kind, month, parsed.rows),
+        )
+    return parsed.rows
+
+
+def skip_crm_file(conn: psycopg.Connection, sha: str, file_name: str) -> None:
+    """Файл не распознан: запоминаем, чтобы не разбирать его снова при каждой проверке."""
+    conn.execute("INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded) VALUES (%s, %s, 'unknown',"
+                 " '1970-01-01', 0) ON CONFLICT DO NOTHING", (sha, file_name))

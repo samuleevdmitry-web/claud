@@ -46,7 +46,7 @@ def month_data(aug_direct_visits=40):
 def test_schema_is_idempotent(conn):
     assert db.apply_schema(conn) == [
         "001_metrika.sql", "002_metrika_views.sql", "003_webmaster.sql", "004_webmaster_views.sql", "005_maps.sql",
-        "006_dashboard.sql", "007_wordstat.sql", "008_rabbit.sql", "009_metrika_pages.sql",
+        "006_dashboard.sql", "007_wordstat.sql", "008_rabbit.sql", "009_metrika_pages.sql", "010_crm.sql",
     ]
 
 

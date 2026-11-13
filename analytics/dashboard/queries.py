@@ -496,3 +496,34 @@ def products_total(conn: psycopg.Connection, counter_id: int, month: date) -> di
         SELECT sum(basket_sum) AS basket_sum, sum(purchased_sum) AS purchased_sum, count(*) AS products
         FROM metrika_products WHERE counter_id = %s AND month = {MONTH}
     """, (counter_id, month))
+
+
+# ----- Продажи: выгрузки Битрикс24 и 1С -----
+
+def crm_form_leads(conn: psycopg.Connection, month: date) -> list[dict]:
+    return _all(conn, f"SELECT * FROM crm_form_leads WHERE month = {MONTH}", (month,))
+
+
+def crm_call_leads(conn: psycopg.Connection, month: date) -> list[dict]:
+    return _all(conn, f"SELECT * FROM crm_call_leads WHERE month = {MONTH}", (month,))
+
+
+def crm_call_orders(conn: psycopg.Connection, month: date) -> list[dict]:
+    return _all(conn, f"SELECT * FROM crm_call_orders WHERE month = {MONTH} ORDER BY order_date, order_no", (month,))
+
+
+def crm_files(conn: psycopg.Connection, month: date) -> list[dict]:
+    return _all(conn, f"""
+        SELECT kind, file_name, rows_loaded, imported_at FROM crm_imports WHERE month = {MONTH} ORDER BY imported_at DESC
+    """, (month,))
+
+
+def goal_visits_by_type(conn: psycopg.Connection, counter_id: int, audience: str, month: date) -> dict[str, int]:
+    """Визиты с целью по типам целей Метрики (phone, email, contact_data_sent…) за месяц."""
+    rows = _all(conn, f"""
+        SELECT g.type, sum(s.visits) AS visits FROM metrika_goal_stats s
+        JOIN metrika_goals g USING (counter_id, goal_id)
+        WHERE s.counter_id = %s AND s.audience = %s AND s.grain = 'month' AND s.slice = 'total' AND s.period_start = {MONTH}
+        GROUP BY g.type
+    """, (counter_id, audience, month))
+    return {r["type"]: int(r["visits"] or 0) for r in rows}

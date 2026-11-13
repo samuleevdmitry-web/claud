@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from dataclasses import astuple
 from datetime import date, timedelta
+from pathlib import Path
 
 import psycopg
 
@@ -24,6 +25,7 @@ from analytics.sources.metrika import (
     fetch_traffic,
     grain_range,
 )
+from analytics.sources import crm_files
 from analytics.sources.rabbit import MAX_DAYS, RabbitClient, parse_positions
 from analytics.sources.wordstat import WordstatClient, WordstatError
 from analytics.sources.webmaster import (
@@ -267,3 +269,29 @@ def sync_rabbit(conn: psycopg.Connection, client: RabbitClient, until: date,
     log(f"  {project}: {len({r.query for r in rows})} запросов, съёмов {len(days)}"
         + (f" ({days[0]}…{days[-1]})" if days else ""))
     return db.replace_rabbit_positions(conn, project, date_from, until, rows)
+
+
+def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], None] = print) -> list:
+    """Загружает из папки новые выгрузки Битрикс24 и 1С (*.xlsx); уже загруженные (по содержимому) пропускает.
+
+    Возвращает разобранные файлы — по ним видно, за какие месяцы появились данные.
+    """
+    if not folder.is_dir():
+        return []
+    done, out = db.imported_files(conn), []
+    for path in sorted(folder.glob("*.xlsx")):
+        if path.name.startswith("~$"):
+            continue  # временный файл открытого Excel
+        sha = crm_files.sha256(path)
+        if sha in done:
+            continue
+        try:
+            parsed = crm_files.parse_file(path)
+        except (crm_files.CrmFileError, ValueError, KeyError, OSError) as exc:
+            log(f"  {path.name}: не загружен — {exc}")
+            db.skip_crm_file(conn, sha, path.name)
+            continue
+        rows = db.save_crm_file(conn, sha, path.name, parsed)
+        log(f"  {path.name}: {crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
+        out.append(parsed)
+    return out

@@ -19,7 +19,7 @@ from analytics.keywords import KeywordConfig, load_keywords
 from analytics.sources.rabbit import RabbitClient, RabbitError
 from analytics.sources.webmaster import WebmasterClient, WebmasterError, parse_search_history
 from analytics.sources.wordstat import WordstatClient, WordstatError
-from analytics.sync import sync_metrika, sync_rabbit, sync_webmaster, sync_wordstat
+from analytics.sync import import_crm_folder, sync_metrika, sync_rabbit, sync_webmaster, sync_wordstat
 
 # Сколько последних дней перезагружать при плановом сборе: неделя и запас. Вебмастер отдаёт данные с задержкой
 # в несколько дней и уточняет их, поэтому у него окно больше.
@@ -291,6 +291,20 @@ def make_reports(settings: Settings, month: date, today: date) -> list[Path]:
     return saved
 
 
+def import_crm(settings: Settings, today: date) -> list:
+    """Новые выгрузки Битрикс24 и 1С из папки imports. Если пришли за уже закрытый месяц, отчёт за него пересобирается."""
+    with db.connect(settings.database_url) as conn:
+        db.apply_schema(conn)
+        parsed = import_crm_folder(conn, Path(settings.imports_dir))
+    current = today.replace(day=1)
+    for month in sorted({p.month for p in parsed if p.month < current}):
+        reports = Path(settings.reports_dir)
+        if any(reports.glob(f"{month:%Y-%m} *.html")):  # отчёт за месяц уже был — обновить с продажами
+            print(f"=== отчёт за {month:%m.%Y} пересобирается: пришли выгрузки CRM")
+            make_reports(settings, month, today)
+    return parsed
+
+
 def previous_month(today: date) -> date:
     return (today.replace(day=1) - timedelta(days=1)).replace(day=1)
 
@@ -318,6 +332,10 @@ def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
                 runs[source]["last_ok"] = None
             now = datetime.now(TZ)
             sources = [name for name in SYNCS if CONFIGURED[name](settings)]
+            try:
+                import_crm(settings, now.date())
+            except Exception as exc:
+                print(f"{datetime.now(TZ):%d.%m %H:%M} ошибка (выгрузки CRM): {exc}", file=sys.stderr)
             done = set()
 
             def sync(source: str, since: date) -> None:
@@ -364,6 +382,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("check", help="проверить доступ к Метрике и Вебмастеру")
     sub.add_parser("init-db", help="создать или обновить таблицы и представления")
     sub.add_parser("schedule", help="сбор по расписанию в бесконечном цикле (для Docker)")
+    sub.add_parser("import-crm", help="загрузить новые выгрузки Битрикс24 и 1С (*.xlsx) из папки imports")
     rep = sub.add_parser("report", help="сохранить отчёт за месяц в папку отчётов (по умолчанию — за прошлый месяц)")
     rep.add_argument("--month", help="месяц ГГГГ-ММ")
     for name, help_ in (
@@ -391,6 +410,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "schedule":
             cmd_schedule(settings)
+        if args.command == "import-crm":
+            parsed = import_crm(settings, date.today())
+            print(f"Загружено файлов: {len(parsed)}" if parsed else f"Новых файлов в {settings.imports_dir} нет")
+            return 0
         if args.command == "report":
             month = date.fromisoformat(args.month + "-01") if args.month else previous_month(date.today())
             return 0 if make_reports(settings, month, date.today()) else 1

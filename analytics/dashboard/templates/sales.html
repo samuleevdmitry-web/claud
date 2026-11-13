@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "macros.html" import tiles as show_tiles, insights %}
+{% block title %}Продажи{% endblock %}
+
+{% macro calls_table(title, rows, hint, label) %}
+  <div class="card table-card">
+    <div class="chart-title">{{ title }}</div>
+    <p class="hint">{{ hint }}</p>
+    <table>
+      <thead><tr><th>{{ label }}</th><th class="num">Звонков</th><th class="num">Пропущено</th><th class="num">Не разобрано</th>
+        <th class="num">В сделку</th><th class="num">Нецелевых</th></tr></thead>
+      <tbody>{% for r in rows %}
+        <tr><td class="label" title="{{ r.name }}">{{ r.name }}</td><td class="num">{{ r.leads|int }}</td>
+            <td class="num">{{ r.missed|int }}</td><td class="num{% if r.unprocessed and r.unprocessed * 2 >= r.leads %} bad{% endif %}">{{ r.unprocessed|int }}</td>
+            <td class="num">{{ r.to_deal|int }}</td><td class="num muted">{{ r.nontarget|int }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+{% endmacro %}
+
+{% block content %}
+{% if not stats and not primary %}
+  <div class="card muted">Выгрузки Битрикс24 и 1С относятся к основному сайту — {{ f.sites[0].site or f.sites[0].name }}.</div>
+{% elif not stats %}
+  <div class="card">
+    <div class="chart-title">Выгрузок из Битрикс24 и 1С за {{ f.month|month|lower }} нет</div>
+    <p>Раз в месяц положите сводки в папку <code>{{ folder }}</code> рядом с <code>docker-compose.yml</code>:
+      «лиды с сайта в Б24 против заказов в 1С» и «продажи с входящих звонков» (Excel). Сборщик загрузит их сам в течение
+      15 минут, а отчёт за месяц пересоберётся. Имена, телефоны и почта в базу не попадают.</p>
+  </div>
+{% else %}
+  {{ show_tiles(tiles) }}
+  {{ insights(summary) }}
+
+  <h2>От заявки до заказа</h2>
+  <div class="card table-card">
+    <p class="hint">Метрика считает визиты с заявкой на сайте, Битрикс24 — лиды (формы, почта, звонки из любых источников),
+      1С — заказы клиентов, нашедшихся по почте и телефону. Это разные счётчики, поэтому числа не обязаны сходиться,
+      но сильный разрыв — повод проверить, все ли заявки доходят до CRM.</p>
+    <table>
+      <thead><tr><th>Шаг</th><th class="num">Число</th><th>Пояснение</th></tr></thead>
+      <tbody>{% for label, value, note in funnel %}
+        <tr><td{% if label.startswith('  ') %} class="indent"{% endif %}>{{ label.strip() }}</td>
+            <td class="num">{{ value|int if value is not none else '—' }}</td><td class="muted">{{ note or '' }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+
+  {% if managers %}
+  <h2>Входящие звонки</h2>
+  <div class="grid-2">
+    {{ calls_table('По ответственным', managers, 'Сколько звонков на каждом и сколько не разобрано: красным — когда без стадии половина и больше.', 'Ответственный') }}
+    {{ calls_table('По линиям', lines, 'Номер или линия, куда звонили: где больше всего пропущенных.', 'Линия') }}
+  </div>
+  {% endif %}
+
+  {% if orders %}
+  <div class="card table-card">
+    <div class="chart-title">Заказы 1С после звонков</div>
+    <p class="hint">Новая продажа — клиент без заказов до звонка; действующий клиент заказывал и раньше, поэтому продажу
+      звонку не приписываем.</p>
+    <table>
+      <thead><tr><th>Заказ</th><th>Дата</th><th class="num">Сумма, ₽</th><th>Статус 1С</th><th>Тип</th><th>Менеджер</th></tr></thead>
+      <tbody>{% for o in orders %}
+        <tr><td>{{ o.order_no }}</td><td>{{ o.order_date.strftime('%d.%m') if o.order_date else '—' }}</td>
+            <td class="num">{{ o.amount|int }}</td><td>{{ o.status_1c or '—' }}</td>
+            <td>{{ 'новая продажа' if o.category == 'new' else 'действующий клиент' }}</td><td class="muted">{{ o.manager_1c or '—' }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+  {% endif %}
+  <p class="note">Источник: {% for x in files %}{{ x.file_name }} ({{ x.rows_loaded }} строк){% if not loop.last %}; {% endif %}{% endfor %}.
+    Нецелевые, не разобранные и «в сделку» — по стадиям лидов Битрикс24.</p>
+{% endif %}
+{% endblock %}

@@ -908,3 +908,129 @@ def recommend(d: dict) -> list[Recommendation]:
             + ", ".join(f"{r['dim_label']} {fmt_int(r['visits'])}" for r in sorted(foreign, key=lambda r: -r['visits'])[:3])
             + "."))
     return sorted(out, key=lambda r: r.priority)
+
+
+# ----- Продажи: Битрикс24 и 1С -----
+
+# Стадии лидов Битрикс24 у Олдос: нецелевые, ещё не разобранные и переданные в сделку.
+NONTARGET_STAGES = {"Нецелевое обращение"}
+UNPROCESSED_STAGES = {"Не обработан", "Заявки с сайта", "Новый", "Новая заявка"}
+TO_DEAL_STAGES = {"Перевести в сделку"}
+CLOSED_STATUSES = {"Закрыт", "Готов к закрытию"}
+MISSED = "Пропущенный входящий"
+MISSED_SHARE, UNPROCESSED_SHARE, NONTARGET_SHARE = 15.0, 20.0, 30.0
+
+
+def crm_stats(forms: list[dict], calls: list[dict], orders: list[dict]) -> dict:
+    """Сводка месяца по выгрузкам: формы, звонки и заказы 1С."""
+    def count(rows, pred):
+        return sum(1 for r in rows if pred(r))
+
+    target_forms = [r for r in forms if r["stage"] not in NONTARGET_STAGES]
+    new_orders = [o for o in orders if o["category"] == "new"]
+    existing = [o for o in orders if o["category"] == "existing"]
+    return {
+        "forms": len(forms),
+        "forms_target": len(target_forms),
+        "forms_nontarget": len(forms) - len(target_forms),
+        "forms_unprocessed": count(forms, lambda r: r["stage"] in UNPROCESSED_STAGES),
+        "forms_to_deal": count(forms, lambda r: r["stage"] in TO_DEAL_STAGES),
+        "forms_in_1c": count(forms, lambda r: r["in_1c"]),
+        "forms_target_in_1c": count(target_forms, lambda r: r["in_1c"]),
+        "forms_orders": sum(r["orders"] or 0 for r in forms),
+        "forms_amount": float(sum(r["amount"] or 0 for r in forms)),
+        "forms_closed": float(sum(r["closed"] or 0 for r in forms)),
+        "calls": len(calls),
+        "calls_missed": count(calls, lambda r: r["call_type"] == MISSED),
+        "calls_missed_unprocessed": count(calls, lambda r: r["call_type"] == MISSED and r["stage"] in UNPROCESSED_STAGES),
+        "calls_unprocessed": count(calls, lambda r: r["stage"] in UNPROCESSED_STAGES),
+        "calls_nontarget": count(calls, lambda r: r["stage"] in NONTARGET_STAGES),
+        "calls_to_deal": count(calls, lambda r: r["stage"] in TO_DEAL_STAGES),
+        "calls_in_1c": count(calls, lambda r: r["in_1c"]),
+        "new_sales": len({o["lead_id"] or o["order_no"] for o in new_orders}),
+        "new_orders": len(new_orders),
+        "new_amount": float(sum(o["amount"] for o in new_orders)),
+        "existing_orders": len(existing),
+        "existing_amount": float(sum(o["amount"] for o in existing)),
+    }
+
+
+def _share(part, whole) -> float:
+    return part / whole * 100 if whole else 0.0
+
+
+def crm_findings(s: dict, prev: dict | None, lead_visits: int | None) -> list[Finding]:
+    out = []
+    if s["forms"]:
+        conv = _share(s["forms_target_in_1c"], s["forms_target"])
+        out.append(Finding("plus" if s["forms_amount"] else "minus",
+                           f"Лиды с сайта: {plural(s['forms'], LEADS_CRM)}, целевых {s['forms_target']}; заказ в 1С сделали "
+                           f"{s['forms_in_1c']} ({fmt_pct(conv)} целевых) — {plural(s['forms_orders'], ORDERS)} на "
+                           f"{fmt_int(s['forms_amount'])} ₽, из них закрыто на {fmt_int(s['forms_closed'])} ₽."))
+        if prev and prev.get("forms_target"):
+            was = _share(prev["forms_target_in_1c"], prev["forms_target"])
+            if abs(conv - was) >= 3:
+                out.append(Finding("plus" if conv > was else "minus",
+                                   f"Конверсия целевых лидов с сайта в заказ: {fmt_pct(conv)} против {fmt_pct(was)} "
+                                   "месяцем раньше."))
+        share = _share(s["forms_nontarget"], s["forms"])
+        if share >= NONTARGET_SHARE:
+            out.append(Finding("question", f"{fmt_pct(share)} лидов с форм и почты — нецелевые (поставщики, спам, "
+                                           "предложения услуг). Они раздувают число заявок; можно ли отсекать их до CRM?"))
+    if s["calls"]:
+        missed = _share(s["calls_missed"], s["calls"])
+        if missed >= MISSED_SHARE:
+            out.append(Finding("minus", f"Пропущено {plural(s['calls_missed'], CALLS)} из {s['calls']} входящих "
+                                        f"({fmt_pct(missed)}); по {s['calls_missed_unprocessed']} так и нет решения в Б24."))
+        if s["new_sales"]:
+            out.append(Finding("plus", f"Звонки дали {plural(s['new_sales'], NEW_CLIENTS)} с заказами на "
+                                       f"{fmt_int(s['new_amount'])} ₽; действующие клиенты после звонков заказали ещё на "
+                                       f"{fmt_int(s['existing_amount'])} ₽."))
+    unprocessed = s["forms_unprocessed"] + s["calls_unprocessed"]
+    total = s["forms"] + s["calls"]
+    if total and _share(unprocessed, total) >= UNPROCESSED_SHARE:
+        out.append(Finding("minus", f"Не разобрано {plural(unprocessed, LEADS_CRM)} из {total} ({fmt_pct(_share(unprocessed, total))}): "
+                                    f"звонков {s['calls_unprocessed']}, заявок с сайта {s['forms_unprocessed']}. "
+                                    "Без стадии не посчитать, какие каналы приносят продажи."))
+    if lead_visits and s["forms"]:
+        out.append(Finding("question", f"Метрика насчитала {plural(lead_visits, VISITS)} с заявкой (формы, клики по "
+                                       f"телефону и почте, заказы), в Б24 — {plural(s['forms'], LEADS_CRM)} с форм и почты и "
+                                       f"{plural(s['calls'], CALLS)}. Все ли формы сайта создают лид в Б24?"))
+    return out
+
+
+LEADS_CRM = ("лид", "лида", "лидов")
+ORDERS = ("заказ", "заказа", "заказов")
+CALLS = ("звонок", "звонка", "звонков")
+NEW_CLIENTS = ("нового клиента", "новых клиентов", "новых клиентов")
+
+
+def crm_recommend(s: dict | None) -> list[Recommendation]:
+    if not s:
+        return []
+    out = []
+    if s["calls"] and _share(s["calls_missed"], s["calls"]) >= MISSED_SHARE:
+        out.append(Recommendation(
+            1, "Продажи", "Перезванивать пропущенные звонки",
+            "Включить в Битрикс24 задачу на каждый пропущенный звонок с перезвоном в течение 15 минут; проверить, на какие "
+            "линии и в какие часы звонки теряются, и закрыть их переадресацией или графиком.",
+            f"Пропущено {plural(s['calls_missed'], CALLS)} из {s['calls']} входящих ({fmt_pct(_share(s['calls_missed'], s['calls']))}), "
+            f"по {s['calls_missed_unprocessed']} нет решения. Звонки — главный путь к заказу: каждая новая продажа "
+            f"со звонка в среднем на {fmt_int(s['new_amount'] / s['new_sales']) if s['new_sales'] else '—'} ₽."))
+    unprocessed, total = s["forms_unprocessed"] + s["calls_unprocessed"], s["forms"] + s["calls"]
+    if total and _share(unprocessed, total) >= UNPROCESSED_SHARE:
+        out.append(Recommendation(
+            1, "Продажи", "Разбирать лиды до конца",
+            "Договориться о правиле: каждый лид за день получает стадию — в сделку или нецелевой; в конце недели — "
+            "список неразобранных по менеджерам (таблица в разделе «Продажи»).",
+            f"Не разобрано {plural(unprocessed, LEADS_CRM)} из {total}: звонков {s['calls_unprocessed']}, заявок с сайта "
+            f"{s['forms_unprocessed']}. Часть из них — потерянные клиенты, и без стадий не посчитать отдачу каналов."))
+    nontarget = s["forms_nontarget"] + s["calls_nontarget"]
+    if total and _share(nontarget, total) >= NONTARGET_SHARE:
+        out.append(Recommendation(
+            3, "Продажи", "Отсекать нецелевые обращения до CRM",
+            "Поставщикам и рекламе услуг дать отдельный адрес почты и форму; на формы сайта — проверку от спама; "
+            "в Битрикс24 — правила, которые сразу помечают типовой спам.",
+            f"Нецелевых {fmt_pct(_share(nontarget, total))}: с форм и почты {s['forms_nontarget']}, звонков "
+            f"{s['calls_nontarget']} — менеджеры тратят на них время."))
+    return out
