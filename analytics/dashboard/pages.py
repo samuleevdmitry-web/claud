@@ -9,8 +9,9 @@ from __future__ import annotations
 import tomllib
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 import psycopg
 
@@ -25,6 +26,7 @@ from analytics.format import (
     fmt_duration,
     fmt_int,
     fmt_pct,
+    month_name,
     month_short,
 )
 from analytics.keywords import load_keywords
@@ -35,7 +37,7 @@ AUDIENCES = {"humans": "Только люди", "all": "Весь трафик"}
 STREAM_NAMES = {"search": "статистика запросов", "query_analytics": "аналитика запросов",
                 "pages_in_search": "страницы в поиске", "crawl": "обход роботом", "sqi": "ИКС"}
 SOURCE_NAMES = {"metrika": "Метрика: сайты", "maps": "Метрика: Карты", "webmaster": "Вебмастер",
-                "wordstat": "Вордстат"}
+                "wordstat": "Вордстат", "rabbit": "RabbitSeo", "report": "Отчёт за месяц"}
 
 # Вкладки раздела «Трафик»: отчёты Метрики по группам, как в её интерфейсе.
 TRAFFIC_TABS = {
@@ -597,4 +599,65 @@ def pf_page(conn: psycopg.Connection, settings: Settings, f: Filters, benefit_da
                                and r["position"] is None and r["position_prev"] is None),
         "benefit_from": start and start["date"],
         "weeks": weeks, "charts": charts, "findings": ins.pf_findings(signals),
+    }
+
+
+# ----- Отчёт за месяц -----
+
+def report_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
+    """Отчёт за месяц: показатели, главное, что сделать, выводы каждого раздела и оговорки о данных.
+
+    Собирается из тех же построителей, что разделы дашборда, — цифры и выводы совпадают с ними.
+    """
+    m, yoy_partial = _site_basics(conn, f)
+    main = overview(conn, settings, f)
+    search = search_page(conn, settings, f)
+    demand = demand_page(conn, settings, f)
+    maps = maps_page(conn, settings, f)
+    pf = pf_page(conn, settings, f)
+
+    kpi = [("Сайт", _traffic_tiles(f, m, yoy_partial) + _lead_tiles(f, m, yoy_partial))]
+    if search.get("tiles"):
+        kpi.append(("Поиск Яндекса", search["tiles"]))
+    if demand:
+        kpi.append((f"Спрос, Вордстат ({demand['region']}, {month_name(demand['month']).lower()})", demand["tiles"]))
+    for card in maps["cards"]:
+        kpi.append((f"Карты: {card['name']}", card["tiles"]))
+
+    sections = [("Трафик", traffic(conn, settings, f, "summary")["summary"])]
+    for tab, (title, _) in TRAFFIC_TABS.items():
+        if tab != "summary":
+            sections.append((f"Трафик: {title.lower()}", traffic(conn, settings, f, tab)["summary"]))
+    sections += [("Заявки и цели", leads(conn, settings, f)["summary"]), ("Поиск Яндекса", search.get("summary")),
+                 ("Спрос", demand and demand["summary"]), ("Карты", maps["summary"])]
+    sections = [(title, s) for title, s in sections if s]
+
+    def collect(kind: str) -> list[str]:
+        out: list[str] = []
+        for _, summary in sections:
+            for k, _, texts in summary.groups:
+                out += [t for t in texts if k == kind and t not in out]
+        return out
+
+    todo = collect("check")
+    flagged = [s.title.lower() for s in pf["signals"] if s.status in ("alert", "warn")]
+    if pf["status"] != "ok":
+        todo.insert(0, f"Накрутка ПФ: {pf['verdict']} Сработало: {', '.join(flagged)}. Решить, продолжать ли накрутку; "
+                       "как минимум убрать из проекта запросы, где сайт уже в ТОП-3, и заходы «запрос + домен» — "
+                       "это самые заметные следы (раздел «ПФ и риски»).")
+    caveats = list(search.get("alerts", []))
+    if f.month >= f.today.replace(day=1):
+        caveats.insert(0, f"{month_name(f.month)} ещё не закончился: цифры за неполный месяц, сравнение с прошлым "
+                          "месяцем занижено.")
+    if main["skipped"]:
+        caveats.append("На графиках по месяцам нет неполных месяцев: " + ", ".join(main["skipped"]) + ".")
+    if demand and demand["lagging"]:
+        caveats.append(f"Вордстат публикует месяц с задержкой: спрос — за {month_name(demand['month']).lower()}.")
+    caveats.append(f"Метрика — в варианте «{AUDIENCES[f.audience].lower()}».")
+    return {
+        # в «Главном» без «что проверить»: эти пункты собраны в «Что сделать»
+        "kpi": kpi, "main": ins.Summary([g for g in main["summary"].groups if g[0] != "check"]),
+        "pf": pf, "sections": sections,
+        "todo": todo[:12], "questions": collect("question")[:10], "caveats": caveats,
+        "generated": datetime.now(ZoneInfo("Europe/Moscow")),
     }

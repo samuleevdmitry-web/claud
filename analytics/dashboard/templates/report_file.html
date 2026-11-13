@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Отчёт за {{ f.month|month|lower }} — {{ f.site.site or f.site.name }}</title>
+  <style>{{ css|safe }}</style>
+</head>
+<body class="report-file">
+<main class="main">
+  <h1>Отчёт за {{ f.month|month|lower }} — {{ f.site.site or f.site.name }}</h1>
+  <div class="subtitle">Сравнение с {{ f.prev|month_with }} · {{ audiences[f.audience]|lower }}</div>
+  {% include "report_body.html" %}
+</main>
+</body>
+</html>

@@ -27,6 +27,7 @@ services:
     command: python -m analytics schedule
     volumes:
       - ./wordstat.toml:/app/wordstat.toml:ro  # ключи Вордстата: правки подхватываются без пересборки
+      - ./reports:/app/reports  # ежемесячные отчёты: папка reports рядом с этим файлом
     depends_on:
       db:
         condition: service_healthy

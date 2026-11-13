@@ -16,8 +16,10 @@ from analytics.sources.wordstat import MonthCount
 
 
 def connect(url: str) -> psycopg.Connection:
-    # autocommit: каждая запись идёт в явном блоке conn.transaction() и фиксируется по его завершении
-    return psycopg.connect(url, autocommit=True)
+    # autocommit: каждая запись идёт в явном блоке conn.transaction() и фиксируется по его завершении.
+    # prepare_threshold=None: без серверных подготовленных запросов. Иначе после 5 одинаковых запросов
+    # в соединении PostgreSQL берёт общий план, и выборки из представлений Метрики идут минуты вместо долей секунды.
+    return psycopg.connect(url, autocommit=True, prepare_threshold=None)
 
 
 def apply_schema(conn: psycopg.Connection) -> list[str]:

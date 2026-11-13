@@ -7,6 +7,7 @@ import sys
 import time
 import tomllib
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import psycopg
 
@@ -26,6 +27,8 @@ SOURCE_ERRORS = (MetrikaError, WebmasterError, WordstatError, RabbitError)
 WORDSTAT_SINCE = date(2023, 1, 1)  # три полных года — чтобы видеть сезонность
 # Вордстат обновляет данные раз в месяц: загружаем 5-го числа.
 MONTHLY_ON = {"wordstat": 5}
+# Отчёт за прошлый месяц — 6-го: Метрика закрыла месяц, Вордстат загружен накануне, Вебмастер догнал задержку.
+REPORT_DAY = 6
 
 
 def check_metrika(settings: Settings) -> None:
@@ -203,6 +206,38 @@ def missing_history(conn: psycopg.Connection, settings: Settings) -> set[str]:
     return missing
 
 
+def make_reports(settings: Settings, month: date, today: date) -> list[Path]:
+    """Сохраняет отчёт за месяц по каждому сайту в папку отчётов; пишет запуск в sync_runs как источник report."""
+    from analytics.dashboard.app import report_file  # дашборд нужен только здесь
+
+    folder = Path(settings.reports_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    month_end = (month + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    saved = []
+    with db.connect(settings.database_url) as conn:
+        db.apply_schema(conn)
+        run_id = db.start_run(conn, "report", month, month_end)
+        try:
+            for counter_id in settings.metrika_counters:
+                made = report_file(conn, settings, counter_id, month, today)
+                if made is None:
+                    print(f"  {counter_id}: нет данных за {month:%m.%Y}, отчёт не сформирован")
+                    continue
+                name, html = made
+                (folder / name).write_text(html, encoding="utf-8")
+                saved.append(folder / name)
+                print(f"  сохранён {folder / name}")
+        except Exception as exc:
+            db.finish_run(conn, run_id, error=str(exc))
+            raise
+        db.finish_run(conn, run_id, rows_loaded=len(saved))
+    return saved
+
+
+def previous_month(today: date) -> date:
+    return (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+
+
 def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
     """Бесконечный цикл для Docker: раз в 15 минут проверяет, не пора ли загружать данные.
 
@@ -229,6 +264,15 @@ def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
                     run_sync(settings, source, since, now.date())
                 except Exception as exc:  # ошибка записана в sync_runs; цикл продолжается
                     print(f"{datetime.now(TZ):%d.%m %H:%M} ошибка ({source}): {exc}", file=sys.stderr)
+            # отчёт — после загрузок, чтобы попали свежие данные
+            if settings.metrika_counters and due_sources(now, runs, ["report"], {"report": 0},
+                                                         monthly_on={"report": REPORT_DAY}):
+                month = previous_month(now.date())
+                print(f"=== отчёт за {month:%m.%Y}")
+                try:
+                    make_reports(settings, month, now.date())
+                except Exception as exc:
+                    print(f"{datetime.now(TZ):%d.%m %H:%M} ошибка (отчёт): {exc}", file=sys.stderr)
         except psycopg.OperationalError as exc:
             print(f"{datetime.now(TZ):%d.%m %H:%M} база недоступна, повторю позже: {exc}", file=sys.stderr)
         time.sleep(check_every)
@@ -240,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("check", help="проверить доступ к Метрике и Вебмастеру")
     sub.add_parser("init-db", help="создать или обновить таблицы и представления")
     sub.add_parser("schedule", help="ежедневный сбор в бесконечном цикле (для Docker)")
+    rep = sub.add_parser("report", help="сохранить отчёт за месяц в папку отчётов (по умолчанию — за прошлый месяц)")
+    rep.add_argument("--month", help="месяц ГГГГ-ММ")
     for name, help_ in (
         ("sync", "загрузить все источники (для ежедневного запуска)"),
         ("sync-metrika", "загрузить данные Метрики"),
@@ -265,6 +311,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "schedule":
             cmd_schedule(settings)
+        if args.command == "report":
+            month = date.fromisoformat(args.month + "-01") if args.month else previous_month(date.today())
+            return 0 if make_reports(settings, month, date.today()) else 1
 
         today = date.today()
         until = min(args.until or today, today)

@@ -21,6 +21,7 @@ class Settings:
     wordstat_keywords_path: str
     rabbit_guest_url: str
     database_url: str
+    reports_dir: str = "reports"  # куда сборщик сохраняет ежемесячные отчёты
 
 
 def _list(name: str) -> tuple[str, ...]:
@@ -42,4 +43,5 @@ def load_settings() -> Settings:
         wordstat_keywords_path=os.environ.get("WORDSTAT_KEYWORDS", "").strip() or "wordstat.toml",
         rabbit_guest_url=os.environ.get("RABBIT_GUEST_URL", "").strip(),
         database_url=os.environ.get("DATABASE_URL", "").strip() or DEFAULT_DATABASE_URL,
+        reports_dir=os.environ.get("REPORTS_DIR", "").strip() or "reports",
     )

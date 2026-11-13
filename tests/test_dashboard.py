@@ -93,7 +93,7 @@ def test_page_with_data(client):
     page = client.get("/", params={"month": "2026-09"})
     assert page.status_code == 200
     text = page.text
-    assert "Сентябрь 2026" in text and "сравнение с август 2026" in text
+    assert "Сентябрь 2026" in text and "сравнение с августом 2026" in text
     assert "1 200" in text                      # визиты за сентябрь
     assert "▲ 20,0%" in text                    # +20% к августу
     assert "Переходы из поисковых систем" in text   # таблица каналов
@@ -117,7 +117,7 @@ def test_every_section_renders(client):
         sync_metrika(conn, FakeMetrikaClient(goals, data, humans_share=0.8), 42, frozenset({1}), "lastsign",
                      since=aug, until=date(2026, 9, 30), today=date(2026, 10, 2), log=lambda _: None)
     for path in ("/", "/traffic", "/traffic?tab=geo", "/traffic?tab=time", "/traffic?tab=sources", "/leads",
-                 "/search", "/pf", "/demand", "/maps", "/status"):
+                 "/search", "/pf", "/report", "/demand", "/maps", "/status"):
         page = client.get(path, params={"month": "2026-09"})
         assert page.status_code == 200, path
     geo = client.get("/traffic", params={"month": "2026-09", "tab": "geo", "aud": "all"}).text
@@ -159,3 +159,28 @@ def test_pf_section_flags_bot_traces(client):
     assert "ткань для тюбингов example.ru" in page
     overview = client.get("/", params={"month": "2026-10", "aud": "all"}).text
     assert "ПФ: Похоже на санкции" in overview
+
+
+@needs_db
+def test_monthly_report_file(client, tmp_path, monkeypatch):
+    aug, sep = date(2026, 8, 1), date(2026, 9, 1)
+    data = {("month", "total"): [(aug, [], [1000, 800, 2500, 20.0, 2.5, 150.0], {1: (10, 9)}),
+                                 (sep, [], [1300, 900, 3000, 18.0, 2.6, 160.0], {1: (15, 14)})]}
+    goals = [{"id": 1, "name": "Отправил контактные данные", "type": "contact_data_sent"}]
+    with db.connect(TEST_DATABASE_URL) as conn:
+        sync_metrika(conn, FakeMetrikaClient(goals, data), 42, frozenset({1}), "lastsign",
+                     since=aug, until=date(2026, 9, 30), today=date(2026, 10, 2), log=lambda _: None)
+    page = client.get("/report", params={"month": "2026-09"}).text
+    assert "Показатели" in page and "Что сделать" in page and "1\xa0300" in page
+
+    from analytics.cli import make_reports
+    from analytics.config import load_settings
+
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
+    saved = make_reports(load_settings(), sep, date(2026, 10, 6))
+    assert [p.name for p in saved] == ["2026-09 example.ru.html"]
+    html = saved[0].read_text(encoding="utf-8")
+    assert "Отчёт за сентябрь 2026 — example.ru" in html and "<style>" in html and "1\xa0300" in html
+    with db.connect(TEST_DATABASE_URL) as conn:
+        assert conn.execute("SELECT status FROM sync_runs WHERE source = 'report'").fetchone() == ("ok",)
+    assert make_reports(load_settings(), date(2026, 3, 1), date(2026, 10, 6)) == []  # за март данных нет

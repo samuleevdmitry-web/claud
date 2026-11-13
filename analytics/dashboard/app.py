@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from analytics import db
 from analytics.config import load_settings
 from analytics.dashboard import pages
-from analytics.format import fmt_change, fmt_dec, fmt_duration, fmt_int, fmt_pct, month_name, month_short
+from analytics.format import fmt_change, fmt_dec, fmt_duration, fmt_int, fmt_pct, month_name, month_short, month_with
 
 HERE = Path(__file__).parent
 TZ = ZoneInfo("Europe/Moscow")
@@ -31,6 +31,7 @@ NAV = [
     ("leads", "/leads", "Заявки и цели", "target"),
     ("search", "/search", "Поиск Яндекса", "search"),
     ("pf", "/pf", "ПФ и риски", "shield"),
+    ("report", "/report", "Отчёт за месяц", "doc"),
     ("demand", "/demand", "Спрос", "trend"),
     ("maps", "/maps", "Карты", "pin"),
     ("status", "/status", "Данные", "db"),
@@ -40,7 +41,7 @@ app = FastAPI(title="Аналитика", docs_url=None, redoc_url=None, openapi
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.filters.update(
-    int=fmt_int, dec=fmt_dec, pct=fmt_pct, duration=fmt_duration, month=month_name, month_short=month_short,
+    int=fmt_int, dec=fmt_dec, pct=fmt_pct, duration=fmt_duration, month=month_name, month_short=month_short, month_with=month_with,
     change=fmt_change, local=lambda dt: dt.astimezone(TZ).strftime("%d.%m.%Y %H:%M") if dt else "—",
 )
 
@@ -95,6 +96,22 @@ def search(request: Request, site: int | None = None, month: str | None = None, 
 @app.get("/pf", response_class=HTMLResponse)
 def pf(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
     return render(request, "pf", pages.pf_page, site, month, aud)
+
+
+@app.get("/report", response_class=HTMLResponse)
+def report(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
+    return render(request, "report", pages.report_page, site, month, aud)
+
+
+def report_file(conn: psycopg.Connection, settings, counter_id: int, month: date, today: date) -> tuple[str, str] | None:
+    """Отчёт за месяц одним HTML-файлом со встроенными стилями: имя файла и содержимое. None — данных нет."""
+    f = pages.resolve_filters(conn, settings, counter_id, month.strftime("%Y-%m"), None, today)
+    if f is None or f.month != month or f.counter_id != counter_id:
+        return None
+    context = pages.report_page(conn, settings, f)
+    css = (HERE / "static" / "dashboard.css").read_text(encoding="utf-8")
+    html = templates.env.get_template("report_file.html").render(f=f, css=css, audiences=pages.AUDIENCES, **context)
+    return f"{month:%Y-%m} {f.site.get('site') or counter_id}.html", html
 
 
 @app.get("/demand", response_class=HTMLResponse)

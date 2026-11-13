@@ -9,6 +9,9 @@ from decimal import Decimal
 NBSP = " "
 MONTHS = ["январь", "февраль", "март", "апрель", "май", "июнь",
           "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+# творительный падеж: «сравнение с сентябрём 2026»
+MONTHS_WITH = ["январём", "февралём", "мартом", "апрелем", "маем", "июнем",
+               "июлем", "августом", "сентябрём", "октябрём", "ноябрём", "декабрём"]
 MONTHS_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
 
 Number = int | float | Decimal | None
@@ -16,6 +19,10 @@ Number = int | float | Decimal | None
 
 def month_name(d: date) -> str:
     return f"{MONTHS[d.month - 1].capitalize()} {d.year}"
+
+
+def month_with(d: date) -> str:
+    return f"{MONTHS_WITH[d.month - 1]} {d.year}"
 
 
 def month_short(d: date) -> str:

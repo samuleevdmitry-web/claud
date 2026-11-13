@@ -1,0 +1,49 @@
+{# Тело отчёта за месяц: и для раздела дашборда, и для сохранённого файла #}
+{% from "macros.html" import insights %}
+<p class="note">Сформирован {{ generated.strftime('%d.%m.%Y %H:%M') }} по Москве из данных дашборда. Выводы собраны по правилам
+  (docs/metrics.md) из тех же цифр, что в разделах.</p>
+
+{{ insights(main, "Главное за месяц") }}
+
+<div class="card verdict verdict-{{ pf.status }}">
+  <div class="verdict-title">Накрутка ПФ и риски</div>
+  <p>{{ pf.verdict }}</p>
+  {% set flagged = pf.signals|selectattr('status', 'in', ['alert', 'warn'])|list %}
+  {% if flagged %}<ul class="plain-list">{% for s in flagged %}<li><b>{{ s.title }}.</b> {{ s.text }}</li>{% endfor %}</ul>{% endif %}
+</div>
+
+<h2>Показатели</h2>
+<div class="card table-card">
+  <table class="report-kpi">
+    <thead><tr><th>Показатель</th><th class="num">Значение</th><th class="num">К прошлому месяцу</th><th>Для сравнения</th></tr></thead>
+    {% for group, tiles in kpi %}
+    <tbody>
+      <tr class="group-row"><th colspan="4">{{ group }}</th></tr>
+      {% for t in tiles %}
+      <tr><td>{{ t.label }}</td><td class="num">{{ t.value }}</td>
+          <td class="num">{% if t.delta %}<span class="tile-delta {{ t.delta.tone }}">{{ t.delta.text }}</span>{% else %}—{% endif %}</td>
+          <td class="muted">{{ t.note }}</td></tr>
+      {% endfor %}
+    </tbody>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="chart-title">Что сделать</div>
+    {% if todo %}<ol class="plain-list">{% for t in todo %}<li>{{ t }}</li>{% endfor %}</ol>
+    {% else %}<p class="muted">Срочного нет.</p>{% endif %}
+  </div>
+  <div class="card">
+    <div class="chart-title">Вопросы к команде</div>
+    {% if questions %}<ol class="plain-list">{% for t in questions %}<li>{{ t }}</li>{% endfor %}</ol>
+    {% else %}<p class="muted">Вопросов нет.</p>{% endif %}
+  </div>
+</div>
+
+<h2>Выводы по разделам</h2>
+{% for title, summary in sections %}{{ insights(summary, title) }}{% endfor %}
+
+<h2>Оговорки о данных</h2>
+<ul class="plain-list note-list">{% for c in caveats %}<li>{{ c }}</li>{% endfor %}</ul>
