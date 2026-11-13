@@ -13,7 +13,7 @@ import psycopg
 
 from analytics import db
 from analytics.config import Settings, load_settings
-from analytics.schedule import TZ, due_sources
+from analytics.schedule import TZ, due_sources, month_close_sources
 from analytics.sources.metrika import SLICES, MetrikaClient, MetrikaError, dimensions_for
 from analytics.keywords import KeywordConfig, load_keywords
 from analytics.sources.rabbit import RabbitClient, RabbitError
@@ -21,10 +21,14 @@ from analytics.sources.webmaster import WebmasterClient, WebmasterError, parse_s
 from analytics.sources.wordstat import WordstatClient, WordstatError
 from analytics.sync import sync_metrika, sync_rabbit, sync_webmaster, sync_wordstat
 
-# Период ежедневной перезагрузки. Вебмастер отдаёт данные с задержкой в несколько дней и уточняет их.
-DEFAULT_DAYS = {"metrika": 7, "maps": 7, "webmaster": 30, "wordstat": 7, "rabbit": 7}
+# Сколько последних дней перезагружать при плановом сборе: неделя и запас. Вебмастер отдаёт данные с задержкой
+# в несколько дней и уточняет их, поэтому у него окно больше.
+DEFAULT_DAYS = {"metrika": 14, "maps": 14, "webmaster": 30, "wordstat": 7, "rabbit": 14}
 SOURCE_ERRORS = (MetrikaError, WebmasterError, WordstatError, RabbitError)
 WORDSTAT_SINCE = date(2023, 1, 1)  # три полных года — чтобы видеть сезонность
+# Метрика, Карты, Вебмастер и RabbitSeo — раз в неделю, в понедельник: прошедшая неделя закрыта целиком.
+# Аналитика запросов Вебмастера хранит 14 дней, так что пропустить можно не больше одного понедельника.
+WEEKLY_ON = {"metrika": 0, "maps": 0, "webmaster": 0, "rabbit": 0}
 # Вордстат обновляет данные раз в месяц: загружаем 5-го числа.
 MONTHLY_ON = {"wordstat": 5}
 # Отчёт за прошлый месяц — 6-го: Метрика закрыла месяц, Вордстат загружен накануне, Вебмастер догнал задержку.
@@ -186,7 +190,7 @@ def run_sync(settings: Settings, source: str, since: date, until: date) -> None:
 def missing_history(conn: psycopg.Connection, settings: Settings) -> set[str]:
     """Источники Метрики, у которых в базе нет истории «только людей» или новых отчётов.
 
-    Так бывает после обновления, добавившего отчёты: обычная ежедневная загрузка берёт только последние дни,
+    Так бывает после обновления, добавившего отчёты: плановая загрузка берёт только последние дни,
     поэтому таким источникам расписание один раз загружает историю с начала, как пустой базе.
     Признак — нет ни одной строки «только люди» в отчёте, который появился последним из нужных
     (у сайта — поисковые системы по дням, для слежения за долей Яндекса).
@@ -248,7 +252,8 @@ def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
     Проверка по журналу sync_runs, а не по таймеру: ноутбук может спать, и после пробуждения
     пропущенный сбор запустится при первой же проверке.
     """
-    print(f"Ежедневный сбор: проверка каждые {check_every // 60} мин")
+    print(f"Сбор по расписанию (по понедельникам, Вордстат — {MONTHLY_ON['wordstat']}-го, отчёт — {REPORT_DAY}-го): "
+          f"проверка каждые {check_every // 60} мин")
     while True:
         try:
             with db.connect(settings.database_url) as conn:
@@ -263,14 +268,24 @@ def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
                 runs[source]["last_ok"] = None
             now = datetime.now(TZ)
             sources = [name for name in SYNCS if CONFIGURED[name](settings)]
-            for source, since in due_sources(now, runs, sources, DEFAULT_DAYS, monthly_on=MONTHLY_ON):
+            done = set()
+
+            def sync(source: str, since: date) -> None:
+                done.add(source)
                 try:
                     run_sync(settings, source, since, now.date())
                 except Exception as exc:  # ошибка записана в sync_runs; цикл продолжается
                     print(f"{datetime.now(TZ):%d.%m %H:%M} ошибка ({source}): {exc}", file=sys.stderr)
-            # отчёт — после загрузок, чтобы попали свежие данные
+
+            for source, since in due_sources(now, runs, sources, DEFAULT_DAYS, monthly_on=MONTHLY_ON,
+                                             weekly_on=WEEKLY_ON):
+                sync(source, since)
+            # отчёт — после загрузок; если конец прошлого месяца ещё не забран (сбор раз в неделю), сначала он
             if settings.metrika_counters and due_sources(now, runs, ["report"], {"report": 0},
                                                          monthly_on={"report": REPORT_DAY}):
+                weekly = [s for s in sources if s in WEEKLY_ON and s not in done]
+                for source, since in month_close_sources(now, runs, weekly, DEFAULT_DAYS):
+                    sync(source, since)
                 month = previous_month(now.date())
                 print(f"=== отчёт за {month:%m.%Y}")
                 try:
@@ -287,11 +302,11 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check", help="проверить доступ к Метрике и Вебмастеру")
     sub.add_parser("init-db", help="создать или обновить таблицы и представления")
-    sub.add_parser("schedule", help="ежедневный сбор в бесконечном цикле (для Docker)")
+    sub.add_parser("schedule", help="сбор по расписанию в бесконечном цикле (для Docker)")
     rep = sub.add_parser("report", help="сохранить отчёт за месяц в папку отчётов (по умолчанию — за прошлый месяц)")
     rep.add_argument("--month", help="месяц ГГГГ-ММ")
     for name, help_ in (
-        ("sync", "загрузить все источники (для ежедневного запуска)"),
+        ("sync", "загрузить все источники сейчас"),
         ("sync-metrika", "загрузить данные Метрики"),
         ("sync-maps", "загрузить счётчики карточек на Картах"),
         ("sync-webmaster", "загрузить данные Вебмастера"),
@@ -300,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("--since", type=date.fromisoformat,
-                       help="с даты ГГГГ-ММ-ДД (по умолчанию: Метрика и Карты — 7 дней назад, Вебмастер — 30)")
+                       help="с даты ГГГГ-ММ-ДД (по умолчанию: Метрика, Карты, RabbitSeo — 14 дней назад, Вебмастер — 30)")
         p.add_argument("--until", type=date.fromisoformat, help="по дату ГГГГ-ММ-ДД (по умолчанию сегодня)")
     args = parser.parse_args(argv)
     settings = load_settings()

@@ -178,6 +178,14 @@ def test_sync_webmaster(conn):
         "SELECT stream, last_date FROM webmaster_freshness WHERE host_id = %s", (host,)
     ).fetchall())
     assert freshness["search"] == date(2026, 8, 2) and freshness["query_analytics"] == day
+    # отставание — от дня последней успешной загрузки Вебмастера, а не от сегодня (сбор раз в неделю)
+    run_id = db.start_run(conn, "webmaster", date(2026, 7, 1), date(2026, 8, 20))
+    db.finish_run(conn, run_id, rows_loaded=1)
+    conn.execute("UPDATE sync_runs SET finished_at = '2026-08-06 09:00+03' WHERE id = %s", (run_id,))
+    lag = conn.execute(
+        "SELECT days_stale FROM webmaster_freshness WHERE host_id = %s AND stream = 'search'", (host,)
+    ).fetchone()
+    assert lag == (4,)
 
     assert conn.execute(
         "SELECT count(*) FROM webmaster_queries_monthly WHERE host_id = %s", (host,)

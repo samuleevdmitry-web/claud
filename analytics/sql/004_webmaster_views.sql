@@ -50,8 +50,12 @@ WHERE impressions > 0 AND position IS NOT NULL
 GROUP BY host_id, date, 3;
 
 -- Свежесть данных: если Вебмастер давно не обновлялся, мониторинг должен об этом сказать.
+-- Отставание считается от дня последней успешной загрузки Вебмастера, а не от сегодня: сбор идёт раз в неделю,
+-- и к концу недели данные в базе закономерно «старее» — это не задержка Вебмастера.
 CREATE OR REPLACE VIEW webmaster_freshness AS
-SELECT host_id, stream, last_date, current_date - last_date AS days_stale
+SELECT host_id, stream, last_date,
+       coalesce((SELECT max(finished_at) FROM sync_runs WHERE source = 'webmaster' AND status = 'ok')::date,
+                current_date) - last_date AS days_stale
 FROM (
     SELECT host_id, 'search' AS stream, max(date) AS last_date FROM webmaster_search_daily GROUP BY host_id
     UNION ALL
