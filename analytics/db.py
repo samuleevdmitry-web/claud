@@ -272,13 +272,22 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
         cur.execute("DELETE FROM crm_summary WHERE month = %s AND kind = %s", (month, kind))
         cur.executemany("INSERT INTO crm_summary (month, kind, metric, value, note) VALUES (%s, %s, %s, %s, %s)"
                         " ON CONFLICT DO NOTHING", [(month, kind, m, v, n) for m, v, n in parsed.summary])
-        if kind == "orders":  # выгрузки заказов могут пересекаться: заказ обновляется по номеру
+        if kind == "orders":
+            # Выгрузки заказов дополняют друг друга по номеру заказа: список заказов с контактами и построчный отчёт
+            # с номенклатурой. Новое значение заменяет прежнее, только если оно есть (пустое не затирает).
             cur.executemany(
                 "INSERT INTO orders_1c (order_no, order_date, amount, status, client_hash, email_hashes, phone_hashes,"
                 " items, groups) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
-                " ON CONFLICT (order_no) DO UPDATE SET order_date = EXCLUDED.order_date, amount = EXCLUDED.amount,"
-                " status = EXCLUDED.status, client_hash = EXCLUDED.client_hash, email_hashes = EXCLUDED.email_hashes,"
-                " phone_hashes = EXCLUDED.phone_hashes, items = EXCLUDED.items, groups = EXCLUDED.groups",
+                " ON CONFLICT (order_no) DO UPDATE SET order_date = EXCLUDED.order_date,"
+                " amount = CASE WHEN EXCLUDED.amount > 0 THEN EXCLUDED.amount ELSE orders_1c.amount END,"
+                " status = coalesce(EXCLUDED.status, orders_1c.status),"
+                " client_hash = coalesce(EXCLUDED.client_hash, orders_1c.client_hash),"
+                " email_hashes = CASE WHEN cardinality(EXCLUDED.email_hashes) > 0 THEN EXCLUDED.email_hashes"
+                "  ELSE orders_1c.email_hashes END,"
+                " phone_hashes = CASE WHEN cardinality(EXCLUDED.phone_hashes) > 0 THEN EXCLUDED.phone_hashes"
+                "  ELSE orders_1c.phone_hashes END,"
+                " items = CASE WHEN cardinality(EXCLUDED.items) > 0 THEN EXCLUDED.items ELSE orders_1c.items END,"
+                " groups = CASE WHEN cardinality(EXCLUDED.groups) > 0 THEN EXCLUDED.groups ELSE orders_1c.groups END",
                 [(o.order_no, o.order_date, o.amount, o.status, o.client_hash, list(o.email_hashes),
                   list(o.phone_hashes), list(o.items), list(o.groups)) for o in parsed.orders],
             )

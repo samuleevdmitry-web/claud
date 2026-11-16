@@ -35,19 +35,49 @@ def fingerprint(kind: str, value: str | None) -> str | None:
     return hashlib.sha256(f"{_salt()}:{kind}:{value}".encode()).hexdigest()
 
 
+# Адрес внутри любого текста ячейки: «E-mail=ivan@x.ru», «a@b.ru; c@d.ru», «Почта: a@b.ru (бухгалтерия)».
+_EMAIL = re.compile(r"[\w.%+\-]+@[\w\-]+(?:\.[\w\-]+)*\.[^\W\d_]{2,}")
+# Номер внутри текста: цифры с пробелами, скобками и дефисами; запятая, «;», буквы (доб., моб.) его заканчивают.
+_PHONE_RUN = re.compile(r"\+?\d[\d\s\-()]{5,}\d")
+
+
+def emails(value) -> list[str]:
+    """Все адреса из текста ячейки, в едином виде, без повторов."""
+    out = []
+    for m in _EMAIL.findall(str(value or "")):
+        e = norm_email(m)
+        if e and e not in out:
+            out.append(e)
+    return out
+
+
 def email_hash(value) -> str | None:
-    """Отпечаток почты. В ячейке бывает несколько адресов через запятую — берётся первый."""
-    first = str(value or "").replace(";", ",").split(",")[0]
-    return fingerprint("email", norm_email(first))
+    """Отпечаток почты. В ячейке бывает несколько адресов — берётся первый."""
+    found = emails(value)
+    return fingerprint("email", found[0]) if found else None
 
 
 def email_hashes(value) -> list[str]:
-    """Отпечатки всех адресов ячейки (через запятую, точку с запятой, пробел или с новой строки)."""
+    """Отпечатки всех адресов ячейки."""
+    return [fingerprint("email", e) for e in emails(value)]
+
+
+def phone_hashes(value) -> list[str]:
+    """Отпечатки всех номеров ячейки: «+7 (917) 470-64-44, 8 999 000-11-22», «т.=(3452) 12-34-56 доб. 12»,
+    два номера через пробел. Городские номера без кода (меньше 10 цифр) не берутся — их не сравнить."""
     out = []
-    for part in re.split(r"[,;\s]+", str(value or "")):
-        h = fingerprint("email", norm_email(part))
-        if h and h not in out:
-            out.append(h)
+    for run in _PHONE_RUN.findall(str(value or "")):
+        digits = re.sub(r"\D", "", run)
+        if len(digits) <= 12:
+            candidates = [digits]
+        else:  # несколько номеров подряд без запятой
+            candidates = [d for d in (re.sub(r"\D", "", t) for t in run.split()) if len(d) >= 10]
+            if not candidates and len(digits) % 2 == 0:
+                candidates = [digits[:len(digits) // 2], digits[len(digits) // 2:]]
+        for d in candidates:
+            h = phone_hash(d)
+            if h and h not in out:
+                out.append(h)
     return out
 
 

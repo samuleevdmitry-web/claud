@@ -25,7 +25,7 @@ from analytics.sources.metrika import (
     fetch_traffic,
     grain_range,
 )
-from analytics.sources import crm_files, semantics, unisender
+from analytics.sources import crm_files, excel, semantics, unisender
 from analytics.sources.rabbit import MAX_DAYS, RabbitClient, parse_positions
 from analytics.sources.wordstat import WordstatClient, WordstatError
 from analytics.sources.webmaster import (
@@ -280,22 +280,24 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
     if not folder.is_dir():
         return []
     done, out = db.imported_files(conn, crm_files.PARSER_VERSION), []
-    for path in sorted(folder.glob("*.xlsx")):
+    for path in sorted(x for x in folder.iterdir() if x.suffix.lower() in excel.EXTENSIONS):
         if path.name.startswith("~$"):
             continue  # временный файл открытого Excel
         sha = crm_files.sha256(path)
         if sha in done:
             continue
         try:
-            sheets = semantics.read_workbook(path)
+            sheets = excel.read_sheets(path)
             if semantics.is_semantics(sheets):
                 sem = semantics.parse_sheets(sheets)
                 db.save_semantics(conn, sha, path.name, sem, crm_files.PARSER_VERSION)
                 log(f"  {path.name}: семантика — {sem.rows} фраз, {len(sem.positions)} позиций")
                 out.append(sem)
                 continue
-            parsed = crm_files.parse_file(path)
-        except (crm_files.CrmFileError, semantics.SemanticsError, ValueError, KeyError, OSError) as exc:
+            parsed = crm_files.parse_file(path, sheets)
+        except Exception as exc:  # битый или чужой файл не должен останавливать загрузку остальных
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
             log(f"  {path.name}: не загружен — {exc}")
             db.skip_crm_file(conn, sha, path.name, crm_files.PARSER_VERSION)
             continue

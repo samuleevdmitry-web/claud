@@ -11,8 +11,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-import openpyxl
 import requests
+
+from analytics.sources.excel import read_sheets
 
 ENGINES = {"яндекс": "yandex", "yandex": "yandex", "google": "google", "гугл": "google"}
 SHEET_ID = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]+)")
@@ -86,11 +87,7 @@ def _date(v) -> date | None:
 
 
 def read_workbook(path: Path) -> dict[str, list[tuple]]:
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    try:
-        return {name: list(wb[name].iter_rows(values_only=True)) for name in wb.sheetnames}
-    finally:
-        wb.close()
+    return read_sheets(path)
 
 
 def export_url(sheet_url: str) -> str:

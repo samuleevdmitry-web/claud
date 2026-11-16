@@ -250,3 +250,50 @@ def test_orders_import_and_retry_of_unknown_files(tmp_path):
         logs.clear()
         import_crm_folder(conn, tmp_path, log=logs.append)
         assert logs == []  # оба файла уже разобраны этой версией
+
+
+def test_xls_cells_are_converted():
+    import xlrd
+
+    from analytics.sources.excel import xls_value
+
+    class Cell:
+        def __init__(self, ctype, value):
+            self.ctype, self.value = ctype, value
+
+    assert xls_value(Cell(xlrd.XL_CELL_EMPTY, ""), 0) is None
+    assert xls_value(Cell(xlrd.XL_CELL_NUMBER, 12.0), 0) == 12 and xls_value(Cell(xlrd.XL_CELL_NUMBER, 12.5), 0) == 12.5
+    assert xls_value(Cell(xlrd.XL_CELL_DATE, 46300.0), 0) == datetime(2026, 10, 5)
+    assert xls_value(Cell(xlrd.XL_CELL_TEXT, "05.10.2026"), 0) == "05.10.2026"
+
+
+def test_orders_list_with_labelled_contacts(tmp_path):
+    """Список заказов 1С: «Текущее состояние», подписи в ячейках почты и несколько телефонов в одной."""
+    from analytics import privacy
+    path = sheet_file(tmp_path / "list.xlsx", [
+        ["Дата", "Клиент", "Контрагент", "Номер", "Сумма", "Текущее состояние", "Комментарий", "Менеджер",
+         "Электронная почта", "Телефон"],
+        ["05.10.2026", "Ромашка", "ООО «Ромашка»", "АТЦБ-026330", 49896.5, "Закрыт", "срочно", "Петров",
+         "E-mail=Ivan@Mail.ru,  buh@romashka.ru", "т.=(3452) 12-34-56, 8 917 470 64 44 8 999 000 11 22"],
+    ])
+    [o] = parse_file(path).orders
+    assert (o.order_no, o.order_date, o.amount, o.status) == ("АТЦБ-026330", date(2026, 10, 5), 49896.5, "Закрыт")
+    assert o.email_hashes == (privacy.email_hash("ivan@mail.ru"), privacy.email_hash("buh@romashka.ru"))
+    assert set(o.phone_hashes) == {privacy.phone_hash("3452123456"), privacy.phone_hash("9174706444"),
+                                   privacy.phone_hash("9990001122")}
+
+
+@needs_db
+def test_order_exports_complement_each_other(tmp_path):
+    """Список заказов с контактами + построчный отчёт с номенклатурой: второй не затирает контакты первого."""
+    with db.connect(TEST_DATABASE_URL) as conn:
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        db.apply_schema(conn)
+        sheet_file(tmp_path / "a_list.xlsx", [["Номер", "Дата", "Сумма", "Электронная почта", "Текущее состояние"],
+                                              ["АТЦБ-1", "05.10.2026", 500, "a@b.ru", "Закрыт"]])
+        sheet_file(tmp_path / "b_lines.xlsx", [["Заказ клиента", "Номенклатура", "Сумма"],
+                                               ["Заказ клиента АТЦБ-1 от 05.10.2026 12:00:00", "Флис 280", 200],
+                                               ["Заказ клиента АТЦБ-1 от 05.10.2026 12:00:00", "Оксфорд 600D", 300]])
+        import_crm_folder(conn, tmp_path, log=lambda _: None)
+        row = conn.execute("SELECT amount, status, cardinality(email_hashes), items FROM orders_1c").fetchone()
+        assert row == (500, "Закрыт", 1, ["Флис 280", "Оксфорд 600D"])

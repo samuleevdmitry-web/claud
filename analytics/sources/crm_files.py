@@ -1,4 +1,4 @@
-"""Ежемесячные выгрузки из Битрикс24 и 1С (Excel), которые кладутся в папку imports.
+"""Ежемесячные выгрузки из Битрикс24 и 1С (Excel, .xlsx или .xls), которые кладутся в папку imports.
 
 Распознаются два вида сводок:
 - forms — «лиды с сайта в Б24 против заказов в 1С»: листы «Совпадения» и «Все лиды»;
@@ -20,9 +20,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-import openpyxl
-
 from analytics import privacy
+from analytics.sources.excel import read_sheets
 
 KINDS = {
     "forms": {"Совпадения", "Все лиды"},
@@ -119,13 +118,9 @@ def detect(sheetnames: list[str]) -> str | None:
     return next((kind for kind, needed in KINDS.items() if needed <= names), None)
 
 
-def parse_file(path: Path) -> CrmFile:
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    try:
-        kind = detect(wb.sheetnames)
-        sheets = {name: list(wb[name].iter_rows(values_only=True)) for name in wb.sheetnames}
-    finally:
-        wb.close()
+def parse_file(path: Path, sheets: dict[str, list[tuple]] | None = None) -> CrmFile:
+    sheets = sheets if sheets is not None else read_sheets(path)
+    kind = detect(list(sheets))
     if kind == "forms":
         return _parse_forms(sheets)
     if kind == "calls":
@@ -295,7 +290,7 @@ ORDER_COLUMNS = {
     "date": ("дата заказа", "дата", "дата документа", "дата создания", "создан", "дата создания заказа"),
     "amount": ("сумма заказа", "сумма документа", "сумма", "итого", "сумма с ндс", "сумма заказа с ндс"),
     "line_amount": ("сумма строки", "сумма по строке", "сумма позиции", "стоимость", "сумма товара"),
-    "status": ("статус", "статус заказа", "статус 1с", "состояние", "состояние заказа"),
+    "status": ("статус", "статус заказа", "статус 1с", "состояние", "состояние заказа", "текущее состояние"),
     "client": ("клиент", "клиент 1с", "контрагент", "покупатель", "партнер", "заказчик", "клиент (контрагент)"),
     "item": ("номенклатура", "товар", "наименование", "наименование товара", "позиция", "товары"),
     "group": ("группа номенклатуры", "группа", "товарная группа", "группа товаров", "вид номенклатуры",
@@ -345,23 +340,19 @@ def headers_preview(rows: list[tuple], limit: int = 25) -> list[str]:
     return []
 
 
-_ORDER_NO = re.compile(r"[A-ZА-ЯЁ]{2,6}-?\d{3,}|\b\d{4,}\b")
 _ORDER_DATE = re.compile(r"от\s+(\d{2}\.\d{2}\.\d{4})")
+_ORDER_IN_NAME = re.compile(r"(\S+)\s+от\s+\d{2}\.\d{2}\.\d{4}")
 
 
 def _order_no(v) -> str | None:
     """«Заказ клиента АТЦБ-026330 от 05.10.2026 12:00:00» → «АТЦБ-026330»; просто номер — как есть."""
+    if isinstance(v, (int, float)):
+        return str(int(v))
     s = _text(v)
     if not s:
         return None
-    if isinstance(v, (int, float)):
-        return str(int(v))
-    m = _ORDER_NO.search(s.upper())
-    return m.group(0) if m and len(s) > 20 else s
-
-
-def _split(v) -> list[str]:
-    return [x.strip() for x in re.split(r"[,;\n]+", _text(v) or "") if x.strip()]
+    m = _ORDER_IN_NAME.search(s)
+    return (m.group(1).lstrip("№") or None) if m else s
 
 
 def _parse_orders(rows: list[tuple], header_row: int, cols: dict[str, int]) -> CrmFile:
@@ -406,10 +397,7 @@ def _parse_orders(rows: list[tuple], header_row: int, cols: dict[str, int]) -> C
         for i in email_cols:
             o["emails"] += [h for h in privacy.email_hashes(row[i] if i < len(row) else None) if h not in o["emails"]]
         for i in phone_cols:
-            for ph in _split(row[i] if i < len(row) else None):
-                h = privacy.phone_hash(ph)
-                if h and h not in o["phones"]:
-                    o["phones"].append(h)
+            o["phones"] += [h for h in privacy.phone_hashes(row[i] if i < len(row) else None) if h not in o["phones"]]
         for key, out in (("item", "items"), ("group", "groups")):
             t = _text(cell(row, key))
             if t and t not in o[out]:
