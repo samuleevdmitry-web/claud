@@ -8,6 +8,7 @@ import pytest
 
 from analytics import db
 from analytics import insights as ins
+from analytics.sources import crm_files
 from analytics.sources.crm_files import CrmFileError, parse_file
 from analytics.sync import import_crm_folder
 
@@ -153,3 +154,99 @@ def test_new_clients_only_and_no_double_count():
     target = rows["Конверсия целевых"]
     assert target["key"] and (target["total"], target["forms"], round(target["calls"], 1)) == (40.0, 50.0, 33.3)
     assert (rows["Нашлись среди целевых"]["total"], rows["Сумма этих заказов, ₽"]["calls"]) == (2, 20000.0)
+
+
+def sheet_file(path, rows, title="Заказы"):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    for row in rows:
+        ws.append(row)
+    wb.save(path)
+    return path
+
+
+def test_orders_export_by_lines(tmp_path):
+    """Построчная выгрузка: сумма заказа из «Суммы документа», почта и телефоны — отпечатками, клиент — отпечатком."""
+    from analytics import privacy
+    path = sheet_file(tmp_path / "orders.xlsx", [
+        ["Номер", "Дата", "Контрагент", "Email", "Телефон", "Статус", "Номенклатура", "Группа номенклатуры",
+         "Сумма строки", "Сумма документа"],
+        ["АТЦБ-1", datetime(2026, 10, 5, 12), "ИП Иванов", "Ivanov@Mail.ru", "+7 (917) 470-64-44", "Закрыт",
+         "Мембрана 3-слойная", "Мембранные ткани", 30000, 50000],
+        ["АТЦБ-1", datetime(2026, 10, 5, 12), "ИП Иванов", "Ivanov@Mail.ru", "+7 (917) 470-64-44", "Закрыт",
+         "Флис 280", "Флис", 20000, 50000],
+        ["АТЦБ-2", "06.10.2026", "ООО «Ромашка»", "", "", "В работе", "Оксфорд 600D", "Оксфорд", 9000, 9000],
+        ["Итого", None, None, None, None, None, None, None, 59000, 59000],
+    ])
+    f = parse_file(path)
+    assert (f.kind, f.month) == ("orders", date(2026, 10, 1)) and not f.notes
+    a, b = sorted(f.orders, key=lambda o: o.order_no)
+    assert (a.order_no, a.order_date, a.amount, a.status) == ("АТЦБ-1", date(2026, 10, 5), 50000.0, "Закрыт")
+    assert a.items == ("Мембрана 3-слойная", "Флис 280") and a.groups == ("Мембранные ткани", "Флис")
+    assert a.email_hashes == (privacy.email_hash("ivanov@mail.ru"),) and a.phone_hashes == (privacy.phone_hash("9174706444"),)
+    assert a.client_hash == privacy.fingerprint("client", "ип иванов") and b.amount == 9000.0
+    assert "Иванов" not in repr(f.orders) and "ivanov" not in repr(f.orders).lower()
+
+
+def test_orders_export_documents_with_title_rows(tmp_path):
+    """Список документов 1С: заголовки ниже шапки, номер и дата внутри «Заказ клиента … от …», несколько адресов."""
+    from analytics import privacy
+    path = sheet_file(tmp_path / "docs.xlsx", [
+        ["Заказы клиентов"], ["Период: октябрь 2026"], [],
+        ["Заказ клиента", "Клиент", "Электронная почта", "Телефоны", "Сумма"],
+        ["Заказ клиента ЦБ-000123 от 05.10.2026 12:00:00", "Ромашка", "a@b.ru\nc@d.ru", "+7 917 470-64-44, 8 999 000 11 22",
+         "12 500,50"],
+    ], title="TDSheet")
+    f = parse_file(path)
+    [o] = f.orders
+    assert (o.order_no, o.order_date, o.amount) == ("ЦБ-000123", date(2026, 10, 5), 12500.5)
+    assert len(o.email_hashes) == 2 and len(o.phone_hashes) == 2 and privacy.email_hash("c@d.ru") in o.email_hashes
+    assert f.notes == ["нет номенклатуры — тему письма с купленным не сравнить"]
+
+
+def test_orders_single_sum_column_by_lines(tmp_path):
+    """Одна колонка «Сумма» в построчной выгрузке: разные суммы строк складываются, одинаковые — сумма заказа."""
+    path = sheet_file(tmp_path / "o.xlsx", [
+        ["Номер заказа", "Дата заказа", "Клиент", "Номенклатура", "Сумма"],
+        ["1", datetime(2026, 10, 1), "А", "Флис", 100], ["1", datetime(2026, 10, 1), "А", "Оксфорд", 250],
+        ["2", datetime(2026, 10, 2), "Б", "Флис", 400], ["2", datetime(2026, 10, 2), "Б", "Тент", 400],
+    ])
+    amounts = {o.order_no: o.amount for o in parse_file(path).orders}
+    assert amounts == {"1": 350.0, "2": 400.0}
+
+
+def test_generic_clients_are_not_grouped(tmp_path):
+    path = sheet_file(tmp_path / "o.xlsx", [
+        ["Номер", "Дата", "Клиент", "Сумма"],
+        ["1", datetime(2026, 10, 1), "Физическое лицо", 100], ["2", datetime(2026, 10, 1), "Розничный покупатель", 100],
+        ["3", datetime(2026, 10, 1), "ООО «Ромашка»", 100],
+    ])
+    hashes = {o.order_no: o.client_hash for o in parse_file(path).orders}
+    assert hashes["1"] is None and hashes["2"] is None and hashes["3"]
+
+
+def test_unknown_file_lists_headers_without_data(tmp_path):
+    path = sheet_file(tmp_path / "x.xlsx", [["Клиент", "Почта", "Комментарий"], ["Иванов", "ivanov@mail.ru", "перезвонить"]],
+                      title="Лист1")
+    with pytest.raises(CrmFileError) as err:
+        parse_file(path)
+    assert "Клиент, Почта, Комментарий" in str(err.value) and "ivanov" not in str(err.value)
+
+
+@needs_db
+def test_orders_import_and_retry_of_unknown_files(tmp_path):
+    with db.connect(TEST_DATABASE_URL) as conn:
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        db.apply_schema(conn)
+        sheet_file(tmp_path / "orders.xlsx", [["Номер", "Дата", "Сумма", "Email"], ["А-1", datetime(2026, 10, 5), 100, "a@b.ru"]])
+        sheet_file(tmp_path / "other.xlsx", [["Что-то", "Ещё", "Другое"]])
+        # файл, который прежняя версия разбора не узнала, разбирается заново
+        db.skip_crm_file(conn, crm_files.sha256(tmp_path / "orders.xlsx"), "orders.xlsx", version=3)
+        logs = []
+        import_crm_folder(conn, tmp_path, log=logs.append)
+        assert conn.execute("SELECT order_no, amount FROM orders_1c").fetchall() == [("А-1", 100)]
+        assert any("все заказы 1С — 1 заказов" in x for x in logs) and any("other.xlsx: не загружен" in x for x in logs)
+        logs.clear()
+        import_crm_folder(conn, tmp_path, log=logs.append)
+        assert logs == []  # оба файла уже разобраны этой версией

@@ -260,9 +260,9 @@ def mark_backfilled(conn: psycopg.Connection, counter_id: int, reports: set[str]
 
 
 def imported_files(conn: psycopg.Connection, version: int = 1) -> set[str]:
-    """Файлы, уже загруженные этой версией разбора (нераспознанные — любой)."""
+    """Файлы, уже разобранные этой версией разбора (и нераспознанные ею): новая версия разбирает их заново."""
     return {sha for (sha,) in conn.execute(
-        "SELECT sha256 FROM crm_imports WHERE parser_version >= %s OR kind = 'unknown'", (version,))}
+        "SELECT sha256 FROM crm_imports WHERE parser_version >= %s", (version,))}
 
 
 def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, version: int = 1) -> int:
@@ -272,7 +272,17 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
         cur.execute("DELETE FROM crm_summary WHERE month = %s AND kind = %s", (month, kind))
         cur.executemany("INSERT INTO crm_summary (month, kind, metric, value, note) VALUES (%s, %s, %s, %s, %s)"
                         " ON CONFLICT DO NOTHING", [(month, kind, m, v, n) for m, v, n in parsed.summary])
-        if kind == "forms":
+        if kind == "orders":  # выгрузки заказов могут пересекаться: заказ обновляется по номеру
+            cur.executemany(
+                "INSERT INTO orders_1c (order_no, order_date, amount, status, client_hash, email_hashes, phone_hashes,"
+                " items, groups) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                " ON CONFLICT (order_no) DO UPDATE SET order_date = EXCLUDED.order_date, amount = EXCLUDED.amount,"
+                " status = EXCLUDED.status, client_hash = EXCLUDED.client_hash, email_hashes = EXCLUDED.email_hashes,"
+                " phone_hashes = EXCLUDED.phone_hashes, items = EXCLUDED.items, groups = EXCLUDED.groups",
+                [(o.order_no, o.order_date, o.amount, o.status, o.client_hash, list(o.email_hashes),
+                  list(o.phone_hashes), list(o.items), list(o.groups)) for o in parsed.orders],
+            )
+        elif kind == "forms":
             cur.execute("DELETE FROM crm_form_leads WHERE month = %s", (month,))
             cur.executemany(
                 "INSERT INTO crm_form_leads (lead_id, month, created_at, stage, in_1c, orders, amount, closed, first_order,"
@@ -314,10 +324,12 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
     return parsed.rows
 
 
-def skip_crm_file(conn: psycopg.Connection, sha: str, file_name: str) -> None:
-    """Файл не распознан: запоминаем, чтобы не разбирать его снова при каждой проверке."""
-    conn.execute("INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded) VALUES (%s, %s, 'unknown',"
-                 " '1970-01-01', 0) ON CONFLICT DO NOTHING", (sha, file_name))
+def skip_crm_file(conn: psycopg.Connection, sha: str, file_name: str, version: int = 1) -> None:
+    """Файл не распознан: запоминаем, чтобы не разбирать его снова при каждой проверке (до новой версии разбора)."""
+    conn.execute("INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded, parser_version)"
+                 " VALUES (%s, %s, 'unknown', '1970-01-01', 0, %s)"
+                 " ON CONFLICT (sha256) DO UPDATE SET parser_version = EXCLUDED.parser_version, imported_at = now()",
+                 (sha, file_name, version))
 
 
 def save_semantics(conn: psycopg.Connection, sha: str, file_name: str, sem, version: int = 1) -> int:
@@ -358,6 +370,39 @@ def save_unisender(conn: psycopg.Connection, lists: dict[int, str], campaigns: l
             [(x.campaign_id, x.total, x.sent, x.delivered, x.read_unique, x.read_all, x.clicked_unique, x.clicked_all,
               x.unsubscribed, x.spam) for x in stats])
     return len(campaigns) + len(stats)
+
+
+def save_recipients(conn: psycopg.Connection, campaign_id: int, deliveries: list, links: list | None) -> int:
+    """Отчёт о доставке рассылки (заменяет прежний) и ссылки письма (если удалось их получить)."""
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM unisender_delivery WHERE campaign_id = %s", (campaign_id,))
+        cur.executemany("INSERT INTO unisender_delivery (campaign_id, email_hash, status, level) VALUES (%s, %s, %s, %s)"
+                        " ON CONFLICT DO NOTHING", [(campaign_id, d.email_hash, d.status[:40], d.level) for d in deliveries])
+        if links is not None:
+            cur.execute("DELETE FROM unisender_links WHERE campaign_id = %s", (campaign_id,))
+            cur.executemany("INSERT INTO unisender_links (campaign_id, url, text) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                            [(campaign_id, x.url[:1000], x.text) for x in links])
+        cur.execute("INSERT INTO unisender_recipients_runs (campaign_id, recipients) VALUES (%s, %s)"
+                    " ON CONFLICT (campaign_id) DO UPDATE SET recipients = EXCLUDED.recipients, fetched_at = now()",
+                    (campaign_id, len(deliveries)))
+    return len(deliveries)
+
+
+def recipients_due(conn: psycopg.Connection, campaigns: list, today: date, fresh_days: int = 30,
+                   max_age_days: int = 175) -> list:
+    """Рассылки, чей отчёт о доставке пора забрать: ещё не забирали, или рассылка свежая (открытия копятся),
+    и при этом не старше max_age_days (UniSender отдаёт отчёт только за последние 180 дней)."""
+    fetched = dict(conn.execute("SELECT campaign_id, fetched_at FROM unisender_recipients_runs").fetchall())
+    out = []
+    for c in campaigns:
+        if not c.start_time or c.start_time.date() > today:
+            continue
+        age = (today - c.start_time.date()).days
+        last = fetched.get(c.campaign_id)
+        settled = last is not None and (last.date() - c.start_time.date()).days >= fresh_days
+        if age <= max_age_days and not settled:
+            out.append(c)
+    return out
 
 
 def replace_email_base(conn: psycopg.Connection, contacts: list) -> int:

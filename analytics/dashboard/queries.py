@@ -719,21 +719,132 @@ def email_base(conn: psycopg.Connection) -> dict | None:
     """)
 
 
-def base_leads(conn: psycopg.Connection, month: date) -> dict:
-    """Лиды месяца, чья почта или телефон есть в базе рассылок: лиды с форм и входящие звонки."""
-    forms = _all(conn, f"""
-        SELECT f.*, EXISTS (
-            SELECT 1 FROM email_base b
-            WHERE b.email_hash = ANY (f.email_hashes) OR (f.phone_hash IS NOT NULL AND b.phone_hash = f.phone_hash)
-        ) AS in_base
-        FROM crm_form_leads f WHERE f.month = {MONTH}
-    """, (month,))
-    calls = _all(conn, f"""
-        SELECT c.*, (c.phone_hash IS NOT NULL AND EXISTS (SELECT 1 FROM email_base b WHERE b.phone_hash = c.phone_hash))
-                    AS in_base
-        FROM crm_call_leads c WHERE c.month = {MONTH}
-    """, (month,))
-    return {"forms": forms, "calls": calls}
+# ----- рассылки по базе и заказы 1С -----
+
+WINDOW_DAYS = 14  # заказ считается после письма, если письмо ушло не раньше чем за 14 дней до заказа
+# Рассылки по служебным спискам (сотрудники, тесты) в сведении с заказами не участвуют.
+MAILING = "NOT coalesce(l.title, '') ~* '(сотрудник|тест)'"
+NOT_CANCELLED = "coalesce(status, '') !~* '(отмен|аннул)'"
+
+# Контакты клиента заказа: почта из самого заказа и из других заказов того же клиента, плюс почта контактов
+# базы рассылок, найденных по телефону. Параметры: from, to — даты заказов.
+_ORDER_CONTACTS = f"""
+    o AS MATERIALIZED (
+        SELECT * FROM orders_1c
+        WHERE order_date >= %(from)s AND order_date < %(to)s AND {NOT_CANCELLED}
+    ),
+    crowd AS MATERIALIZED (  -- «клиент» с множеством разных адресов — не один покупатель, его заказы не сводим
+        SELECT client_hash FROM orders_1c CROSS JOIN LATERAL unnest(email_hashes) e
+        WHERE client_hash IS NOT NULL GROUP BY client_hash HAVING count(DISTINCT e) > 5
+    ),
+    same AS MATERIALIZED (
+        SELECT o.order_no, x.email_hashes, x.phone_hashes FROM o JOIN orders_1c x ON x.client_hash = o.client_hash
+        WHERE o.client_hash NOT IN (SELECT client_hash FROM crowd)
+        UNION ALL
+        SELECT order_no, email_hashes, phone_hashes FROM o
+    ),
+    contacts AS MATERIALIZED (
+        SELECT DISTINCT order_no, email_hash FROM (
+            SELECT s.order_no, e AS email_hash FROM same s CROSS JOIN LATERAL unnest(s.email_hashes) e
+            UNION ALL
+            SELECT s.order_no, b.email_hash FROM same s CROSS JOIN LATERAL unnest(s.phone_hashes) p
+            JOIN email_base b ON b.phone_hash = p WHERE b.email_hash IS NOT NULL
+        ) z
+    )
+"""
+
+
+def orders_coverage(conn: psycopg.Connection) -> dict | None:
+    row = _one(conn, f"SELECT count(*) AS orders, min(order_date) AS first, max(order_date) AS last FROM orders_1c"
+                     f" WHERE {NOT_CANCELLED}")
+    return row if row and row["orders"] else None
+
+
+def deliveries_loaded(conn: psycopg.Connection, month: date, window: int = WINDOW_DAYS) -> bool:
+    """Есть ли отчёты о доставке по рассылкам, которые могли повлиять на заказы месяца."""
+    return bool(_one(conn, """
+        SELECT 1 AS ok FROM unisender_recipients_runs r JOIN unisender_campaigns c USING (campaign_id)
+        WHERE c.start_time >= %s::date - %s AND c.start_time < %s LIMIT 1
+    """, (month, window, _next_month(month))))
+
+
+def mail_orders(conn: psycopg.Connection, month: date, window: int = WINDOW_DAYS) -> list[dict]:
+    """Заказы месяца: клиент в базе рассылок или нет, и какие письма он получил за window дней до заказа
+    (touches: рассылка и лучший статус письма у его адресов)."""
+    return _all(conn, f"""
+        WITH {_ORDER_CONTACTS},
+        t AS (
+            SELECT k.order_no, d.campaign_id, max(d.level) AS level
+            FROM contacts k
+            JOIN o USING (order_no)
+            JOIN unisender_delivery d USING (email_hash)
+            JOIN unisender_campaigns c USING (campaign_id)
+            LEFT JOIN unisender_lists l ON l.list_id = c.list_id
+            WHERE c.start_time::date <= o.order_date AND c.start_time::date > o.order_date - %(w)s AND {MAILING}
+            GROUP BY 1, 2
+        )
+        SELECT o.order_no, o.order_date, o.amount, o.items, o.groups,
+               (EXISTS (SELECT 1 FROM contacts k JOIN email_base b USING (email_hash) WHERE k.order_no = o.order_no)
+                OR EXISTS (SELECT 1 FROM contacts k JOIN unisender_delivery d USING (email_hash)
+                           WHERE k.order_no = o.order_no)
+                OR EXISTS (SELECT 1 FROM unnest(o.phone_hashes) p JOIN email_base b ON b.phone_hash = p)) AS in_base,
+               coalesce(json_agg(json_build_object('campaign_id', t.campaign_id, 'level', t.level))
+                        FILTER (WHERE t.campaign_id IS NOT NULL), '[]') AS touches
+        FROM o LEFT JOIN t USING (order_no)
+        GROUP BY o.order_no, o.order_date, o.amount, o.items, o.groups, o.phone_hashes
+        ORDER BY o.order_date, o.order_no
+    """, {"from": month, "to": _next_month(month), "w": window})
+
+
+def mail_campaigns(conn: psycopg.Connection, ids: list[int]) -> dict[int, dict]:
+    """Тема, дата и ссылки писем — чтобы понять, о каких товарах письмо."""
+    if not ids:
+        return {}
+    rows = _all(conn, """
+        SELECT c.campaign_id, c.subject, c.start_time, l.title AS list_title,
+               coalesce(array_agg(k.url) FILTER (WHERE k.url IS NOT NULL), '{}') AS urls,
+               coalesce(array_agg(k.text) FILTER (WHERE k.url IS NOT NULL), '{}') AS texts
+        FROM unisender_campaigns c
+        LEFT JOIN unisender_lists l ON l.list_id = c.list_id
+        LEFT JOIN unisender_links k USING (campaign_id)
+        WHERE c.campaign_id = ANY (%s)
+        GROUP BY 1, 2, 3, 4
+    """, (ids,))
+    return {r["campaign_id"]: r for r in rows}
+
+
+def mail_lift(conn: psycopg.Connection, month: date, window: int = WINDOW_DAYS) -> list[dict]:
+    """Рассылки месяца: сколько адресов получили, открыли, перешли, и сколько из открывших и не открывших
+    сделали заказ за window дней после письма."""
+    return _all(conn, f"""
+        WITH c AS MATERIALIZED (
+            SELECT c.campaign_id, c.start_time, c.start_time::date AS day, c.subject
+            FROM unisender_campaigns c LEFT JOIN unisender_lists l ON l.list_id = c.list_id
+            WHERE c.start_time >= %(from)s AND c.start_time < %(m_end)s AND {MAILING}
+              AND EXISTS (SELECT 1 FROM unisender_recipients_runs r WHERE r.campaign_id = c.campaign_id)
+        ),
+        {_ORDER_CONTACTS},
+        oc AS MATERIALIZED (SELECT k.email_hash, o.order_date FROM contacts k JOIN o USING (order_no)),
+        r AS (
+            SELECT d.campaign_id, d.level, EXISTS (
+                SELECT 1 FROM oc WHERE oc.email_hash = d.email_hash
+                  AND oc.order_date >= c.day AND oc.order_date < c.day + %(w)s) AS ordered
+            FROM unisender_delivery d JOIN c USING (campaign_id)
+            WHERE d.level >= 1
+        )
+        SELECT c.campaign_id, c.start_time, c.subject, (c.day + %(w)s) AS window_end,
+               count(r.level) AS delivered, count(*) FILTER (WHERE r.level >= 2) AS opened,
+               count(*) FILTER (WHERE r.level >= 3) AS clicked,
+               count(*) FILTER (WHERE r.level >= 2 AND r.ordered) AS opened_ordered,
+               count(*) FILTER (WHERE r.level = 1 AND r.ordered) AS unopened_ordered
+        FROM c LEFT JOIN r USING (campaign_id)
+        GROUP BY 1, 2, 3, 4
+        ORDER BY c.start_time
+    """, {"from": month, "m_end": _next_month(month), "to": _next_month(month) + timedelta(days=window), "w": window})
+
+
+def _next_month(month: date) -> date:
+    return (month.replace(day=1) + timedelta(days=32)).replace(day=1)
 
 
 def email_utm_month(conn: psycopg.Connection, counter_id: int, audience: str, month: date) -> list[dict]:

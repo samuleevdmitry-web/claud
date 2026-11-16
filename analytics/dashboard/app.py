@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from analytics import db
 from analytics.config import load_settings
 from analytics.dashboard import pages
-from analytics.format import fmt_change, fmt_dec, fmt_duration, fmt_int, fmt_pct, month_name, month_short, month_with
+from analytics.format import fmt_change, fmt_dec, fmt_duration, fmt_int, fmt_pct, month_name, month_short, month_with, plural
 
 HERE = Path(__file__).parent
 TZ = ZoneInfo("Europe/Moscow")
@@ -68,6 +68,7 @@ templates.env.filters.update(
     urlencode_pairs=urlencode_pairs,
     int=fmt_int, dec=fmt_dec, pct=fmt_pct, duration=fmt_duration, month=month_name, month_short=month_short, month_with=month_with,
     change=fmt_change, local=lambda dt: dt.astimezone(TZ).strftime("%d.%m.%Y %H:%M") if dt else "—",
+    plural=lambda n, *forms: plural(round(n), forms),
 )
 
 

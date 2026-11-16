@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from math import log10
 from statistics import median
 
+from analytics import topics
 from analytics.format import fmt_dec, fmt_int, fmt_pct, month_short, plural
 
 KINDS = {"plus": "Плюсы", "minus": "Минусы", "question": "Вопросы", "check": "Что проверить"}
@@ -1152,27 +1153,105 @@ def email_stats(campaigns: list[dict], source_row: dict | None) -> dict:
     return s
 
 
-def base_stats(forms: list[dict], calls: list[dict], orders: list[dict]) -> dict:
-    """Лиды из базы рассылок против остальных: конверсия в новых клиентов с заказом (только новые)."""
-    def part(rows):
-        target = [r for r in rows if r["stage"] not in NONTARGET_STAGES]
-        sold = [r for r in rows if r["in_1c"] and r.get("category") != "existing"]
-        return {"leads": len(rows), "target": len(target), "sold": len(sold),
-                "amount": float(sum(r["amount"] or 0 for r in sold)), "conv": _share(len(sold), len(target))}
+ORDER_CLASSES = [
+    ("topic_click", "Перешли по ссылке письма и купили товар из него"),
+    ("topic_open", "Открыли письмо и купили товар из него"),
+    ("open_other", "Открыли письмо, купили другое"),
+    ("unopened", "Получили письмо, но не открывали"),
+    ("no_mail", "В базе рассылок, писем за 14 дней до заказа не было"),
+    ("outside", "Нет в базе рассылок"),
+]
+MAIL_CLASSES = ("topic_click", "topic_open", "open_other")  # заказ после открытого письма
+LIFT_MIN_OPENED = 50  # меньше открывших — сравнение с не открывшими ненадёжно
 
-    in_base_calls = {r["lead_id"] for r in calls if r["in_base"]}
-    new_orders = [o for o in orders if o["category"] == "new"]
-    base_call_orders = [o for o in new_orders if o["lead_id"] in in_base_calls]
+
+def _order_class(level: int, topic: bool, in_base: bool) -> str:
+    if level >= 2:
+        return ("topic_click" if level >= 3 else "topic_open") if topic else "open_other"
+    if level == 1:
+        return "unopened"
+    return "no_mail" if in_base else "outside"
+
+
+def mail_orders_stats(orders: list[dict], campaigns: dict[int, dict], lift_rows: list[dict],
+                      orders_last: date | None) -> dict:
+    """Заказы месяца против рассылок: какое письмо было у клиента за 14 дней до заказа и что он с ним сделал.
+
+    Для заказа берётся самое сильное касание: открытое письмо по теме покупки, затем переход по ссылке, открытие,
+    просто доставка. Тема письма сравнивается с номенклатурой заказа по основам слов (analytics.topics).
+    """
+    terms = {cid: topics.campaign_terms(c["subject"], list(zip(c["urls"], c["texts"]))) for cid, c in campaigns.items()}
+    has_items = any(o["items"] or o["groups"] for o in orders)
+    classes = {key: {"key": key, "title": title, "orders": 0, "amount": 0.0} for key, title in ORDER_CLASSES}
+    examples, bought_groups, campaign_orders = [], {}, {}
+    for o in orders:
+        bought = topics.order_terms(o["items"], o["groups"])
+        best = None
+        for t in o["touches"] or []:
+            c = campaigns.get(t["campaign_id"])
+            if not c:
+                continue
+            common = bought & terms.get(t["campaign_id"], set())
+            key = (t["level"] >= 2 and bool(common), t["level"], c["start_time"].isoformat() if c["start_time"] else "")
+            if best is None or key > best[0]:
+                best = (key, t, c, common)
+        level = best[1]["level"] if best else 0
+        cls = _order_class(level, bool(best and best[3]), o["in_base"] or bool(best))
+        amount = float(o["amount"] or 0)
+        classes[cls]["orders"] += 1
+        classes[cls]["amount"] += amount
+        if cls in MAIL_CLASSES:
+            cid = best[2]["campaign_id"]
+            agg = campaign_orders.setdefault(cid, {"orders": 0, "amount": 0.0, "topic": 0, "topic_amount": 0.0})
+            agg["orders"] += 1
+            agg["amount"] += amount
+            if best[3]:
+                agg["topic"] += 1
+                agg["topic_amount"] += amount
+        if cls in ("topic_click", "topic_open"):
+            examples.append({"order_no": o["order_no"], "order_date": o["order_date"], "amount": amount, "class": cls,
+                             "campaign": best[2], "days": (o["order_date"] - best[2]["start_time"].date()).days,
+                             "matched": [x for x in (o["items"] or []) + (o["groups"] or [])
+                                         if topics.stems(x) & best[3]][:2]})
+        if cls != "outside":
+            for g in (o["groups"] or o["items"] or [])[:3]:
+                bought_groups[g] = bought_groups.get(g, 0) + 1
+    base_orders = [c for k, c in classes.items() if k != "outside"]
+    mailed = [classes[k] for k in MAIL_CLASSES]
+    lift = _lift(lift_rows, orders_last)
+    for row in lift_rows:
+        row.update(campaign_orders.get(row["campaign_id"], {"orders": 0, "amount": 0.0, "topic": 0, "topic_amount": 0.0}))
+    all_terms = set().union(*terms.values()) if terms else set()
+    uncovered = [(g, n) for g, n in sorted(bought_groups.items(), key=lambda x: -x[1])
+                 if not (topics.stems(g) & all_terms)][:5]
     return {
-        "forms_base": part([r for r in forms if r["in_base"]]),
-        "forms_other": part([r for r in forms if not r["in_base"]]),
-        "calls_base": sum(1 for r in calls if r["in_base"]), "calls": len(calls),
-        "calls_base_sales": len({o["lead_id"] for o in base_call_orders}),
-        "calls_base_amount": float(sum(o["amount"] for o in base_call_orders)),
+        "orders": len(orders), "amount": sum(float(o["amount"] or 0) for o in orders),
+        "classes": list(classes.values()), "has_items": has_items,
+        "base_orders": sum(c["orders"] for c in base_orders), "base_amount": sum(c["amount"] for c in base_orders),
+        "mail_orders": sum(c["orders"] for c in mailed), "mail_amount": sum(c["amount"] for c in mailed),
+        "topic_orders": classes["topic_click"]["orders"] + classes["topic_open"]["orders"],
+        "topic_amount": classes["topic_click"]["amount"] + classes["topic_open"]["amount"],
+        "examples": sorted(examples, key=lambda e: -e["amount"])[:20],
+        "campaigns": lift_rows, "lift": lift, "uncovered": uncovered if campaigns else [],
     }
 
 
-def email_findings(s: dict, prev: dict | None, campaigns: list[dict], base: dict | None) -> list[Finding]:
+def _lift(rows: list[dict], orders_last: date | None) -> dict | None:
+    """Открывшие письмо против не открывших: доля сделавших заказ за 14 дней. Только рассылки, у которых
+    14 дней уже прошли и есть выгрузка заказов за них."""
+    closed = [r for r in rows if orders_last and r["window_end"] <= orders_last + timedelta(days=1) and r["delivered"]]
+    opened = sum(r["opened"] for r in closed)
+    unopened = sum(r["delivered"] - r["opened"] for r in closed)
+    if not closed or not opened or not unopened:
+        return None
+    rate_open = 100.0 * sum(r["opened_ordered"] for r in closed) / opened
+    rate_unopen = 100.0 * sum(r["unopened_ordered"] for r in closed) / unopened
+    return {"campaigns": len(closed), "pending": len(rows) - len(closed), "opened": opened, "unopened": unopened,
+            "rate_open": rate_open, "rate_unopen": rate_unopen,
+            "extra": max(0.0, (rate_open - rate_unopen) / 100.0 * opened), "reliable": opened >= LIFT_MIN_OPENED}
+
+
+def email_findings(s: dict, prev: dict | None, campaigns: list[dict], mail: dict | None) -> list[Finding]:
     out = []
     if s["campaigns"]:
         text = (f"Рассылок: {s['campaigns']}, доставлено {fmt_int(s['delivered'])} писем; открыли {fmt_pct(s['open_rate'])}, "
@@ -1206,15 +1285,34 @@ def email_findings(s: dict, prev: dict | None, campaigns: list[dict], base: dict
         out.append(Finding("plus" if s["channel_leads"] else "minus",
                            f"Метрика, канал «почтовые рассылки»: {plural(s['channel_visits'], VISITS)}, "
                            f"{plural(s['channel_leads'] or 0, LEADS)}."))
-    if base and base["forms_base"]["leads"]:
-        b, o = base["forms_base"], base["forms_other"]
-        out.append(Finding("question" if b["conv"] <= o["conv"] else "plus",
-                           f"Из лидов с сайта {b['leads']} — подписчики базы рассылок; заказ в 1С сделали {b['sold']} "
-                           f"({fmt_pct(b['conv'])} целевых) против {fmt_pct(o['conv'])} у остальных."))
+    if mail and mail["orders"]:
+        m = mail
+        text = (f"Заказов 1С за месяц: {fmt_int(m['orders'])}, из них от клиентов из базы рассылок — "
+                f"{fmt_int(m['base_orders'])} на {fmt_int(m['base_amount'])} ₽. После открытого письма (за 14 дней) — "
+                f"{plural(m['mail_orders'], ORDERS)} на {fmt_int(m['mail_amount'])} ₽")
+        text += (f", из них товар из письма — {plural(m['topic_orders'], ORDERS)} на {fmt_int(m['topic_amount'])} ₽."
+                 if m["has_items"] else ". Номенклатуры в выгрузке нет — тему письма с покупкой не сравнить.")
+        out.append(Finding("plus" if m["mail_orders"] else "question", text))
+        lift = m["lift"]
+        if lift:
+            diff = lift["rate_open"] - lift["rate_unopen"]
+            kind = "plus" if diff > 0 else "minus"
+            text = (f"Из открывших письмо заказ за 14 дней сделали {fmt_pct(lift['rate_open'], 1)}, из не открывших — "
+                    f"{fmt_pct(lift['rate_unopen'], 1)} ({plural(lift['campaigns'], ('рассылка', 'рассылки', 'рассылок'))}).")
+            if diff > 0:
+                text += (f" Разница — около {plural(round(lift['extra']), ('заказа', 'заказов', 'заказов'))}: это верхняя "
+                         "оценка того, что дала "
+                         "рассылка (открывают и так более активные клиенты).")
+            if not lift["reliable"]:
+                kind, text = "question", text + " Открывших пока мало — вывод ненадёжный."
+            out.append(Finding(kind, text))
+        if m["uncovered"]:
+            out.append(Finding("check", "Клиенты базы чаще всего покупали то, о чём писем в этом месяце не было: "
+                                        + ", ".join(f"{g} ({n})" for g, n in m["uncovered"][:4]) + "."))
     return out
 
 
-def email_recommend(s: dict | None, campaigns: list[dict], base: dict | None) -> list[Recommendation]:
+def email_recommend(s: dict | None, campaigns: list[dict], mail: dict | None) -> list[Recommendation]:
     if not s or not s["campaigns"]:
         return []
     out = []
@@ -1236,13 +1334,17 @@ def email_recommend(s: dict | None, campaigns: list[dict], base: dict | None) ->
             "Ссылка из письма должна вести сразу на товар или подборку из письма с ценой и кнопкой заявки, а не на главную.",
             "; ".join(f"«{(c['subject'] or str(c['campaign_id']))[:40]}» — {plural(c['visits'], VISITS)} без заявок"
                       for c in idle[:3]) + "."))
-    if base:
-        b, o = base["forms_base"], base["forms_other"]
-        if b["target"] >= 5 and b["conv"] >= 1.5 * max(o["conv"], 0.1):
-            out.append(Recommendation(
-                3, "E-mail", "Чаще работать с подписчиками",
-                "Подписчики покупают лучше остальных: регулярная рассылка с новинками и остатками, отдельный сегмент "
-                "«оставили заявку, но не купили».",
-                f"Целевые лиды из базы рассылок становятся клиентами в {fmt_pct(b['conv'])} случаев, остальные — "
-                f"в {fmt_pct(o['conv'])}."))
+    lift = (mail or {}).get("lift")
+    if lift and lift["reliable"] and lift["rate_open"] >= 1.5 * max(lift["rate_unopen"], 0.1):
+        out.append(Recommendation(
+            3, "E-mail", "Рассылки по базе приносят заказы — слать регулярно",
+            "Держать постоянный ритм: новинки, остатки, сезонные подборки по направлениям; не открывшим — повтор "
+            "с другой темой письма через 3–4 дня.",
+            f"Открывшие письмо заказывают в {fmt_pct(lift['rate_open'], 1)} случаев за 14 дней, не открывшие — "
+            f"в {fmt_pct(lift['rate_unopen'], 1)}."))
+    if mail and mail["uncovered"]:
+        out.append(Recommendation(
+            3, "E-mail", "Писать о том, что база покупает",
+            "Сделать рассылки по группам, которые клиенты базы берут чаще всего, — с подборкой, ценами и наличием.",
+            "Чаще всего покупали, а писем не было: " + ", ".join(g for g, _ in mail["uncovered"][:3]) + "."))
     return out

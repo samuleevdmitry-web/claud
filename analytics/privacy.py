@@ -42,9 +42,9 @@ def email_hash(value) -> str | None:
 
 
 def email_hashes(value) -> list[str]:
-    """Отпечатки всех адресов ячейки (через запятую или точку с запятой)."""
+    """Отпечатки всех адресов ячейки (через запятую, точку с запятой, пробел или с новой строки)."""
     out = []
-    for part in str(value or "").replace(";", ",").split(","):
+    for part in re.split(r"[,;\s]+", str(value or "")):
         h = fingerprint("email", norm_email(part))
         if h and h not in out:
             out.append(h)

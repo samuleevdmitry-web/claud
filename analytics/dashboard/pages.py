@@ -760,7 +760,7 @@ def recommendations(conn: psycopg.Connection, settings: Settings, f: Filters, pf
     sales = sales_page(conn, settings, f)  # выгрузки CRM — по основному сайту
     email = email_data(conn, settings, f)
     recs = ins.recommend(data) + ins.crm_recommend(sales["stats"]) + ins.email_recommend(
-        email["stats"], email["campaigns"], email["base"])
+        email["stats"], email["campaigns"], email["mail"])
     return sorted(recs, key=lambda r: r.priority)
 
 
@@ -960,12 +960,17 @@ def email_data(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
     prev = ins.email_stats(prev_campaigns, None) if prev_campaigns else None
     primary = not settings.metrika_counters or f.counter_id == settings.metrika_counters[0]
     base_info = q.email_base(conn) if primary else None
-    base = None
-    if base_info and base_info["contacts"]:
-        leads = q.base_leads(conn, f.month)
-        if leads["forms"] or leads["calls"]:
-            base = ins.base_stats(leads["forms"], leads["calls"], q.crm_call_orders(conn, f.month))
-    return {"stats": s, "prev": prev, "campaigns": campaigns, "base_info": base_info, "base": base}
+    coverage = q.orders_coverage(conn) if primary else None
+    mail = None
+    delivery_ready = bool(coverage) and q.deliveries_loaded(conn, f.month)
+    if delivery_ready:
+        orders = q.mail_orders(conn, f.month)
+        lift_rows = q.mail_lift(conn, f.month)
+        if orders or lift_rows:
+            ids = sorted({t["campaign_id"] for o in orders for t in o["touches"]} | {r["campaign_id"] for r in lift_rows})
+            mail = ins.mail_orders_stats(orders, q.mail_campaigns(conn, ids), lift_rows, coverage["last"])
+    return {"stats": s, "prev": prev, "campaigns": campaigns, "base_info": base_info, "mail": mail,
+            "orders_coverage": coverage, "delivery_ready": delivery_ready, "window": q.WINDOW_DAYS}
 
 
 def email_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
@@ -997,7 +1002,7 @@ def email_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
         tile("Отписки", fmt_pct(s["unsub_rate"], 2), "unsub_rate", "pp", f"{fmt_int(s['unsubscribed'])} человек"),
         metrika_tile,
     ]
-    findings = ins.email_findings(s, prev, d["campaigns"], d["base"])
+    findings = ins.email_findings(s, prev, d["campaigns"], d["mail"])
     return {**d, "tiles": tiles, "charts": charts, "summary": ins.summarize(findings), "findings": findings,
             "utm": q.email_utm_month(conn, f.counter_id, f.audience, f.month),
             "configured": bool(settings.unisender_api_key) or bool(d["campaigns"])}

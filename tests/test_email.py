@@ -5,10 +5,19 @@ from datetime import date, datetime
 
 import pytest
 
-from analytics import db, privacy
+from analytics import db, privacy, topics
 from analytics import insights as ins
 from analytics.dashboard import queries as q
-from analytics.sources.unisender import UnisenderClient, UnisenderError, parse_contacts
+from analytics.sources.unisender import (
+    Link,
+    UnisenderClient,
+    UnisenderError,
+    delivery_level,
+    extract_links,
+    parse_contacts,
+    parse_delivery,
+    table_rows,
+)
 from analytics.sync import sync_metrika, sync_unisender
 from tests.fakes import FakeMetrikaClient, FakeResponse, FakeSession, dim
 
@@ -98,7 +107,8 @@ class FakeUnisender:
 
     def campaigns(self, since, until):
         from analytics.sources.unisender import parse_campaign
-        return [parse_campaign({"id": 101, "start_time": "2026-09-10 10:00:00", "list_id": 1, "subject": "Мембраны"}),
+        return [parse_campaign({"id": 101, "start_time": "2026-09-10 10:00:00", "list_id": 1, "subject": "Мембраны",
+                                "message_id": 7}),
                 parse_campaign({"id": 102, "start_time": "2026-09-20 10:00:00", "list_id": 1, "subject": "Флис"})]
 
     def stats(self, campaign_id):
@@ -108,6 +118,17 @@ class FakeUnisender:
 
     def export_contacts(self):
         return parse_contacts(CSV)
+
+    def delivery(self, campaign_id):
+        rows = {101: [{"email": "buyer@example.ru", "send_result": "ok_link_visited"},
+                      {"email": "other@example.ru", "send_result": "ok_delivered"},
+                      {"email": "third@example.ru", "send_result": "ok_read"}],
+                102: [{"email": "buyer@example.ru", "send_result": "ok_read"},
+                      {"email": "other@example.ru", "send_result": "err_user_unknown"}]}[campaign_id]
+        return parse_delivery(rows)
+
+    def message_links(self, message_id):
+        return [Link("https://oldos.ru/catalog/membrannye_tkani/", "Мембраны")]
 
 
 @needs_db
@@ -136,16 +157,89 @@ def test_email_channel_and_base():
         assert (s["campaigns"], s["delivered"], round(s["open_rate"], 1), round(s["unsub_rate"], 2)) == (2, 1800, 22.2, 1.0)
         assert "Снизить отписки" in [r.title for r in ins.email_recommend(s, campaigns, None)]
 
-        # лиды месяца: один — подписчик (почта в другом регистре), второй — нет
-        conn.execute("INSERT INTO crm_form_leads (lead_id, month, created_at, stage, in_1c, orders, amount, email_hashes)"
-                     " VALUES (1, %s, %s, 'Перевести в сделку', true, 1, 50000, %s),"
-                     " (2, %s, %s, 'Перевести в сделку', false, 0, 0, %s)",
-                     (sep, datetime(2026, 9, 12), [privacy.email_hash("BUYER@example.ru")],
-                      sep, datetime(2026, 9, 13), [privacy.email_hash("new@client.ru")]))
-        conn.execute("INSERT INTO crm_call_leads (lead_id, month, call_type, stage, in_1c, phone_hash)"
-                     " VALUES (10, %s, 'Входящий', 'Перевести в сделку', false, %s)", (sep, privacy.phone_hash("89990001122")))
-        leads = q.base_leads(conn, sep)
-        base = ins.base_stats(leads["forms"], leads["calls"], [])
-        assert (base["forms_base"]["leads"], base["forms_base"]["sold"], base["forms_other"]["leads"]) == (1, 1, 1)
-        assert base["calls_base"] == 1
+        # отчёт о доставке по адресам и ссылки письма
+        assert conn.execute("SELECT count(*) FROM unisender_delivery").fetchone()[0] == 5
+        assert conn.execute("SELECT url FROM unisender_links WHERE campaign_id = 101").fetchone()[0].endswith("tkani/")
         assert q.email_base(conn)["contacts"] == 3
+
+        # заказы 1С: покупатель (почта в другом регистре) купил мембрану через 5 дней после письма, по которому кликнул;
+        # второй клиент из базы (найден по телефону) письмо не открывал; третий — не из базы
+        orders = [
+            ("З-1", date(2026, 9, 15), 50000, "Закрыт", "c1", [privacy.email_hash("BUYER@example.ru")], [],
+             ["Мембрана 3-слойная"], ["Мембранные ткани"]),
+            ("З-2", date(2026, 9, 18), 7000, "Закрыт", "c2", [], [privacy.phone_hash("89990001122")], ["Флис 280"], []),
+            ("З-3", date(2026, 9, 25), 9000, "Отменен", "c3", [], [], [], []),
+            ("З-4", date(2026, 9, 26), 3000, "Закрыт", "c4", [privacy.email_hash("new@client.ru")], [], ["Флис"], []),
+        ]
+        conn.cursor().executemany("INSERT INTO orders_1c (order_no, order_date, amount, status, client_hash, email_hashes,"
+                         " phone_hashes, items, groups) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)", orders)
+        rows = q.mail_orders(conn, sep)
+        assert [(r["order_no"], r["in_base"], sorted((t["campaign_id"], t["level"]) for t in r["touches"])) for r in rows] == [
+            ("З-1", True, [(101, 3)]), ("З-2", True, []), ("З-4", False, [])]
+        lift = q.mail_lift(conn, sep)
+        assert [(r["campaign_id"], r["delivered"], r["opened"], r["clicked"], r["opened_ordered"], r["unopened_ordered"])
+                for r in lift] == [(101, 3, 2, 1, 1, 0), (102, 1, 1, 0, 0, 0)]
+        ids = sorted({t["campaign_id"] for r in rows for t in r["touches"]} | {r["campaign_id"] for r in lift})
+        m = ins.mail_orders_stats(rows, q.mail_campaigns(conn, ids), lift, q.orders_coverage(conn)["last"])
+        classes = {c["key"]: (c["orders"], c["amount"]) for c in m["classes"]}
+        assert classes["topic_click"] == (1, 50000.0) and classes["no_mail"] == (1, 7000.0)
+        assert classes["outside"] == (1, 3000.0) and m["orders"] == 3 and m["base_orders"] == 2
+        assert m["examples"][0]["order_no"] == "З-1" and m["examples"][0]["days"] == 5
+        assert m["campaigns"][0]["orders"] == 1 and m["campaigns"][0]["topic"] == 1
+        # у рассылки 101 окно закрыто (заказы есть по 26.09), у 102 — нет
+        assert m["lift"]["campaigns"] == 1 and m["lift"]["pending"] == 1
+        texts = " ".join(x.text for x in ins.email_findings(s, None, campaigns, m)).replace("\xa0", " ")
+        assert "товар из письма — 1 заказ" in texts
+        assert m["uncovered"] == []  # мембраны и флис — темы писем этого месяца
+
+
+def test_delivery_report_and_links():
+    rows = table_rows({"fields": ["email", "send_result", "last_update"],
+                       "data": [["A@b.ru", "ok_read", "2026-09-10"], ["a@b.ru", "ok_link_visited", "x"],
+                                ["c@d.ru", "err_user_unknown", "x"], ["e@f.ru", "ok_unsubscribed", "x"]]})
+    by_level = sorted((d.status, d.level) for d in parse_delivery(rows))
+    assert by_level == [("err_user_unknown", 0), ("ok_link_visited", 3), ("ok_unsubscribed", 2)]
+    assert delivery_level("ok_delivered") == 1 and delivery_level("not_sent") == 0
+    html = ('<p>Новинки</p><a href="https://oldos.ru/catalog/flis/?utm_source=Unisender&amp;utm_medium=email&amp;x=1">'
+            '<b>Флис</b> 280</a> <a href="https://unisender.com/unsubscribe?x">Отписаться</a>'
+            '<a href="mailto:a@b.ru">почта</a><a href="https://vk.com/oldos">VK</a>')
+    assert extract_links(html) == [Link("https://oldos.ru/catalog/flis/?x=1", "Флис 280")]
+
+
+def test_delivery_via_async_task_file():
+    csv_text = "email,send_result,last_update\nbuyer@example.ru,ok_read,2026-09-10\n"
+    session = FakeSession([ok({"task_uuid": "t1", "status": "new"}),
+                           ok({"task_uuid": "t1", "status": "completed", "file_to_download": "https://x/file.csv"}),
+                           FakeResponse(200, text=csv_text)])
+    client = UnisenderClient("key", session=session, backoff=0, pause=0, limit_wait=0)
+    [d] = client.delivery(101, wait=0)
+    assert d.email_hash == privacy.email_hash("buyer@example.ru") and d.level == 2
+    assert session.calls[0][0].endswith("async/getCampaignDeliveryStats") and session.calls[0][1]["campaign_id"] == 101
+
+
+def test_topics_match_letter_and_order():
+    letter = topics.campaign_terms("Новые мембраны и флис со скидкой",
+                                   [("https://oldos.ru/catalog/membrannye_tkani/", "Мембранные ткани"),
+                                    ("https://oldos.ru/catalog/oksford_600d/", "Оксфорд")])
+    order = topics.order_terms(["Ткань Оксфорд 600D PU1000 черный"], ["Ткани для одежды"])
+    assert letter & order == {"оксфо"}
+    assert not topics.stems("Ткань черная, купить оптом в каталоге")  # общие слова не в счёт
+
+
+@needs_db
+def test_shared_client_does_not_borrow_contacts():
+    """«Клиент» с множеством разных адресов (общая карточка) — его заказы не сводятся друг с другом."""
+    with db.connect(TEST_DATABASE_URL) as conn:
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        db.apply_schema(conn)
+        sep = date(2026, 9, 1)
+        sync_unisender(conn, FakeUnisender(), sep, date(2026, 9, 30), log=lambda _: None)
+        emails = ["buyer@example.ru"] + [f"x{i}@example.ru" for i in range(5)]
+        rows = [(f"Р-{i}", date(2026, 9, 12), 100, "Закрыт", "shared", [privacy.email_hash(e)], [], [], [])
+                for i, e in enumerate(emails)]
+        rows.append(("Р-без-почты", date(2026, 9, 12), 100, "Закрыт", "shared", [], [], [], []))
+        conn.cursor().executemany("INSERT INTO orders_1c (order_no, order_date, amount, status, client_hash,"
+                                  " email_hashes, phone_hashes, items, groups) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                                  rows)
+        touched = {r["order_no"]: [t["campaign_id"] for t in r["touches"]] for r in q.mail_orders(conn, sep)}
+        assert touched["Р-0"] == [101] and touched["Р-без-почты"] == []

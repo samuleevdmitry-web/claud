@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
+from html import unescape
 
 import requests
 
@@ -53,6 +55,21 @@ class CampaignStats:
     clicked_all: int
     unsubscribed: int
     spam: int
+
+
+@dataclass(frozen=True)
+class Delivery:
+    """Статус письма рассылки у одного адреса (отчёт о доставке UniSender)."""
+    email_hash: str
+    status: str
+    level: int  # 0 — не доставлено, 1 — доставлено, 2 — открыто, 3 — переход по ссылке
+
+
+@dataclass(frozen=True)
+class Link:
+    """Ссылка из письма рассылки: по ней видно, про какие товары письмо."""
+    url: str
+    text: str
 
 
 @dataclass(frozen=True)
@@ -112,18 +129,41 @@ class UnisenderClient:
 
     def export_contacts(self, wait: float = 15.0, timeout: float = 1800.0) -> list[Contact]:
         params = {f"field_names[{i}]": name for i, name in enumerate(EXPORT_FIELDS)}
-        task = self.call("async/exportContacts", **params) or {}
+        result = self._task("async/exportContacts", "выгрузка базы", wait, timeout, **params)
+        return parse_contacts(self._download(result.get("file_to_download") or ""))
+
+    def delivery(self, campaign_id: int, wait: float = 15.0, timeout: float = 1800.0) -> list[Delivery]:
+        """Кому ушло письмо и что с ним сделали: статус по каждому адресу (только за последние 180 дней)."""
+        return parse_delivery(self.delivery_table(campaign_id, wait, timeout))
+
+    def delivery_table(self, campaign_id: int, wait: float = 15.0, timeout: float = 1800.0) -> list[dict]:
+        result = self._task("async/getCampaignDeliveryStats", f"отчёт о доставке рассылки {campaign_id}", wait, timeout,
+                            campaign_id=campaign_id)
+        if result.get("file_to_download"):
+            return csv_rows(self._download(result["file_to_download"]))
+        return table_rows(result.get("result") if isinstance(result.get("result"), dict) else result)
+
+    def message_links(self, message_id: int) -> list[Link]:
+        """Ссылки из текста письма (getMessage)."""
+        result = self.call("getMessage", id=message_id) or {}
+        message = result[0] if isinstance(result, list) and result else result
+        return extract_links((message or {}).get("body") or "") if isinstance(message, dict) else []
+
+    def _task(self, method: str, what: str, wait: float, timeout: float, **params) -> dict:
+        """Асинхронный метод: запуск задачи и ожидание результата (сначала часто, потом раз в wait секунд)."""
+        task = self.call(method, **params) or {}
         uuid = task.get("task_uuid")
         if not uuid:
-            raise UnisenderError("UniSender не вернул task_uuid для выгрузки базы")
-        started = time.monotonic()
+            raise UnisenderError(f"UniSender не вернул task_uuid ({what})")
+        started, delay = time.monotonic(), min(2.0, wait)
         while True:
             result = self.call("async/getTaskResult", task_uuid=uuid) or {}
             if result.get("status") == "completed":
-                return parse_contacts(self._download(result.get("file_to_download") or ""))
+                return result
             if result.get("status") not in ("new", "processing", None) or time.monotonic() - started > timeout:
-                raise UnisenderError(f"Выгрузка базы UniSender не готова: статус {result.get('status')}")
-            time.sleep(wait)
+                raise UnisenderError(f"UniSender: {what} не готов(а), статус {result.get('status')}")
+            time.sleep(delay)
+            delay = min(delay * 2, wait)
 
     def _download(self, url: str) -> str:
         if not url:
@@ -169,6 +209,75 @@ def parse_stats(campaign_id: int, x: dict) -> CampaignStats:
     keys = ("total", "sent", "delivered", "read_unique", "read_all", "clicked_unique", "clicked_all",
             "unsubscribed", "spam")
     return CampaignStats(campaign_id, *(_int(x.get(k)) for k in keys))
+
+
+def delivery_level(status: str | None) -> int:
+    """ok_link_visited → 3, ok_read и ok_unsubscribed (отписаться можно только из открытого письма) → 2,
+    прочие ok_… (доставлено) → 1, ошибки и «не отправлено» → 0."""
+    s = (status or "").strip().lower()
+    if not s.startswith("ok"):
+        return 0
+    if "link" in s or "visit" in s or "click" in s:
+        return 3
+    if "read" in s or "unsubscrib" in s:
+        return 2
+    return 1
+
+
+def csv_rows(text: str) -> list[dict]:
+    text = text.lstrip("\ufeff")
+    sample = text[:2000]
+    delimiter = ";" if sample.count(";") > sample.count(",") else ","
+    return [{(k or "").strip().lower(): v for k, v in row.items()}
+            for row in csv.DictReader(io.StringIO(text), delimiter=delimiter)]
+
+
+def table_rows(result) -> list[dict]:
+    """Ответ вида {"fields": [...], "data": [[...], ...]} → строки-словари."""
+    if not isinstance(result, dict):
+        return []
+    fields = [str(f).strip().lower() for f in result.get("fields") or []]
+    return [dict(zip(fields, row)) for row in result.get("data") or [] if isinstance(row, (list, tuple))]
+
+
+STATUS_KEYS = ("send_result", "status", "state", "delivery_status", "result")
+
+
+def parse_delivery(rows: list[dict]) -> list[Delivery]:
+    """Строки отчёта о доставке → отпечаток адреса и статус; при повторе адреса остаётся лучший статус."""
+    best: dict[str, Delivery] = {}
+    for row in rows:
+        h = privacy.email_hash(row.get("email"))
+        status = next((str(row[k]) for k in STATUS_KEYS if row.get(k)), "")
+        if not h:
+            continue
+        d = Delivery(h, status, delivery_level(status))
+        if h not in best or d.level > best[h].level:
+            best[h] = d
+    return list(best.values())
+
+
+_A = re.compile(r"<a\b[^>]*?href\s*=\s*[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", re.IGNORECASE | re.DOTALL)
+_TAG = re.compile(r"<[^>]+>")
+SERVICE_LINK = re.compile(r"unisender|unsubscribe|mailto:|tel:|\{\{|%7B%7B|vk\.com|t\.me|telegram|whatsapp|wa\.me|"
+                          r"youtube|instagram|ok\.ru|dzen\.ru", re.IGNORECASE)
+
+
+def extract_links(html: str) -> list[Link]:
+    """Ссылки письма на сайт с их текстом; служебные (отписка, соцсети, почта) и метки utm отбрасываются."""
+    out, seen = [], set()
+    for href, inner in _A.findall(html or ""):
+        url = unescape(href).strip().split("#")[0]
+        base, _, query = url.partition("?")
+        query = "&".join(p for p in query.split("&") if p and not p.lower().startswith("utm_"))
+        url = base + ("?" + query if query else "")
+        if not url.lower().startswith("http") or SERVICE_LINK.search(url):  # utm_source=Unisender уже убрана
+            continue
+        text = " ".join(unescape(_TAG.sub(" ", inner)).split())[:200]
+        if (url, text) not in seen:
+            seen.add((url, text))
+            out.append(Link(url, text))
+    return out
 
 
 def parse_contacts(text: str) -> list[Contact]:

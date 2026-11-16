@@ -6,6 +6,7 @@ import argparse
 import sys
 import time
 import tomllib
+from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from analytics.sources.metrika import SLICES, MetrikaClient, MetrikaError, dimen
 from analytics.keywords import KeywordConfig, load_keywords
 from analytics.sources.rabbit import RabbitClient, RabbitError
 from analytics.sources.semantics import SemanticsError
+from analytics.sources import unisender
 from analytics.sources.unisender import UnisenderClient, UnisenderError
 from analytics.sources.semantics import download as semantics_download
 from analytics.sources.webmaster import WebmasterClient, WebmasterError, parse_search_history
@@ -124,6 +126,15 @@ def check_unisender(settings: Settings) -> None:
         when = f" ({c.start_time:%d.%m})" if c.start_time else ""
         print(f"  последняя {c.campaign_id}{when}: доставлено {st.delivered}, открыли {st.read_unique},"
               f" кликнули {st.clicked_unique}")
+        # отчёт о доставке по адресам: только названия колонок и счётчики статусов, без самих адресов
+        rows = client.delivery_table(c.campaign_id)
+        deliveries = unisender.parse_delivery(rows)
+        statuses = Counter(d.status for d in deliveries)
+        print(f"  отчёт о доставке: {len(rows)} строк, колонки: {', '.join(sorted(rows[0])) if rows else '—'}")
+        print("  статусы: " + (", ".join(f"{k or 'пусто'} {v}" for k, v in statuses.most_common(8)) or "—"))
+        if c.message_id:
+            links = client.message_links(c.message_id)
+            print(f"  ссылок на сайт в письме: {len(links)}" + (f", например {links[0].url[:80]}" if links else ""))
 
 
 def cmd_check(settings: Settings) -> int:

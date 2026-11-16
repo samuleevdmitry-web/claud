@@ -297,20 +297,27 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
             parsed = crm_files.parse_file(path)
         except (crm_files.CrmFileError, semantics.SemanticsError, ValueError, KeyError, OSError) as exc:
             log(f"  {path.name}: не загружен — {exc}")
-            db.skip_crm_file(conn, sha, path.name)
+            db.skip_crm_file(conn, sha, path.name, crm_files.PARSER_VERSION)
             continue
         rows = db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION)
-        log(f"  {path.name}: {crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
+        if parsed.kind == "orders":
+            dates = [o.order_date for o in parsed.orders]
+            log(f"  {path.name}: {crm_files.KIND_NAMES[parsed.kind]} — {rows} заказов, {min(dates):%d.%m.%Y}–"
+                f"{max(dates):%d.%m.%Y}" + "".join(f"; {note}" for note in parsed.notes))
+        else:
+            log(f"  {path.name}: {crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
         out.append(parsed)
     return out
 
 
 def sync_unisender(conn: psycopg.Connection, client, since: date, until: date,
-                   log: Callable[[str], None] = print, refresh_days: int = 60, base: bool = True) -> int:
-    """Рассылки UniSender за период и их статистика, затем база контактов (отпечатки).
+                   log: Callable[[str], None] = print, refresh_days: int = 60, base: bool = True,
+                   recipients: bool = True) -> int:
+    """Рассылки UniSender за период и их статистика, база контактов (отпечатки), затем по каждой рассылке —
+    кому ушло письмо и что с ним сделали, и ссылки из письма.
 
     Открытия и клики по рассылке копятся неделями, поэтому статистика рассылок последних refresh_days дней
-    перечитывается при каждой загрузке.
+    перечитывается при каждой загрузке, а отчёт о доставке — пока рассылке нет месяца.
     """
     since = min(since, until - timedelta(days=refresh_days))
     lists = client.lists()
@@ -328,4 +335,36 @@ def sync_unisender(conn: psycopg.Connection, client, since: date, until: date,
         contacts = client.export_contacts()
         loaded += db.replace_email_base(conn, contacts)
         log(f"  unisender: база — {len(contacts)} контактов (сохранены только отпечатки почты и телефона)")
+    if recipients:
+        loaded += sync_recipients(conn, client, campaigns, until, log)
+    return loaded
+
+
+def sync_recipients(conn: psycopg.Connection, client, campaigns: list, today: date,
+                    log: Callable[[str], None] = print) -> int:
+    """Отчёт о доставке (статус письма у каждого адреса) и ссылки письма — для рассылок, где их пора обновить."""
+    due = db.recipients_due(conn, campaigns, today)
+    if not due:
+        return 0
+    log(f"  unisender: отчёты о доставке по адресам — {len(due)} рассылок (каждый UniSender готовит отдельно)…")
+    loaded, failed = 0, []
+    for i, c in enumerate(due, 1):
+        try:
+            deliveries = client.delivery(c.campaign_id)
+        except unisender.UnisenderError as exc:
+            failed.append(f"{c.campaign_id}: {exc}")
+            continue
+        links = None
+        if c.message_id:
+            try:
+                links = client.message_links(c.message_id)
+            except unisender.UnisenderError as exc:
+                log(f"  рассылка {c.campaign_id}: ссылки письма не получены — {exc}")
+        loaded += db.save_recipients(conn, c.campaign_id, deliveries, links)
+        if i % 10 == 0 or i == len(due):
+            log(f"  unisender: готово {i} из {len(due)}")
+    if failed:
+        log(f"  unisender: отчёт о доставке не получен по {len(failed)} рассылкам, например {failed[0]}")
+        if len(failed) == len(due):
+            raise unisender.UnisenderError(f"Отчёты о доставке не получены: {failed[0]}")
     return loaded
