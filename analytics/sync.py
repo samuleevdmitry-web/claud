@@ -324,6 +324,7 @@ def sync_unisender(conn: psycopg.Connection, client, since: date, until: date,
     loaded = db.save_unisender(conn, lists, campaigns, stats)
     log(f"  unisender: списков {len(lists)}, рассылок {len(campaigns)} ({since}…{until}), статистика {len(stats)}")
     if base:
+        log("  unisender: выгружаю базу контактов (UniSender готовит файл, бывает несколько минут)…")
         contacts = client.export_contacts()
         loaded += db.replace_email_base(conn, contacts)
         log(f"  unisender: база — {len(contacts)} контактов (сохранены только отпечатки почты и телефона)")

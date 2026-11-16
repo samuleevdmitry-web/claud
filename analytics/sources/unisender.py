@@ -4,6 +4,9 @@ API: https://api.unisender.com/ru/api/<метод>?format=json&api_key=… Кл�
 «Настройки аккаунта» → «Интеграции и API». База выгружается асинхронно: async/exportContacts → task_uuid →
 async/getTaskResult, пока статус не «completed», → файл CSV по ссылке file_to_download.
 Почта и телефон из выгрузки сразу превращаются в отпечатки (analytics.privacy) и в базу не попадают.
+
+Лимиты UniSender считаются за 60 секунд на ключ или IP (у exportContacts — 20 запросов). Поэтому между запросами
+пауза, а на ответ «Api call limit exceeded» клиент ждёт минуту и повторяет, а не роняет загрузку.
 """
 
 from __future__ import annotations
@@ -11,6 +14,7 @@ from __future__ import annotations
 import csv
 import io
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -61,25 +65,34 @@ class Contact:
 
 class UnisenderClient:
     def __init__(self, api_key: str, session: requests.Session | None = None, max_retries: int = 4,
-                 backoff: float = 2.0, pause: float = 0.1):
+                 backoff: float = 2.0, pause: float = 1.0, limit_wait: float = 65.0, limit_retries: int = 3,
+                 log: Callable[[str], None] = print):
         if not api_key:
             raise UnisenderError("Не задан UNISENDER_API_KEY (ключ API UniSender)")
         self.api_key = api_key
         self.session = session or requests.Session()
         self.max_retries, self.backoff, self.pause = max_retries, backoff, pause
+        self.limit_wait, self.limit_retries, self.log = limit_wait, limit_retries, log
 
     def call(self, method: str, **params):
-        resp = send(self.session, "GET", API + method, max_retries=self.max_retries, backoff=self.backoff,
-                    params={"format": "json", "api_key": self.api_key, **params})
-        time.sleep(self.pause)
-        if resp.status_code != 200:
-            raise UnisenderError(f"UniSender {method}: HTTP {resp.status_code}")
-        data = resp.json()
-        if "error" in data:
+        for attempt in range(self.limit_retries + 1):
+            resp = send(self.session, "GET", API + method, max_retries=self.max_retries, backoff=self.backoff,
+                        params={"format": "json", "api_key": self.api_key, **params})
+            time.sleep(self.pause)
+            if resp.status_code != 200:
+                raise UnisenderError(f"UniSender {method}: HTTP {resp.status_code}")
+            data = resp.json()
+            if "error" not in data:
+                return data.get("result")
+            if rate_limited(data) and attempt < self.limit_retries:
+                self.log(f"  UniSender {method}: лимит запросов за минуту исчерпан — жду {self.limit_wait:.0f} с")
+                time.sleep(self.limit_wait)  # окно лимита — 60 секунд
+                continue
             code = data.get("code") or ""
             hint = " — проверьте ключ API" if "invalid_api_key" in str(code) or "api_key" in str(data["error"]) else ""
+            if rate_limited(data):
+                hint = " — превышен лимит запросов UniSender, загрузка повторится сама через час"
             raise UnisenderError(f"UniSender {method}: {data['error']}{hint}")
-        return data.get("result")
 
     def lists(self) -> dict[int, str]:
         return {int(x["id"]): x.get("title") or "" for x in self.call("getLists") or []}
@@ -97,7 +110,7 @@ class UnisenderClient:
     def stats(self, campaign_id: int) -> CampaignStats:
         return parse_stats(campaign_id, self.call("getCampaignCommonStats", campaign_id=campaign_id) or {})
 
-    def export_contacts(self, wait: float = 5.0, timeout: float = 900.0) -> list[Contact]:
+    def export_contacts(self, wait: float = 15.0, timeout: float = 1800.0) -> list[Contact]:
         params = {f"field_names[{i}]": name for i, name in enumerate(EXPORT_FIELDS)}
         task = self.call("async/exportContacts", **params) or {}
         uuid = task.get("task_uuid")
@@ -123,6 +136,12 @@ class UnisenderClient:
             raise UnisenderError(f"Файл выгрузки базы UniSender: HTTP {resp.status_code}")
         raw = getattr(resp, "content", None)
         return raw.decode("utf-8-sig", errors="replace") if isinstance(raw, bytes) else resp.text
+
+
+def rate_limited(data: dict) -> bool:
+    """Ответ «Api call limit exceeded for ip: limit 20 calls 329» — превышен лимит за минуту."""
+    text = f"{data.get('code') or ''} {data.get('error') or ''}".lower()
+    return "limit exceeded" in text or "limit_exceeded" in text
 
 
 def _int(v) -> int:

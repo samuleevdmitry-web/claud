@@ -54,7 +54,7 @@ def test_client_reads_campaigns_stats_and_base():
         ok({"task_uuid": "abc", "status": "completed", "file_to_download": "https://api.unisender.com/file.csv"}),
         FakeResponse(200, text=CSV),
     ])
-    client = UnisenderClient("key", session=session, backoff=0, pause=0)
+    client = UnisenderClient("key", session=session, backoff=0, pause=0, limit_wait=0)
     assert client.lists() == {1: "Оптовики"}
     [campaign] = client.campaigns(date(2026, 9, 1), date(2026, 9, 30))
     assert (campaign.campaign_id, campaign.start_time, campaign.subject) == (373194938, datetime(2026, 9, 10, 10), "Новые мембраны")
@@ -67,9 +67,29 @@ def test_client_reads_campaigns_stats_and_base():
 def test_api_error_is_explained():
     session = FakeSession([FakeResponse(200, {"error": "invalid api_key", "code": "invalid_api_key"})])
     with pytest.raises(UnisenderError, match="проверьте ключ"):
-        UnisenderClient("bad", session=session, backoff=0, pause=0).lists()
+        UnisenderClient("bad", session=session, backoff=0, pause=0, limit_wait=0).lists()
     with pytest.raises(UnisenderError):
         UnisenderClient("")
+
+
+LIMIT = {"error": "Error ID:7CE5. OB20142205-02 [Api call limit exceeded for ip: limit 20 calls 329]"}
+
+
+def test_rate_limit_waits_and_retries():
+    waits = []
+    session = FakeSession([FakeResponse(200, LIMIT), FakeResponse(200, LIMIT), ok([{"id": 1, "title": "Оптовики"}])])
+    client = UnisenderClient("key", session=session, backoff=0, pause=0, limit_wait=0, log=waits.append)
+    assert client.lists() == {1: "Оптовики"}
+    assert len(session.calls) == 3 and len(waits) == 2 and "лимит" in waits[0]
+
+
+def test_rate_limit_gives_up_with_explanation():
+    session = FakeSession([FakeResponse(200, LIMIT)] * 3)
+    client = UnisenderClient("key", session=session, backoff=0, pause=0, limit_wait=0, limit_retries=2,
+                             log=lambda _: None)
+    with pytest.raises(UnisenderError, match="повторится сама"):
+        client.lists()
+    assert len(session.calls) == 3
 
 
 class FakeUnisender:
