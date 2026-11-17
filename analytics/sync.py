@@ -279,6 +279,18 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
     """
     if not folder.is_dir():
         return []
+    # сборщик и ручной import-crm не должны разбирать одни и те же файлы одновременно: второй ждёт первого
+    conn.execute("SELECT pg_advisory_lock(%s)", (IMPORT_LOCK,))
+    try:
+        return _import_folder(conn, folder, log)
+    finally:
+        conn.execute("SELECT pg_advisory_unlock(%s)", (IMPORT_LOCK,))
+
+
+IMPORT_LOCK = 4207732
+
+
+def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], None]) -> list:
     done, out = db.imported_files(conn, crm_files.PARSER_VERSION), []
     for path in sorted(x for x in folder.iterdir() if x.suffix.lower() in excel.EXTENSIONS):
         if path.name.startswith("~$"):
