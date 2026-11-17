@@ -301,15 +301,35 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
             log(f"  {path.name}: не загружен — {exc}")
             db.skip_crm_file(conn, sha, path.name, crm_files.PARSER_VERSION)
             continue
+        known = 0
+        if parsed.kind == "orders":  # сколько заказов уже есть из других выгрузок — до того, как этот файл их дополнит
+            known = conn.execute("SELECT count(*) FROM orders_1c WHERE order_no = ANY (%s)",
+                                 ([o.order_no for o in parsed.orders],)).fetchone()[0]
         rows = db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION)
         if parsed.kind == "orders":
-            dates = [o.order_date for o in parsed.orders]
-            log(f"  {path.name}: {crm_files.KIND_NAMES[parsed.kind]} — {rows} заказов, {min(dates):%d.%m.%Y}–"
-                f"{max(dates):%d.%m.%Y}" + "".join(f"; {note}" for note in parsed.notes))
+            log(orders_summary(path.name, parsed, known))
         else:
             log(f"  {path.name}: {crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
         out.append(parsed)
     return out
+
+
+def orders_summary(name: str, parsed, known: int) -> str:
+    """Что дала выгрузка заказов — без данных: сколько заказов и строк, какие колонки узнаны, у скольких заказов есть
+    номенклатура и контакты и сколько из них уже было в базе из других выгрузок."""
+    o = parsed.orders
+    dates = [x.order_date for x in o]
+    total = f"{sum(x.amount for x in o):,.0f}".replace(",", " ")
+    cols = ", ".join(f"{crm_files.COLUMN_NAMES.get(k, k)} ← «{v}»" for k, v in parsed.columns.items())
+    lines = [
+        (f"  {name}: {crm_files.KIND_NAMES['orders']} — {len(o)} заказов ({parsed.lines} строк), "
+         f"{min(dates):%d.%m.%Y}–{max(dates):%d.%m.%Y}, сумма {total} ₽"),
+        f"    колонки: {cols}",
+        (f"    с номенклатурой или группой: {sum(1 for x in o if x.items or x.groups)}, "
+         f"с почтой или телефоном: {sum(1 for x in o if x.email_hashes or x.phone_hashes)}, "
+         f"уже были в базе из других выгрузок: {known}"),
+    ]
+    return "\n".join(lines + [f"    {n}" for n in parsed.notes])
 
 
 def sync_unisender(conn: psycopg.Connection, client, since: date, until: date,

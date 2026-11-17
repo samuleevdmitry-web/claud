@@ -27,7 +27,10 @@ KINDS = {
     "forms": {"Совпадения", "Все лиды"},
     "calls": {"Итог", "Все входящие лиды"},
 }
-KIND_NAMES = {"forms": "лиды с сайта (формы)", "calls": "входящие звонки", "orders": "все заказы 1С"}
+KIND_NAMES = {"forms": "лиды с сайта (формы)", "calls": "входящие звонки", "orders": "заказы 1С"}
+COLUMN_NAMES = {"order_no": "номер", "date": "дата", "amount": "сумма заказа", "line_amount": "сумма строки",
+                "status": "статус", "client": "клиент", "email": "почта", "phone": "телефон", "item": "номенклатура",
+                "group": "группа"}
 # Версия разбора: файлы, загруженные прежней версией, загружаются заново, если ещё лежат в папке.
 # 3 — отпечатки почты и телефона лидов для сведения с базой рассылок.
 # 4 — выгрузка всех заказов 1С; нераспознанные раньше файлы разбираются заново.
@@ -103,6 +106,8 @@ class CrmFile:
     call_orders: list[CallOrder] = field(default_factory=list)
     orders: list[Order] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # чего не хватает в выгрузке
+    columns: dict[str, str] = field(default_factory=dict)  # что из выгрузки заказов взято: поле → название колонки
+    lines: int = 0  # строк с заказами (у построчной выгрузки больше, чем заказов)
 
     @property
     def rows(self) -> int:
@@ -370,6 +375,7 @@ def _parse_orders(rows: list[tuple], header_row: int, cols: dict[str, int]) -> C
     phone_cols = [i for k, i in cols.items() if k.startswith("phone") and k != "phone"] or (
         [cols["phone"]] if "phone" in cols else [])
     acc: dict[str, dict] = {}
+    lines = 0
     for row in rows[header_row + 1:]:
         if not row or all(v in (None, "") for v in row):
             continue
@@ -380,6 +386,7 @@ def _parse_orders(rows: list[tuple], header_row: int, cols: dict[str, int]) -> C
             when = _dt(m.group(1)) if m else None
         if not no or when is None or (_text(no) or "").lower().startswith("итог"):
             continue  # строка «Итого», подзаголовок или пустая
+        lines += 1
         o = acc.setdefault(no, {"date": when.date(), "amounts": [], "lines": 0.0, "status": None, "client": None,
                                 "emails": [], "phones": [], "items": [], "groups": []})
         for key in ("amount", "line_amount"):
@@ -424,8 +431,10 @@ def _parse_orders(rows: list[tuple], header_row: int, cols: dict[str, int]) -> C
         notes.append("нет почты и телефона клиента — связать с базой рассылок можно только через другие выгрузки")
     if "item" not in cols and "group" not in cols:
         notes.append("нет номенклатуры — тему письма с купленным не сравнить")
-    return CrmFile("orders", _month([o.order_date for o in orders]),
-                   orders=orders, notes=notes)
+    header = rows[header_row]
+    names = {k: _text(header[i]) for k, i in cols.items() if not k[-1].isdigit() and i < len(header) and _text(header[i])}
+    return CrmFile("orders", _month([o.order_date for o in orders]), orders=orders, notes=notes, columns=names,
+                   lines=lines)
 
 
 # «Клиенты», под которыми в 1С идут разные люди: их заказы вместе не собираются, иначе смешаются чужие контакты.

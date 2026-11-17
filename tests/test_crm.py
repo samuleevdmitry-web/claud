@@ -246,7 +246,7 @@ def test_orders_import_and_retry_of_unknown_files(tmp_path):
         logs = []
         import_crm_folder(conn, tmp_path, log=logs.append)
         assert conn.execute("SELECT order_no, amount FROM orders_1c").fetchall() == [("А-1", 100)]
-        assert any("все заказы 1С — 1 заказов" in x for x in logs) and any("other.xlsx: не загружен" in x for x in logs)
+        assert any("заказы 1С — 1 заказов" in x for x in logs) and any("other.xlsx: не загружен" in x for x in logs)
         logs.clear()
         import_crm_folder(conn, tmp_path, log=logs.append)
         assert logs == []  # оба файла уже разобраны этой версией
@@ -294,6 +294,10 @@ def test_order_exports_complement_each_other(tmp_path):
         sheet_file(tmp_path / "b_lines.xlsx", [["Заказ клиента", "Номенклатура", "Сумма"],
                                                ["Заказ клиента АТЦБ-1 от 05.10.2026 12:00:00", "Флис 280", 200],
                                                ["Заказ клиента АТЦБ-1 от 05.10.2026 12:00:00", "Оксфорд 600D", 300]])
-        import_crm_folder(conn, tmp_path, log=lambda _: None)
+        logs = []
+        import_crm_folder(conn, tmp_path, log=logs.append)
         row = conn.execute("SELECT amount, status, cardinality(email_hashes), items FROM orders_1c").fetchone()
         assert row == (500, "Закрыт", 1, ["Флис 280", "Оксфорд 600D"])
+        text = "\n".join(logs)
+        assert "b_lines.xlsx: заказы 1С — 1 заказов (2 строк)" in text and "номенклатура ← «Номенклатура»" in text
+        assert "с номенклатурой или группой: 1" in text and "уже были в базе из других выгрузок: 1" in text
