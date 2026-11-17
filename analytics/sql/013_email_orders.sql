@@ -40,3 +40,6 @@ CREATE TABLE IF NOT EXISTS orders_1c (
 );
 CREATE INDEX IF NOT EXISTS orders_1c_date ON orders_1c (order_date);
 CREATE INDEX IF NOT EXISTS orders_1c_client ON orders_1c (client_hash);
+
+-- Итог разбора файла из папки imports (что узнано, сколько строк, почему не загружен) — для страницы «Данные».
+ALTER TABLE crm_imports ADD COLUMN IF NOT EXISTS message text;

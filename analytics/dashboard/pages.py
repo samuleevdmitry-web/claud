@@ -601,7 +601,7 @@ def status_page(conn: psycopg.Connection, settings: Settings, f: Filters | None)
     robots = []
     if f:
         robots = [r for r in q.robots_by_month(conn, f.counter_id).values() if r["month"] < f.today.replace(day=1)]
-    return {"status": status, "robots": robots}
+    return {"status": status, "robots": robots, "imports": q.import_files(conn), "imports_dir": settings.imports_dir}
 
 
 # ----- ПФ и риски -----

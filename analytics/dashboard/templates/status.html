@@ -23,6 +23,21 @@
     Загрузить сразу: <code>docker compose exec collector python -m analytics sync</code>.</p>
 </div>
 
+<div class="card table-card">
+  <div class="chart-title">Файлы из папки imports</div>
+  {% if imports %}
+  <table>
+    <thead><tr><th>Файл</th><th>Разобран</th><th>Что в нём нашлось</th></tr></thead>
+    <tbody>{% for x in imports %}
+      <tr><td class="label" title="{{ x.file_name }}">{{ x.file_name }}</td><td class="muted">{{ x.imported_at|local }}</td>
+          <td class="{{ 'bad' if x.kind == 'unknown' else '' }} import-message">{{ x.message or ('не распознан' if x.kind == 'unknown' else '—') }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted">Файлов ещё не было.</p>{% endif %}
+  <p class="note">Сборщик проверяет папку <code>{{ imports_dir }}</code> раз в 15 минут; уже разобранный файл повторно не читается.
+    Загрузить сразу: <code>docker compose exec collector python -m analytics import-crm</code>.</p>
+</div>
+
 {% if robots %}
 <div class="card table-card">
   <div class="chart-title">Роботы в трафике {{ f.site.site or f.site.name }}</div>

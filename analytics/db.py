@@ -344,6 +344,10 @@ def skip_crm_file(conn: psycopg.Connection, sha: str, file_name: str, version: i
                  (sha, file_name, version))
 
 
+def set_import_message(conn: psycopg.Connection, sha: str, message: str) -> None:
+    conn.execute("UPDATE crm_imports SET message = %s WHERE sha256 = %s", (message, sha))
+
+
 def save_semantics(conn: psycopg.Connection, sha: str, file_name: str, sem, version: int = 1) -> int:
     """Семантика целиком: новая выгрузка таблицы заменяет прежнюю."""
     with conn.transaction(), conn.cursor() as cur:

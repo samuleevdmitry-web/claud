@@ -303,30 +303,33 @@ def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], 
             if semantics.is_semantics(sheets):
                 sem = semantics.parse_sheets(sheets)
                 db.save_semantics(conn, sha, path.name, sem, crm_files.PARSER_VERSION)
-                log(f"  {path.name}: семантика — {sem.rows} фраз, {len(sem.positions)} позиций")
+                _report(conn, sha, path.name, f"семантика — {sem.rows} фраз, {len(sem.positions)} позиций", log)
                 out.append(sem)
                 continue
             parsed = crm_files.parse_file(path, sheets)
-        except Exception as exc:  # битый или чужой файл не должен останавливать загрузку остальных
-            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                raise
-            log(f"  {path.name}: не загружен — {exc}")
+        except Exception as exc:  # noqa: BLE001 — битый или чужой файл не должен останавливать загрузку остальных
             db.skip_crm_file(conn, sha, path.name, crm_files.PARSER_VERSION)
+            _report(conn, sha, path.name, f"не загружен — {exc}", log)
             continue
         known = 0
         if parsed.kind == "orders":  # сколько заказов уже есть из других выгрузок — до того, как этот файл их дополнит
             known = conn.execute("SELECT count(*) FROM orders_1c WHERE order_no = ANY (%s)",
                                  ([o.order_no for o in parsed.orders],)).fetchone()[0]
         rows = db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION)
-        if parsed.kind == "orders":
-            log(orders_summary(path.name, parsed, known))
-        else:
-            log(f"  {path.name}: {crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
+        text = (orders_summary(parsed, known) if parsed.kind == "orders"
+                else f"{crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
+        _report(conn, sha, path.name, text, log)
         out.append(parsed)
     return out
 
 
-def orders_summary(name: str, parsed, known: int) -> str:
+def _report(conn: psycopg.Connection, sha: str, name: str, text: str, log: Callable[[str], None]) -> None:
+    """Итог разбора файла: в журнал и в базу — его видно на странице «Данные» дашборда."""
+    log(f"  {name}: " + text.replace("\n", "\n    "))
+    db.set_import_message(conn, sha, text)
+
+
+def orders_summary(parsed, known: int) -> str:
     """Что дала выгрузка заказов — без данных: сколько заказов и строк, какие колонки узнаны, у скольких заказов есть
     номенклатура и контакты и сколько из них уже было в базе из других выгрузок."""
     o = parsed.orders
@@ -334,14 +337,18 @@ def orders_summary(name: str, parsed, known: int) -> str:
     total = f"{sum(x.amount for x in o):,.0f}".replace(",", " ")
     cols = ", ".join(f"{crm_files.COLUMN_NAMES.get(k, k)} ← «{v}»" for k, v in parsed.columns.items())
     lines = [
-        (f"  {name}: {crm_files.KIND_NAMES['orders']} — {len(o)} заказов ({parsed.lines} строк), "
+        (f"{crm_files.KIND_NAMES['orders']} — {len(o)} заказов ({parsed.lines} строк), "
          f"{min(dates):%d.%m.%Y}–{max(dates):%d.%m.%Y}, сумма {total} ₽"),
-        f"    колонки: {cols}",
-        (f"    с номенклатурой или группой: {sum(1 for x in o if x.items or x.groups)}, "
+        f"колонки: {cols}",
+        (f"с номенклатурой или группой: {sum(1 for x in o if x.items or x.groups)}, "
          f"с почтой или телефоном: {sum(1 for x in o if x.email_hashes or x.phone_hashes)}, "
          f"уже были в базе из других выгрузок: {known}"),
     ]
-    return "\n".join(lines + [f"    {n}" for n in parsed.notes])
+    notes = parsed.notes
+    if known and not any(x.email_hashes or x.phone_hashes for x in o):  # контакты придут из общего списка заказов
+        notes = [n for n in notes if not n.startswith(("нет ни почты", "нет почты"))] + [
+            f"контактов в файле нет — они берутся из других выгрузок по номеру заказа (совпало {known} из {len(o)})"]
+    return "\n".join(lines + notes)
 
 
 def sync_unisender(conn: psycopg.Connection, client, since: date, until: date,

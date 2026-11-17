@@ -250,6 +250,9 @@ def test_orders_import_and_retry_of_unknown_files(tmp_path):
         logs.clear()
         import_crm_folder(conn, tmp_path, log=logs.append)
         assert logs == []  # оба файла уже разобраны этой версией
+        from analytics.dashboard import queries as q
+        messages = {x["file_name"]: x["message"] for x in q.import_files(conn)}
+        assert messages["other.xlsx"].startswith("не загружен") and "Что-то, Ещё, Другое" in messages["other.xlsx"]
 
 
 def test_xls_cells_are_converted():
@@ -302,3 +305,9 @@ def test_order_exports_complement_each_other(tmp_path):
         text = "\n".join(logs)
         assert "b_lines.xlsx: заказы 1С — 1 заказов (2 строк)" in text and "номенклатура ← «Номенклатура»" in text
         assert "с номенклатурой или группой: 1" in text and "уже были в базе из других выгрузок: 1" in text
+        # итог разбора сохранён для страницы «Данные»
+        from analytics.dashboard import queries as q
+        files = {x["file_name"]: x["message"] for x in q.import_files(conn)}
+        assert files["b_lines.xlsx"].startswith("заказы 1С — 1 заказов (2 строк)")
+        assert "номенклатура ← «Номенклатура»" in files["b_lines.xlsx"]
+        assert "не связать" not in files["b_lines.xlsx"] and "совпало 1 из 1" in files["b_lines.xlsx"]

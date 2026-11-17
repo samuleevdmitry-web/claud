@@ -512,6 +512,13 @@ def crm_call_orders(conn: psycopg.Connection, month: date) -> list[dict]:
     return _all(conn, f"SELECT * FROM crm_call_orders WHERE month = {MONTH} ORDER BY order_date, order_no", (month,))
 
 
+def import_files(conn: psycopg.Connection, limit: int = 40) -> list[dict]:
+    """Файлы из папки imports: последний разбор каждого, свежие сверху."""
+    return _all(conn, """
+        SELECT file_name, kind, rows_loaded, imported_at, message FROM crm_imports ORDER BY imported_at DESC LIMIT %s
+    """, (limit,))
+
+
 def crm_files(conn: psycopg.Connection, month: date) -> list[dict]:
     return _all(conn, f"""
         SELECT kind, file_name, rows_loaded, imported_at FROM crm_imports WHERE month = {MONTH} ORDER BY imported_at DESC
