@@ -274,12 +274,15 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
                         " ON CONFLICT DO NOTHING", [(month, kind, m, v, n) for m, v, n in parsed.summary])
         if kind == "orders":
             # Выгрузки заказов дополняют друг друга по номеру заказа: список заказов с контактами и построчный отчёт
-            # с номенклатурой. Новое значение заменяет прежнее, только если оно есть (пустое не затирает).
+            # с номенклатурой. Новое значение заменяет прежнее, только если оно есть (пустое не затирает). Сумму заказа
+            # построчный отчёт не меняет: в нём могут быть не все позиции (например, только товары из рассылок).
+            totals = "item" not in getattr(parsed, "columns", {})
             cur.executemany(
                 "INSERT INTO orders_1c (order_no, order_date, amount, status, client_hash, email_hashes, phone_hashes,"
                 " items, groups) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
                 " ON CONFLICT (order_no) DO UPDATE SET order_date = EXCLUDED.order_date,"
-                " amount = CASE WHEN EXCLUDED.amount > 0 THEN EXCLUDED.amount ELSE orders_1c.amount END,"
+                " amount = CASE WHEN EXCLUDED.amount > 0 AND (%s OR orders_1c.amount = 0) THEN EXCLUDED.amount"
+                "  ELSE orders_1c.amount END,"
                 " status = coalesce(EXCLUDED.status, orders_1c.status),"
                 " client_hash = coalesce(EXCLUDED.client_hash, orders_1c.client_hash),"
                 " email_hashes = CASE WHEN cardinality(EXCLUDED.email_hashes) > 0 THEN EXCLUDED.email_hashes"
@@ -289,7 +292,7 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
                 " items = CASE WHEN cardinality(EXCLUDED.items) > 0 THEN EXCLUDED.items ELSE orders_1c.items END,"
                 " groups = CASE WHEN cardinality(EXCLUDED.groups) > 0 THEN EXCLUDED.groups ELSE orders_1c.groups END",
                 [(o.order_no, o.order_date, o.amount, o.status, o.client_hash, list(o.email_hashes),
-                  list(o.phone_hashes), list(o.items), list(o.groups)) for o in parsed.orders],
+                  list(o.phone_hashes), list(o.items), list(o.groups), totals) for o in parsed.orders],
             )
         elif kind == "forms":
             cur.execute("DELETE FROM crm_form_leads WHERE month = %s", (month,))

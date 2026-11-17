@@ -291,9 +291,10 @@ def test_order_exports_complement_each_other(tmp_path):
         db.apply_schema(conn)
         sheet_file(tmp_path / "a_list.xlsx", [["Номер", "Дата", "Сумма", "Электронная почта", "Текущее состояние"],
                                               ["АТЦБ-1", "05.10.2026", 500, "a@b.ru", "Закрыт"]])
+        # в построчном отчёте только часть позиций (на 300 ₽ из 500) — сумма заказа остаётся из списка
         sheet_file(tmp_path / "b_lines.xlsx", [["Заказ клиента", "Номенклатура", "Сумма"],
-                                               ["Заказ клиента АТЦБ-1 от 05.10.2026 12:00:00", "Флис 280", 200],
-                                               ["Заказ клиента АТЦБ-1 от 05.10.2026 12:00:00", "Оксфорд 600D", 300]])
+                                               ["Заказ клиента АТЦБ-1 от 05.10.2026 12:00:00", "Флис 280", 100],
+                                               ["Заказ клиента АТЦБ-1 от 05.10.2026 12:00:00", "Оксфорд 600D", 200]])
         logs = []
         import_crm_folder(conn, tmp_path, log=logs.append)
         row = conn.execute("SELECT amount, status, cardinality(email_hashes), items FROM orders_1c").fetchone()
