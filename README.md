@@ -63,6 +63,8 @@
 | Посмотреть, как идёт сбор | `docker compose logs -f collector` |
 | Проверить доступы к Яндексу | `docker compose exec collector python -m analytics check` |
 | Обновить после изменений в коде | `powershell -ExecutionPolicy Bypass -File .\update.ps1` (см. ниже) |
+| Проверить, как один адрес прошёл через базу, письма и заказы | `docker compose exec collector python -m analytics trace-email адрес@почта --month 2026-10` |
+| Перечитать все файлы imports заново | `docker compose exec collector python -m analytics import-crm --again` |
 | Резервная копия базы | `docker compose exec db pg_dump -U analytics analytics > backup.sql` |
 | Остановить | `docker compose down` (данные сохранятся) |
 

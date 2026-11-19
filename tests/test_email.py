@@ -258,3 +258,56 @@ def test_addresses_are_kept_only_with_email_lists():
         conn.execute("DELETE FROM unisender_recipients_runs")
         sync_unisender(conn, FakeUnisender(), sep, date(2026, 9, 30), log=lambda _: None)
         assert conn.execute("SELECT count(*) FROM email_contacts").fetchone()[0] == 0
+
+
+@needs_db
+def test_trace_email_follows_one_address(tmp_path, monkeypatch):
+    """Клиент из базы, открывший письмо, не попадает в «нет в базе рассылок»; trace-email показывает каждый шаг,
+    а смену соли DATA_SALT между загрузками — находит."""
+    import openpyxl
+
+    from analytics.sources.unisender import Contact, Delivery, parse_campaign
+    from analytics.sync import import_crm_folder
+    from analytics.trace import trace_email
+
+    oct_ = date(2026, 10, 1)
+    with db.connect(TEST_DATABASE_URL) as conn:
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        db.apply_schema(conn)
+        addr = "ryba-aist@inbox.ru"
+        db.save_unisender(conn, {1: "Оптовики"}, [parse_campaign({"id": 401, "start_time": "2026-10-14 10:00:00",
+                                                                  "list_id": 1, "subject": "Новинки"})], [])
+        db.replace_email_base(conn, [Contact(privacy.email_hash(addr), None, "active", (1,))])
+        db.save_recipients(conn, 401, [Delivery(privacy.email_hash(addr), "ok_read", 2)], [])
+        db.save_email_contacts(conn, [(privacy.email_hash(addr), addr)])
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Дата", "Клиент", "Контрагент", "Номер", "Сумма", "Текущее состояние", "Электронная почта", "Телефон"])
+        ws.append(["20.10.2026", "Карагод ИП", "Карагод ИП", "АТЦБ-026900", 15000, "Закрыт", "E-mail=Ryba-Aist@inbox.ru",
+                   "Представление=8 900 111 22 33"])
+        ws.append(["03.10.2026", "Карагод ИП", "Карагод ИП", "АТЦБ-026100", 5000, "Закрыт", "", ""])
+        wb.save(tmp_path / "orders.xls".replace(".xls", ".xlsx"))
+        import_crm_folder(conn, tmp_path, log=lambda _: None, keep_contacts=True)
+
+        rows = q.mail_orders(conn, oct_)
+        ids = sorted({t["campaign_id"] for o in rows for t in o["touches"]})
+        stats = ins.mail_orders_stats(rows, q.mail_campaigns(conn, ids), [], None, None)
+        where = {no: c["key"] for c in stats["classes"] for no in c.get("order_nos", [])}
+        # заказ через 6 дней после открытого письма — «открыли письмо»; ранний заказ того же клиента без почты —
+        # «в базе, писем не было», а не «нет в базе»
+        assert where == {"АТЦБ-026900": "open_other", "АТЦБ-026100": "no_mail"}
+
+        out = []
+        result = trace_email(conn, "  RYBA-AIST@inbox.ru ", oct_, log=out.append)
+        text = "\n".join(out)
+        assert result["in_base"] and "статус active, списки: Оптовики" in text and "14.10 «Новинки» (Оптовики) — открыл" in text
+        assert "АТЦБ-026900 20.10.2026 15 000 ₽ Закрыт Карагод ИП — в таблице: «Открыли письмо за 14 дней до заказа" in text
+        assert "расхождений" in text and "всё сходится" in text
+
+        # соль поменяли после загрузки UniSender: отпечатки базы больше не совпадают — trace это находит
+        monkeypatch.setenv("DATA_SALT", "другая-соль")
+        out.clear()
+        result = trace_email(conn, addr, oct_, log=out.append)
+        text = "\n".join(out)
+        assert not result["in_base"] and "под другим отпечатком" in text and "другой солью" in text
+        assert "соль менялась" in text

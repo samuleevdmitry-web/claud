@@ -430,7 +430,7 @@ def test_recipient_lists(client, tmp_path, monkeypatch):
     assert "buyer@x.ru" in page and "sleep@x.ru" in page and '<details class="list">' in page
     # база без сотрудников: получили buyer и sleep, открыл только buyer
     assert "получили 2 адресов (без сотрудников). Открывали хотя бы одно — <strong>1</strong>" in page
-    assert "Клиенты, которых нет в базе рассылок — 2, с почтой — 1" in page
+    assert "Клиенты, которых не нашли в базе рассылок — 2: с почтой в 1С — 1, без почты в 1С — 1" in page
     assert "ООО Новый" in page and "new@client.ru" in page and "+7 917 470-64-44" in page
     outside = client.get("/email/contacts.csv", params={"month": "2026-10", "kind": "outside"}).text
     assert outside.splitlines()[1:] == ["new@client.ru;ООО Новый;;2;3000;20.10.2026",

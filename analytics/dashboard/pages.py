@@ -985,7 +985,7 @@ def email_data(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
     mail = safe("Рассылки по базе и заказы", mail_part) if delivery_ready else None
     if mail:
         outside = next((c.get("order_nos", []) for c in mail["classes"] if c["key"] == "outside"), [])
-        mail["outside_clients"] = safe("Клиенты, которых нет в базе рассылок",
+        mail["outside_clients"] = safe("Клиенты, которых не нашли в базе рассылок",
                                        lambda: q.clients_of_orders(conn, outside))
 
     def items_part():

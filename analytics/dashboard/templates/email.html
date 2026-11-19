@@ -174,7 +174,12 @@
   {% set oc = mail.outside_clients %}
   {% if oc and oc.clients %}
   <details class="list">
-    <summary>Клиенты, которых нет в базе рассылок — {{ oc.clients|int }}, с почтой — {{ oc.with_email|int }}{% if email_lists and oc.clients > (oc.rows|length) %} (показаны первые {{ oc.rows|length }}){% endif %}</summary>
+    <summary>Клиенты, которых не нашли в базе рассылок — {{ oc.clients|int }}: с почтой в 1С — {{ oc.with_email|int }},
+      без почты в 1С — {{ (oc.clients - oc.with_email)|int }}{% if email_lists and oc.clients > (oc.rows|length) %} (показаны первые {{ oc.rows|length }}){% endif %}</summary>
+    <p class="hint">«С почтой в 1С» — почты из заказа нет ни в базе UniSender, ни в отчётах о доставке писем: их можно
+      добавить в рассылку. «Без почты в 1С» — клиент может быть в базе под почтой, которой нет в заказе (телефонов в
+      базе UniSender нет, сверить по ним нельзя): стоит дописать почту в карточку клиента в 1С. Проверить одного клиента:
+      <code>docker compose exec collector python -m analytics trace-email адрес@почта --month {{ f.month.strftime('%Y-%m') }}</code>.</p>
     {% if email_lists %}
     <div class="table-card">
     <table>

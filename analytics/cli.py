@@ -24,6 +24,7 @@ from analytics.sources.unisender import UnisenderClient, UnisenderError
 from analytics.sources.semantics import download as semantics_download
 from analytics.sources.webmaster import WebmasterClient, WebmasterError, parse_search_history
 from analytics.sources.wordstat import WordstatClient, WordstatError
+from analytics.trace import trace_email
 from analytics.sync import import_crm_folder, sync_metrika, sync_rabbit, sync_unisender, sync_webmaster, sync_wordstat
 
 # Сколько последних дней перезагружать при плановом сборе: неделя и запас. Вебмастер отдаёт данные с задержкой
@@ -433,7 +434,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("check", help="проверить доступ к Метрике и Вебмастеру")
     sub.add_parser("init-db", help="создать или обновить таблицы и представления")
     sub.add_parser("schedule", help="сбор по расписанию в бесконечном цикле (для Docker)")
-    sub.add_parser("import-crm", help="загрузить новые выгрузки Битрикс24 и 1С (*.xlsx) из папки imports")
+    imp = sub.add_parser("import-crm", help="загрузить новые выгрузки Битрикс24 и 1С (*.xlsx, *.xls) из папки imports")
+    imp.add_argument("--again", action="store_true", help="перечитать все файлы папки заново (например, после смены DATA_SALT)")
+    tr = sub.add_parser("trace-email", help="проверить один адрес: база UniSender, письма, заказы 1С, строка таблицы")
+    tr.add_argument("email", help="адрес почты клиента")
+    tr.add_argument("--month", help="месяц ГГГГ-ММ (по умолчанию — прошлый)")
     rep = sub.add_parser("report", help="сохранить отчёт за месяц в папку отчётов (по умолчанию — за прошлый месяц)")
     rep.add_argument("--month", help="месяц ГГГГ-ММ")
     for name, help_ in (
@@ -450,6 +455,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--since", type=date.fromisoformat,
                        help="с даты ГГГГ-ММ-ДД (по умолчанию: Метрика, Карты, RabbitSeo — 14 дней назад, Вебмастер — 30)")
         p.add_argument("--until", type=date.fromisoformat, help="по дату ГГГГ-ММ-ДД (по умолчанию сегодня)")
+        if name == "sync-unisender":
+            p.add_argument("--refetch", action="store_true",
+                           help="заново забрать отчёты о доставке по всем рассылкам периода (после смены DATA_SALT)")
     args = parser.parse_args(argv)
     settings = load_settings()
 
@@ -464,12 +472,25 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "schedule":
             cmd_schedule(settings)
         if args.command == "import-crm":
+            if args.again:
+                with db.connect(settings.database_url) as conn:
+                    db.apply_schema(conn)
+                    conn.execute("DELETE FROM crm_imports")
             parsed = import_crm(settings, date.today())
             print(f"Загружено файлов: {len(parsed)}" if parsed else f"Новых файлов в {settings.imports_dir} нет")
             return 0
         if args.command == "report":
             month = date.fromisoformat(args.month + "-01") if args.month else previous_month(date.today())
             return 0 if make_reports(settings, month, date.today()) else 1
+        if args.command == "trace-email":
+            month = date.fromisoformat(args.month + "-01") if args.month else previous_month(date.today())
+            with db.connect(settings.database_url) as conn:
+                db.apply_schema(conn)
+                return 0 if trace_email(conn, args.email, month) else 1
+        if args.command == "sync-unisender" and args.refetch:
+            with db.connect(settings.database_url) as conn:
+                conn.execute("DELETE FROM unisender_recipients_runs")
+            print("Отчёты о доставке будут забраны заново по всем рассылкам периода")
 
         today = date.today()
         until = min(args.until or today, today)
