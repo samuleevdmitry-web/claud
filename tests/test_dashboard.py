@@ -186,3 +186,41 @@ def test_monthly_report_file(client, tmp_path, monkeypatch):
     with db.connect(TEST_DATABASE_URL) as conn:
         assert conn.execute("SELECT status FROM sync_runs WHERE source = 'report'").fetchone() == ("ok",)
     assert make_reports(load_settings(), date(2026, 3, 1), date(2026, 10, 6)) == []  # за март данных нет
+
+
+@needs_db
+def test_email_month_without_orders(client):
+    """Рассылки сентября с отчётами по адресам, а заказы 1С — только за октябрь: страница не падает, а говорит,
+    что заказов за месяц нет; рассылка без заказов за её 14 дней не считается «без заказов»."""
+    from analytics import privacy
+    from analytics.sources.unisender import Delivery, parse_campaign, parse_stats
+
+    sep = date(2026, 9, 1)
+    with db.connect(TEST_DATABASE_URL) as conn:
+        sync_metrika(conn, FakeMetrikaClient([], {("month", "total"): [(sep, [], [1000, 800, 2500, 20.0, 2.5, 150.0], {})]}),
+                     42, frozenset(), "lastsign", since=sep, until=date(2026, 9, 30), today=date(2026, 10, 2),
+                     log=lambda _: None)
+        early = parse_campaign({"id": 1, "start_time": "2026-09-05 10:00:00", "list_id": 1, "subject": "Флис"})
+        late = parse_campaign({"id": 2, "start_time": "2026-09-25 10:00:00", "list_id": 1, "subject": "Мембраны"})
+        db.save_unisender(conn, {1: "Оптовики"}, [early, late],
+                          [parse_stats(1, {"sent": 10, "delivered": 10}), parse_stats(2, {"sent": 10, "delivered": 10})])
+        h = privacy.email_hash("buyer@example.ru")
+        for cid in (1, 2):
+            db.save_recipients(conn, cid, [Delivery(h, "ok_read", 2), Delivery(privacy.email_hash("x@y.ru"), "ok_delivered", 1)],
+                               [])
+        conn.execute("INSERT INTO orders_1c (order_no, order_date, amount, status, email_hashes) VALUES"
+                     " ('А-1', '2026-10-02', 1000, 'Закрыт', %s), ('А-2', '2026-10-30', 10, 'Закрыт', '{}')", ([h],))
+    resp = client.get("/email?site=42&month=2026-09")
+    assert resp.status_code == 200, resp.text[-2000:]
+    assert "Заказов за сентябрь" in resp.text
+    from analytics.config import load_settings
+    from analytics.dashboard import pages
+    with db.connect(TEST_DATABASE_URL) as conn:
+        f = pages.resolve_filters(conn, load_settings(), 42, "2026-09", None, date(2026, 11, 19))
+        mail = pages.email_data(conn, load_settings(), f)["mail"]
+    rows = {r["campaign_id"]: r for r in mail["campaigns"]}
+    # у рассылки 05.09 все 14 дней — до начала выгрузки заказов (с 01.10): её заказы неизвестны, а не нулевые;
+    # у рассылки 25.09 известна только часть окна — в сравнение открывших и не открывших она не входит
+    assert rows[1]["coverage"] == "none" and rows[2]["coverage"] == "partial"
+    assert rows[2]["opened_ordered"] == 1 and mail["lift"] is None
+    assert "нет выгрузки заказов" in resp.text

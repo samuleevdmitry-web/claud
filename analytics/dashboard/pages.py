@@ -968,7 +968,8 @@ def email_data(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
         lift_rows = q.mail_lift(conn, f.month)
         if orders or lift_rows:
             ids = sorted({t["campaign_id"] for o in orders for t in o["touches"]} | {r["campaign_id"] for r in lift_rows})
-            mail = ins.mail_orders_stats(orders, q.mail_campaigns(conn, ids), lift_rows, coverage["last"])
+            mail = ins.mail_orders_stats(orders, q.mail_campaigns(conn, ids), lift_rows, coverage["first"],
+                                         coverage["last"])
     return {"stats": s, "prev": prev, "campaigns": campaigns, "base_info": base_info, "mail": mail,
             "orders_coverage": coverage, "delivery_ready": delivery_ready, "window": q.WINDOW_DAYS}
 

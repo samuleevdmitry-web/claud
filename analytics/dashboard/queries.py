@@ -762,8 +762,9 @@ _ORDER_CONTACTS = f"""
 
 
 def orders_coverage(conn: psycopg.Connection) -> dict | None:
-    row = _one(conn, f"SELECT count(*) AS orders, min(order_date) AS first, max(order_date) AS last FROM orders_1c"
-                     f" WHERE {NOT_CANCELLED}")
+    # выгрузки помесячные: заказы известны с начала месяца самого раннего заказа по день самого позднего
+    row = _one(conn, f"SELECT count(*) AS orders, date_trunc('month', min(order_date))::date AS first,"
+                     f" max(order_date) AS last FROM orders_1c WHERE {NOT_CANCELLED}")
     return row if row and row["orders"] else None
 
 

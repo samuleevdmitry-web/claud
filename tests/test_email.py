@@ -180,7 +180,8 @@ def test_email_channel_and_base():
         assert [(r["campaign_id"], r["delivered"], r["opened"], r["clicked"], r["opened_ordered"], r["unopened_ordered"])
                 for r in lift] == [(101, 3, 2, 1, 1, 0), (102, 1, 1, 0, 0, 0)]
         ids = sorted({t["campaign_id"] for r in rows for t in r["touches"]} | {r["campaign_id"] for r in lift})
-        m = ins.mail_orders_stats(rows, q.mail_campaigns(conn, ids), lift, q.orders_coverage(conn)["last"])
+        cov = q.orders_coverage(conn)
+        m = ins.mail_orders_stats(rows, q.mail_campaigns(conn, ids), lift, cov["first"], cov["last"])
         classes = {c["key"]: (c["orders"], c["amount"]) for c in m["classes"]}
         assert classes["topic_click"] == (1, 50000.0) and classes["no_mail"] == (1, 7000.0)
         assert classes["outside"] == (1, 3000.0) and m["orders"] == 3 and m["base_orders"] == 2

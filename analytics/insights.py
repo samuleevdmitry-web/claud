@@ -1174,7 +1174,7 @@ def _order_class(level: int, topic: bool, in_base: bool) -> str:
 
 
 def mail_orders_stats(orders: list[dict], campaigns: dict[int, dict], lift_rows: list[dict],
-                      orders_last: date | None) -> dict:
+                      orders_first: date | None, orders_last: date | None) -> dict:
     """Заказы месяца против рассылок: какое письмо было у клиента за 14 дней до заказа и что он с ним сделал.
 
     Для заказа берётся самое сильное касание: открытое письмо по теме покупки, затем переход по ссылке, открытие,
@@ -1218,9 +1218,10 @@ def mail_orders_stats(orders: list[dict], campaigns: dict[int, dict], lift_rows:
                 bought_groups[g] = bought_groups.get(g, 0) + 1
     base_orders = [c for k, c in classes.items() if k != "outside"]
     mailed = [classes[k] for k in MAIL_CLASSES]
-    lift = _lift(lift_rows, orders_last)
     for row in lift_rows:
         row.update(campaign_orders.get(row["campaign_id"], {"orders": 0, "amount": 0.0, "topic": 0, "topic_amount": 0.0}))
+        row["coverage"] = _coverage(row, orders_first, orders_last)
+    lift = _lift(lift_rows)
     all_terms = set().union(*terms.values()) if terms else set()
     uncovered = [(g, n) for g, n in sorted(bought_groups.items(), key=lambda x: -x[1])
                  if not (topics.stems(g) & all_terms)][:5]
@@ -1236,10 +1237,19 @@ def mail_orders_stats(orders: list[dict], campaigns: dict[int, dict], lift_rows:
     }
 
 
-def _lift(rows: list[dict], orders_last: date | None) -> dict | None:
+def _coverage(row: dict, first: date | None, last: date | None) -> str:
+    """Есть ли выгрузка заказов за 14 дней после письма: full — за все дни, partial — за часть, none — ни за один
+    (тогда «0 заказали» значило бы не «никто не заказал», а «заказов за эти дни нет в базе»)."""
+    day, end = row["start_time"].date(), row["window_end"]  # end — первый день после окна
+    if not first or not last or end <= first or day > last:
+        return "none"
+    return "full" if first <= day and end <= last + timedelta(days=1) else "partial"
+
+
+def _lift(rows: list[dict]) -> dict | None:
     """Открывшие письмо против не открывших: доля сделавших заказ за 14 дней. Только рассылки, у которых
-    14 дней уже прошли и есть выгрузка заказов за них."""
-    closed = [r for r in rows if orders_last and r["window_end"] <= orders_last + timedelta(days=1) and r["delivered"]]
+    14 дней уже прошли и есть выгрузка заказов за все эти дни."""
+    closed = [r for r in rows if r["coverage"] == "full" and r["delivered"]]
     opened = sum(r["opened"] for r in closed)
     unopened = sum(r["delivered"] - r["opened"] for r in closed)
     if not closed or not opened or not unopened:
@@ -1285,30 +1295,35 @@ def email_findings(s: dict, prev: dict | None, campaigns: list[dict], mail: dict
         out.append(Finding("plus" if s["channel_leads"] else "minus",
                            f"Метрика, канал «почтовые рассылки»: {plural(s['channel_visits'], VISITS)}, "
                            f"{plural(s['channel_leads'] or 0, LEADS)}."))
-    if mail and mail["orders"]:
-        m = mail
+    if mail:
+        out += _mail_findings(mail)
+    return out
+
+
+def _mail_findings(m: dict) -> list[Finding]:
+    out = []
+    if m["orders"]:
         text = (f"Заказов 1С за месяц: {fmt_int(m['orders'])}, из них от клиентов из базы рассылок — "
                 f"{fmt_int(m['base_orders'])} на {fmt_int(m['base_amount'])} ₽. После открытого письма (за 14 дней) — "
                 f"{plural(m['mail_orders'], ORDERS)} на {fmt_int(m['mail_amount'])} ₽")
         text += (f", из них товар из письма — {plural(m['topic_orders'], ORDERS)} на {fmt_int(m['topic_amount'])} ₽."
                  if m["has_items"] else ". Номенклатуры в выгрузке нет — тему письма с покупкой не сравнить.")
         out.append(Finding("plus" if m["mail_orders"] else "question", text))
-        lift = m["lift"]
-        if lift:
-            diff = lift["rate_open"] - lift["rate_unopen"]
-            kind = "plus" if diff > 0 else "minus"
-            text = (f"Из открывших письмо заказ за 14 дней сделали {fmt_pct(lift['rate_open'], 1)}, из не открывших — "
-                    f"{fmt_pct(lift['rate_unopen'], 1)} ({plural(lift['campaigns'], ('рассылка', 'рассылки', 'рассылок'))}).")
-            if diff > 0:
-                text += (f" Разница — около {plural(round(lift['extra']), ('заказа', 'заказов', 'заказов'))}: это верхняя "
-                         "оценка того, что дала "
-                         "рассылка (открывают и так более активные клиенты).")
-            if not lift["reliable"]:
-                kind, text = "question", text + " Открывших пока мало — вывод ненадёжный."
-            out.append(Finding(kind, text))
-        if m["uncovered"]:
-            out.append(Finding("check", "Клиенты базы чаще всего покупали то, о чём писем в этом месяце не было: "
-                                        + ", ".join(f"{g} ({n})" for g, n in m["uncovered"][:4]) + "."))
+    lift = m["lift"]
+    if lift:
+        diff = lift["rate_open"] - lift["rate_unopen"]
+        kind = "plus" if diff > 0 else "minus"
+        text = (f"Из открывших письмо заказ за 14 дней сделали {fmt_pct(lift['rate_open'], 1)}, из не открывших — "
+                f"{fmt_pct(lift['rate_unopen'], 1)} ({plural(lift['campaigns'], ('рассылка', 'рассылки', 'рассылок'))}).")
+        if diff > 0:
+            text += (f" Разница — около {plural(round(lift['extra']), ('заказа', 'заказов', 'заказов'))}: это верхняя "
+                     "оценка того, что дала рассылка (открывают и так более активные клиенты).")
+        if not lift["reliable"]:
+            kind, text = "question", text + " Открывших пока мало — вывод ненадёжный."
+        out.append(Finding(kind, text))
+    if m["orders"] and m["uncovered"]:
+        out.append(Finding("check", "Клиенты базы чаще всего покупали то, о чём писем в этом месяце не было: "
+                                    + ", ".join(f"{g} ({n})" for g, n in m["uncovered"][:4]) + "."))
     return out
 
 

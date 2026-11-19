@@ -74,9 +74,10 @@
   <p class="muted">Выгрузка заказов 1С есть (по {{ orders_coverage.last.strftime('%d.%m.%Y') }}), но отчётов о доставке
     UniSender по адресам за {{ f.month|month|lower }} нет: они загружаются вместе с рассылками по понедельникам
     (UniSender отдаёт их только за последние 180 дней). Без них не видно, кто получил и открыл письмо.</p>
-  {% elif not mail %}
+  {% elif not mail or not mail.orders %}
   <p class="muted">Заказов за {{ f.month|month|lower }} в выгрузках 1С нет (есть с {{ orders_coverage.first.strftime('%d.%m.%Y') }}
-    по {{ orders_coverage.last.strftime('%d.%m.%Y') }}).</p>
+    по {{ orders_coverage.last.strftime('%d.%m.%Y') }}).{% if mail and mail.campaigns %} Ниже — рассылки месяца: заказы после
+    них видны за те дни из {{ window }}, на которые есть выгрузка.{% endif %}</p>
   {% else %}
   <p class="hint">Для каждого заказа месяца — письма, которые клиент получил за {{ window }} дней до заказа, и что он с ними
     сделал (отчёт о доставке UniSender по адресам). Клиент узнаётся по почте и телефону из 1С — по отпечаткам, сами адреса
@@ -110,8 +111,8 @@
 <div class="card table-card">
   <div class="chart-title">Рассылки {{ f.month|month|lower }} и заказы после них</div>
   <p class="hint">По адресам из отчёта о доставке; списки сотрудников и тестовые не считаются. «Заказали» — адрес клиента,
-    который сделал заказ в 1С за {{ window }} дней после письма. «Заказы после письма» — заказы, для которых это письмо
-    было самым сильным касанием (открыл письмо по теме покупки, перешёл, открыл).</p>
+    который сделал заказ в 1С за {{ window }} дней после письма. «Заказы после письма» — заказы этого месяца, для которых это
+    письмо было самым сильным касанием (открыл письмо по теме покупки, перешёл, открыл).</p>
   <table>
     <thead><tr><th>Дата</th><th>Тема</th><th class="num">Получили</th><th class="num">Открыли</th><th class="num">Перешли</th>
       <th class="num">Заказали из открывших</th><th class="num">Из не открывших</th><th class="num">Заказы после письма</th>
@@ -121,14 +122,20 @@
       <tr><td>{{ c.start_time.strftime('%d.%m') if c.start_time else '—' }}</td>
           <td class="label" title="{{ c.subject or '' }}">{{ c.subject or c.campaign_id }}</td>
           <td class="num">{{ c.delivered|int }}</td><td class="num">{{ c.opened|int }}</td><td class="num">{{ c.clicked|int }}</td>
-          <td class="num">{{ c.opened_ordered|int }}{% if c.opened %} <span class="muted">({{ (100.0 * c.opened_ordered / c.opened)|pct(1) }})</span>{% endif %}</td>
-          <td class="num">{{ c.unopened_ordered|int }}{% if unopened %} <span class="muted">({{ (100.0 * c.unopened_ordered / unopened)|pct(1) }})</span>{% endif %}</td>
+          {% if c.coverage == 'none' %}
+          <td class="num muted" colspan="{{ 5 if mail.has_items else 4 }}">нет выгрузки заказов за {{ window }} дней после письма</td>
+          {% else %}
+          <td class="num">{{ c.opened_ordered|int }}{% if c.opened %} <span class="muted">({{ (100.0 * c.opened_ordered / c.opened)|pct(1) }})</span>{% endif %}{% if c.coverage == 'partial' %}*{% endif %}</td>
+          <td class="num">{{ c.unopened_ordered|int }}{% if unopened %} <span class="muted">({{ (100.0 * c.unopened_ordered / unopened)|pct(1) }})</span>{% endif %}{% if c.coverage == 'partial' %}*{% endif %}</td>
           <td class="num">{{ c.orders|int }}</td><td class="num">{{ c.amount|int }}</td>
-          {% if mail.has_items %}<td class="num">{{ c.topic|int }}</td>{% endif %}</tr>
+          {% if mail.has_items %}<td class="num">{{ c.topic|int }}</td>{% endif %}
+          {% endif %}</tr>
     {% endfor %}</tbody>
   </table>
-  {% if mail.lift and mail.lift.pending %}<p class="note">У части рассылок {{ window }} дней ещё не прошли или нет выгрузки
-    заказов за эти дни (заказы 1С есть по {{ orders_coverage.last.strftime('%d.%m.%Y') }}) — их цифры будут расти.</p>{% endif %}
+  {% if mail.campaigns|selectattr('coverage', 'ne', 'full')|list %}<p class="note">* — выгрузка заказов есть не за все
+    {{ window }} дней после письма (заказы 1С есть с {{ orders_coverage.first.strftime('%d.%m.%Y') }} по
+    {{ orders_coverage.last.strftime('%d.%m.%Y') }}): такие рассылки не входят в сравнение открывших и не открывших,
+    а их цифры вырастут, когда появятся выгрузки за недостающие дни.</p>{% endif %}
 </div>
 {% endif %}
 
