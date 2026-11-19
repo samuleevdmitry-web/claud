@@ -15,6 +15,7 @@ import psycopg
 from analytics import insights as ins
 from analytics import privacy
 from analytics.dashboard import queries as q
+from analytics.sources import crm_files
 
 LEVELS = {0: "не доставлено", 1: "получил, не открыл", 2: "открыл", 3: "перешёл по ссылке"}
 CLASS_TITLES = dict(ins.ORDER_CLASSES)
@@ -136,4 +137,20 @@ def trace_client(conn: psycopg.Connection, name: str, month: date, log: Callable
             state = "есть в базе UniSender" if privacy.phone_hash(p) in base_phones else (
                 "в базе UniSender телефонов нет" if not base_phones else "нет в базе UniSender")
             log(f"      телефон +7{p} — {state}")
+    # компании из справочника Б24 с этим названием: их почты и телефоны тоже считаются контактами клиента
+    keys = {crm_files.company_key(o[4]) for o in orders} - {None}
+    companies = conn.execute("SELECT name, emails, phones FROM companies WHERE company_key = ANY (%s) ORDER BY name",
+                             (sorted(keys),)).fetchall() if keys else []
+    if conn.execute("SELECT 1 FROM companies LIMIT 1").fetchone():
+        log(f"Справочник компаний Б24: найдено по названию — {len(companies)}")
+        for cname, emails, phones in companies:
+            log(f"  {cname or 'название не сохранено'}")
+            for e in emails or []:
+                h = privacy.email_hash(e)
+                state = "есть в базе UniSender" if h in base_emails else "письма получал" if h in sent else "нет в базе UniSender"
+                log(f"      почта {e} — {state}")
+            for p in phones or []:
+                log(f"      телефон +7{p}")
+    else:
+        log("Справочника компаний Б24 в imports нет — по нему клиента тоже можно связать с его почтой")
     return orders

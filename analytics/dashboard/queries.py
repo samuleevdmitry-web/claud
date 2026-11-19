@@ -735,30 +735,60 @@ NOT_CANCELLED = "coalesce(status, '') !~* '(отмен|аннул)'"
 
 # Контакты клиента заказа: почта из самого заказа и из других заказов того же клиента, плюс почта контактов
 # базы рассылок, найденных по телефону. Параметры: from, to — даты заказов.
-_ORDER_CONTACTS = f"""
-    o AS MATERIALIZED (
-        SELECT * FROM orders_1c
-        WHERE order_date >= %(from)s AND order_date < %(to)s AND {NOT_CANCELLED}
-    ),
+def _client_contacts(src: str) -> str:
+    """CTE для заказов из src (order_no, client_hash, email_hashes, phone_hashes, company_key, inn_hash):
+    contacts(order_no, email_hash) — все известные адреса клиента заказа:
+    - почта и телефон самого заказа и других заказов того же клиента 1С (кроме «общих» карточек с кучей адресов);
+    - почты и телефоны компании из справочника Б24 — найденной по названию без формы собственности, по ИНН
+      или по общей с заказом почте или телефону;
+    - адреса контактов базы UniSender, найденных по любому из этих телефонов."""
+    return f"""
     crowd AS MATERIALIZED (  -- «клиент» с множеством разных адресов — не один покупатель, его заказы не сводим
         SELECT client_hash FROM orders_1c CROSS JOIN LATERAL unnest(email_hashes) e
         WHERE client_hash IS NOT NULL GROUP BY client_hash HAVING count(DISTINCT e) > 5
     ),
     same AS MATERIALIZED (
-        SELECT o.order_no, x.email_hashes, x.phone_hashes FROM o JOIN orders_1c x ON x.client_hash = o.client_hash
-        WHERE o.client_hash NOT IN (SELECT client_hash FROM crowd)
+        SELECT s.order_no, x.email_hashes, x.phone_hashes FROM {src} s JOIN orders_1c x ON x.client_hash = s.client_hash
+        WHERE s.client_hash NOT IN (SELECT client_hash FROM crowd)
         UNION ALL
-        SELECT order_no, email_hashes, phone_hashes FROM o
+        SELECT order_no, email_hashes, phone_hashes FROM {src}
+    ),
+    own AS MATERIALIZED (
+        SELECT order_no, e AS email_hash, NULL::text AS phone_hash FROM same CROSS JOIN LATERAL unnest(email_hashes) e
+        UNION
+        SELECT order_no, NULL::text, p FROM same CROSS JOIN LATERAL unnest(phone_hashes) p
+    ),
+    comp AS MATERIALIZED (
+        SELECT s.order_no, c.company_id FROM {src} s JOIN companies c ON c.company_key = s.company_key
+        UNION
+        SELECT s.order_no, c.company_id FROM {src} s JOIN companies c ON c.inn_hash = s.inn_hash
+        UNION
+        SELECT w.order_no, cc.company_id FROM own w JOIN company_contacts cc ON cc.email_hash = w.email_hash
+        UNION
+        SELECT w.order_no, cc.company_id FROM own w JOIN company_contacts cc ON cc.phone_hash = w.phone_hash
+    ),
+    allc AS MATERIALIZED (
+        SELECT order_no, email_hash, phone_hash FROM own
+        UNION
+        SELECT k.order_no, cc.email_hash, cc.phone_hash FROM comp k JOIN company_contacts cc USING (company_id)
     ),
     contacts AS MATERIALIZED (
         SELECT DISTINCT order_no, email_hash FROM (
-            SELECT s.order_no, e AS email_hash FROM same s CROSS JOIN LATERAL unnest(s.email_hashes) e
+            SELECT order_no, email_hash FROM allc WHERE email_hash IS NOT NULL
             UNION ALL
-            SELECT s.order_no, b.email_hash FROM same s CROSS JOIN LATERAL unnest(s.phone_hashes) p
-            JOIN email_base b ON b.phone_hash = p WHERE b.email_hash IS NOT NULL
+            SELECT a.order_no, b.email_hash FROM allc a JOIN email_base b ON b.phone_hash = a.phone_hash
+            WHERE a.phone_hash IS NOT NULL AND b.email_hash IS NOT NULL
         ) z
     )
 """
+
+
+# Заказы за даты from–to и все известные адреса их клиентов (см. _client_contacts).
+_ORDER_CONTACTS = f"""
+    o AS MATERIALIZED (
+        SELECT * FROM orders_1c
+        WHERE order_date >= %(from)s AND order_date < %(to)s AND {NOT_CANCELLED}
+    ),""" + _client_contacts("o")
 
 
 def orders_coverage(conn: psycopg.Connection) -> dict | None:
@@ -911,41 +941,27 @@ def mail_item_orders(conn: psycopg.Connection, mailings: list[tuple[str, date]],
                   FROM mailing_items i JOIN m ON m.mailing = i.mailing AND m.day = i.mailing_date),
         ml AS MATERIALIZED (
             SELECT it.mailing, it.day, o.order_no, o.order_date, o.client_hash, o.email_hashes, o.phone_hashes,
-                   sum(l.amount) AS amount, array_agg(DISTINCT l.item) AS items
+                   o.company_key, o.inn_hash, sum(l.amount) AS amount, array_agg(DISTINCT l.item) AS items
             FROM items it
             JOIN order_lines l ON l.item_norm = it.item_norm
             JOIN orders_1c o ON o.order_no = l.order_no
             WHERE o.order_date >= it.day AND o.order_date <= it.day + %s AND {NOT_CANCELLED.replace("status", "o.status")}
-            GROUP BY 1, 2, 3, 4, 5, 6, 7
+            GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
         ),
-        crowd AS MATERIALIZED (
-            SELECT client_hash FROM orders_1c CROSS JOIN LATERAL unnest(email_hashes) e
-            WHERE client_hash IS NOT NULL GROUP BY client_hash HAVING count(DISTINCT e) > 5
-        ),
-        same AS MATERIALIZED (
-            SELECT DISTINCT ml.order_no, x.email_hashes, x.phone_hashes FROM ml JOIN orders_1c x ON x.client_hash = ml.client_hash
-            WHERE ml.client_hash NOT IN (SELECT client_hash FROM crowd)
-            UNION
-            SELECT order_no, email_hashes, phone_hashes FROM ml
-        ),
-        oc AS MATERIALIZED (
-            SELECT DISTINCT order_no, email_hash FROM (
-                SELECT s.order_no, e AS email_hash FROM same s CROSS JOIN LATERAL unnest(s.email_hashes) e
-                UNION ALL
-                SELECT s.order_no, b.email_hash FROM same s CROSS JOIN LATERAL unnest(s.phone_hashes) p
-                JOIN email_base b ON b.phone_hash = p WHERE b.email_hash IS NOT NULL
-            ) z
-        ),
+        mo AS MATERIALIZED (
+            SELECT DISTINCT order_no, client_hash, email_hashes, phone_hashes, company_key, inn_hash FROM ml
+        ),""" + _client_contacts("mo") + """,
         recv AS (
             SELECT ml.mailing, ml.day, ml.order_no, max(d.level) AS level
-            FROM ml JOIN oc USING (order_no) JOIN map USING (mailing, day)
+            FROM ml JOIN contacts oc USING (order_no) JOIN map USING (mailing, day)
             JOIN unisender_delivery d ON d.campaign_id = map.campaign_id AND d.email_hash = oc.email_hash
             GROUP BY 1, 2, 3
         )
         SELECT ml.mailing, ml.day, ml.order_no, ml.order_date, ml.amount, ml.items, ml.client_hash,
                (ml.order_date - ml.day) AS days, recv.level,
-               EXISTS (SELECT 1 FROM oc JOIN email_base b USING (email_hash) WHERE oc.order_no = ml.order_no) AS in_base,
-               array(SELECT email_hash FROM oc WHERE oc.order_no = ml.order_no ORDER BY 1) AS emails
+               EXISTS (SELECT 1 FROM contacts oc JOIN email_base b USING (email_hash) WHERE oc.order_no = ml.order_no)
+                   AS in_base,
+               array(SELECT email_hash FROM contacts oc WHERE oc.order_no = ml.order_no ORDER BY 1) AS emails
         FROM ml LEFT JOIN recv USING (mailing, day, order_no)
         ORDER BY ml.day, ml.mailing, ml.order_date, ml.order_no
     """
@@ -1080,13 +1096,21 @@ def clients_of_orders(conn: psycopg.Connection, order_nos: list[str], limit: int
             SELECT o.*, coalesce(o.client_hash, o.email_hashes[1], o.phone_hashes[1], o.order_no) AS ckey
             FROM orders_1c o WHERE o.order_no = ANY (%(nos)s)
         ),
+        cm AS (  -- компании справочника Б24 этих клиентов: их почты и телефоны тоже показываем
+            SELECT DISTINCT k.ckey, c.company_id, c.emails, c.phones FROM k
+            JOIN companies c ON c.company_key = k.company_key OR c.inn_hash = k.inn_hash
+        ),
         c AS (
             SELECT ckey, max(client_name) AS name, count(*) AS orders, sum(amount) AS amount, max(order_date) AS last_order,
-                   bool_or(cardinality(email_hashes) > 0) AS has_email,
-                   (SELECT array_agg(DISTINCT e) FROM k k2 CROSS JOIN LATERAL unnest(k2.emails) e WHERE k2.ckey = k.ckey)
-                       AS emails,
-                   (SELECT array_agg(DISTINCT p) FROM k k2 CROSS JOIN LATERAL unnest(k2.phones) p WHERE k2.ckey = k.ckey)
-                       AS phones
+                   bool_or(cardinality(email_hashes) > 0) OR EXISTS (
+                       SELECT 1 FROM cm JOIN company_contacts cc USING (company_id)
+                       WHERE cm.ckey = k.ckey AND cc.email_hash IS NOT NULL) AS has_email,
+                   (SELECT array_agg(DISTINCT e) FROM (
+                        SELECT unnest(k2.emails) AS e FROM k k2 WHERE k2.ckey = k.ckey
+                        UNION SELECT unnest(cm.emails) FROM cm WHERE cm.ckey = k.ckey) z) AS emails,
+                   (SELECT array_agg(DISTINCT p) FROM (
+                        SELECT unnest(k2.phones) AS p FROM k k2 WHERE k2.ckey = k.ckey
+                        UNION SELECT unnest(cm.phones) FROM cm WHERE cm.ckey = k.ckey) z) AS phones
             FROM k GROUP BY ckey
         )
     """

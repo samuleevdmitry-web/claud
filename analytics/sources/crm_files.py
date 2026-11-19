@@ -28,14 +28,16 @@ KINDS = {
     "calls": {"Итог", "Все входящие лиды"},
 }
 KIND_NAMES = {"forms": "лиды с сайта (формы)", "calls": "входящие звонки", "orders": "заказы 1С",
-              "mailing_items": "позиции рассылок", "staff": "сотрудники", "staff_hidden": "сотрудники"}
+              "mailing_items": "позиции рассылок", "staff": "сотрудники", "staff_hidden": "сотрудники",
+              "companies": "справочник компаний Б24"}
 # Версия разбора: файлы, загруженные прежней версией, загружаются заново, если ещё лежат в папке.
 # 3 — отпечатки почты и телефона лидов для сведения с базой рассылок.
 # 4 — выгрузка всех заказов 1С; нераспознанные раньше файлы разбираются заново.
 # 5 — итог разбора каждого файла сохраняется для страницы «Данные»: файлы читаются заново один раз.
 # 6 — колонки узнаются по смыслу («Заказ 1С», «Номенклатура 1С»…), все листы книги, позиции заказов и рассылок.
 # 7 — список сотрудников («Сотрудник», «E-Mail»): нераспознанный раньше файл пользователей читается заново.
-PARSER_VERSION = 7
+# 8 — справочник компаний Б24 (HTML-«xls», CSV); у заказов — ключ названия компании и ИНН для сверки с ним.
+PARSER_VERSION = 8
 
 
 class CrmFileError(Exception):
@@ -99,6 +101,8 @@ class Order:
     client_name: str | None = None
     emails: tuple[str, ...] = ()
     phones: tuple[str, ...] = ()
+    company_key: str | None = None  # отпечаток названия без формы собственности — для сверки с компаниями Б24
+    inn_hash: str | None = None
 
 
 @dataclass
@@ -117,12 +121,13 @@ class CrmFile:
     mailing_items: list = field(default_factory=list)  # MailingItem: позиции рассылок
     sheets_info: list[str] = field(default_factory=list)  # что нашлось на каждом листе
     staff: list = field(default_factory=list)  # StaffMember: сотрудники из файла пользователей
+    companies: list = field(default_factory=list)  # Company: справочник компаний (контактов, лидов) Б24
     totals: bool = True  # суммы заказов целиком (список заказов), а не только части позиций
 
     @property
     def rows(self) -> int:
         return (len(self.form_leads) + len(self.call_leads) + len(self.call_orders) + len(self.orders)
-                + len(self.order_lines) + len(self.mailing_items) + len(self.staff))
+                + len(self.order_lines) + len(self.mailing_items) + len(self.staff) + len(self.companies))
 
 
 def sha256(path: Path) -> str:
@@ -318,7 +323,7 @@ _EXACT = {name: key for key, names in ORDER_COLUMNS.items() for name in names}
 COLUMN_NAMES = {"order_no": "номер", "date": "дата", "amount": "сумма", "line_amount": "сумма строки",
                 "status": "статус", "client": "клиент", "email": "почта", "phone": "телефон", "item": "номенклатура",
                 "group": "группа", "color": "цвет", "mailing": "рассылка", "mailing_date": "дата рассылки",
-                "person": "сотрудник"}
+                "person": "сотрудник", "company": "компания", "inn": "ИНН"}
 
 
 def _column_kind(h: str) -> str | None:
@@ -336,8 +341,12 @@ def _column_kind(h: str) -> str | None:
         if any(w in h for w in ("цена", "колич", "сумм", "после", "источник", "через")):
             return None
         return "mailing"
-    if h.startswith(("сотрудник", "фио", "ф.и.о", "пользователь")) or h in ("имя", "имя сотрудника"):
+    if h.startswith(("сотрудник", "пользователь")):
         return "person"
+    if h == "инн" or h.startswith(("инн ", "инн/")):
+        return "inn"
+    if h in COMPANY_HEADERS or h.startswith(("название компании", "наименование компании", "наименование организации")):
+        return "company"
     if h in _EXACT:
         return _EXACT[h]
     if h.startswith(("когда", "через", "количество", "цена")) or "после" in h:
@@ -359,6 +368,11 @@ def _column_kind(h: str) -> str | None:
     if h.startswith("цвет"):
         return "color"
     return None
+
+
+# Название компании в справочниках Б24 (компании, контакты, лиды); «Клиент»/«Контрагент» в заказах — это client.
+COMPANY_HEADERS = ("название компании", "компания", "наименование компании", "наименование организации",
+                   "организация", "название")
 
 
 def _match_columns(header: list[str]) -> dict[str, int]:
@@ -392,6 +406,8 @@ def _sheet_kind(rows: list[tuple]) -> tuple[str, int, dict[str, int]] | None:
             return "mailing_items", i, cols
         if "person" in cols and "email" in cols and not cols.keys() & {"order_no", "mailing"}:
             return "staff", i, cols
+        if "company" in cols and cols.keys() & {"email", "phone"} and not cols.keys() & {"order_no", "mailing", "person"}:
+            return "companies", i, cols
     return None
 
 
@@ -503,7 +519,7 @@ def _parse_order_sheet(rows: list[tuple], header_row: int, cols: dict[str, int])
         count += 1
         o = acc.setdefault(no, {"date": when.date(), "amounts": [], "lines": 0.0, "status": None, "client": None,
                                 "emails": [], "phones": [], "items": [], "groups": [], "name": None,
-                                "plain_emails": [], "plain_phones": []})
+                                "plain_emails": [], "plain_phones": [], "inn": None})
         line_value = 0.0
         for key in ("amount", "line_amount"):
             if key in cols:
@@ -519,6 +535,7 @@ def _parse_order_sheet(rows: list[tuple], header_row: int, cols: dict[str, int])
         o["status"] = _text(cell(row, "status")) or o["status"]
         o["client"] = o["client"] or privacy.fingerprint("client", _client_key(cell(row, "client")))
         o["name"] = o["name"] or (_text(cell(row, "client")) or "")[:200] or None
+        o["inn"] = o["inn"] or inn_hash(cell(row, "inn"))
         for i in email_cols:
             value = row[i] if i < len(row) else None
             o["emails"] += [h for h in privacy.email_hashes(value) if h not in o["emails"]]
@@ -556,7 +573,7 @@ def _parse_order_sheet(rows: list[tuple], header_row: int, cols: dict[str, int])
 
     orders = {no: Order(no, o["date"], total(o), o["status"], o["client"], tuple(o["emails"]), tuple(o["phones"]),
                         tuple(o["items"]), tuple(o["groups"]), o["name"], tuple(o["plain_emails"]),
-                        tuple(o["plain_phones"]))
+                        tuple(o["plain_phones"]), company_key(o["name"]), o["inn"])
               for no, o in acc.items()}
     return {"orders": orders, "lines": lines, "mailing_items": mailing_items, "count": count,
             "totals": "item" not in cols, "columns": _names(rows, header_row, cols), "cols": cols}
@@ -580,7 +597,7 @@ def _parse_mailing_sheet(rows: list[tuple], header_row: int, cols: dict[str, int
 def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
     """Все листы книги: заказы (список заказов, заказы по позициям, совпадения с рассылками) и позиции рассылок.
     Заказы с разных листов сводятся по номеру; позиции заказа берутся с листа, где их у этого заказа больше всего."""
-    parts, items, info, staff = [], set(), [], []
+    parts, items, info, staff, companies = [], set(), [], [], []
     for name, rows in sheets.items():
         found = _sheet_kind(rows)
         if not found:
@@ -593,6 +610,13 @@ def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
             got = _parse_staff_sheet(rows, header_row, cols)
             staff += got
             info.append(f"лист «{name}»: сотрудники — {len(got)}; колонки: {cols_text}")
+            continue
+        if kind == "companies":
+            got = _parse_company_sheet(rows, header_row, cols)
+            companies += got
+            what = "лиды Б24 (контакты)" if any("лид" in _head(v) for v in rows[header_row]) else "компании"
+            info.append(f"лист «{name}»: {what} — {len(got)} (с почтой {sum(1 for c in got if c.email_hashes)}, "
+                        f"с телефоном {sum(1 for c in got if c.phone_hashes)}); колонки: {cols_text}")
             continue
         if kind == "mailing_items":
             got = _parse_mailing_sheet(rows, header_row, cols)
@@ -612,6 +636,8 @@ def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
     if not parts and not items:
         if staff:
             return CrmFile("staff", date(1970, 1, 1), staff=staff, sheets_info=info)  # список без месяца
+        if companies:
+            return CrmFile("companies", date(1970, 1, 1), companies=companies, sheets_info=info)  # справочник
         return None
     orders: dict[str, Order] = {}
     for part in sorted(parts, key=lambda x: not x["totals"]):  # сначала листы с суммой заказа целиком
@@ -626,7 +652,8 @@ def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
                                tuple(dict.fromkeys(was.phone_hashes + o.phone_hashes)),
                                tuple(dict.fromkeys(was.items + o.items)), tuple(dict.fromkeys(was.groups + o.groups)),
                                was.client_name or o.client_name, tuple(dict.fromkeys(was.emails + o.emails)),
-                               tuple(dict.fromkeys(was.phones + o.phones)))
+                               tuple(dict.fromkeys(was.phones + o.phones)), was.company_key or o.company_key,
+                               was.inn_hash or o.inn_hash)
     lines: list[OrderLine] = []
     by_order: dict[str, list[OrderLine]] = {}
     for part in parts:
@@ -656,6 +683,60 @@ def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
                    columns=columns, lines=sum(p["count"] for p in parts), order_lines=lines,
                    mailing_items=sorted(items, key=lambda x: (x.mailing, x.item)), sheets_info=info,
                    totals=any(p["totals"] for p in parts))
+
+
+LEGAL_FORMS = {"ооо", "оао", "зао", "пао", "ао", "нао", "ип", "тоо", "чп", "пбоюл", "нко", "ано", "кфх", "гк", "тд"}
+LEGAL_PHRASES = ("общество с ограниченной ответственностью", "индивидуальный предприниматель", "публичное акционерное общество",
+                 "закрытое акционерное общество", "открытое акционерное общество", "акционерное общество")
+
+
+def company_key(name) -> str | None:
+    """Отпечаток названия компании для сверки 1С и Б24: без формы собственности, кавычек и порядка слов —
+    «Карагод ИП», «ИП Карагод» и «ИП «Карагод»» совпадают. Общие карточки («Физическое лицо») — None."""
+    s = (_text(name) or "").lower().replace("ё", "е")
+    for phrase in LEGAL_PHRASES:
+        s = s.replace(phrase, " ")
+    words = [w for w in re.sub(r"[\"«»'`“”„.,()/\\\-–—№]+", " ", s).split() if w not in LEGAL_FORMS]
+    if not words or GENERIC_CLIENT.match(" ".join(words)):
+        return None
+    return privacy.fingerprint("company", " ".join(sorted(words)))
+
+
+def inn_hash(value) -> str | None:
+    digits = re.sub(r"\D", "", str(value or ""))
+    return privacy.fingerprint("inn", digits) if len(digits) in (10, 12) else None
+
+
+@dataclass(frozen=True)
+class Company:
+    """Компания (или контакт, лид) из справочника Б24: отпечатки названия, ИНН, почт и телефонов; название, почты и
+    телефоны — только при EMAIL_LISTS=on."""
+    name: str
+    company_key: str | None
+    inn_hash: str | None
+    email_hashes: tuple[str, ...]
+    phone_hashes: tuple[str, ...]
+    emails: tuple[str, ...] = ()
+    phones: tuple[str, ...] = ()
+
+
+def _parse_company_sheet(rows: list[tuple], header_row: int, cols: dict[str, int]) -> list[Company]:
+    email_cols = [i for k, i in cols.items() if k.startswith("email") and k != "email"]
+    phone_cols = [i for k, i in cols.items() if k.startswith("phone") and k != "phone"]
+    out = []
+    for row in rows[header_row + 1:]:
+        if not row:
+            continue
+        name = _text(row[cols["company"]]) if cols["company"] < len(row) else None
+        emails = list(dict.fromkeys(e for i in email_cols if i < len(row) for e in privacy.emails(row[i])))
+        phones = list(dict.fromkeys(n for i in phone_cols if i < len(row) for n in privacy.phones(row[i])))
+        if not name or not (emails or phones):
+            continue
+        inn = row[cols["inn"]] if "inn" in cols and cols["inn"] < len(row) else None
+        out.append(Company(name[:300], company_key(name), inn_hash(inn),
+                           tuple(privacy.fingerprint("email", e) for e in emails),
+                           tuple(privacy.fingerprint("phone", n) for n in phones), tuple(emails), tuple(phones)))
+    return out
 
 
 # «Клиенты», под которыми в 1С идут разные люди: их заказы вместе не собираются, иначе смешаются чужие контакты.

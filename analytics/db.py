@@ -260,7 +260,7 @@ def mark_backfilled(conn: psycopg.Connection, counter_id: int, reports: set[str]
                         [(counter_id, r) for r in sorted(reports)])
 
 
-CONTACT_KINDS = ["orders", "staff", "staff_hidden"]  # файлы, в которых есть имена и контакты для списков
+CONTACT_KINDS = ["orders", "staff", "staff_hidden", "companies"]  # файлы, в которых есть имена и контакты для списков
 
 
 def imported_files(conn: psycopg.Connection, version: int = 1, need_contacts: bool = False) -> set[str]:
@@ -287,7 +287,8 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
             totals = parsed.totals
             cur.executemany(
                 "INSERT INTO orders_1c (order_no, order_date, amount, status, client_hash, email_hashes, phone_hashes,"
-                " items, groups, client_name, emails, phones) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                " items, groups, client_name, emails, phones, company_key, inn_hash)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                 " ON CONFLICT (order_no) DO UPDATE SET order_date = EXCLUDED.order_date,"
                 " amount = CASE WHEN EXCLUDED.amount > 0 AND (%s OR orders_1c.amount = 0) THEN EXCLUDED.amount"
                 "  ELSE orders_1c.amount END,"
@@ -301,12 +302,31 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
                 " groups = CASE WHEN cardinality(EXCLUDED.groups) > 0 THEN EXCLUDED.groups ELSE orders_1c.groups END,"
                 " client_name = coalesce(EXCLUDED.client_name, orders_1c.client_name),"
                 " emails = CASE WHEN cardinality(EXCLUDED.emails) > 0 THEN EXCLUDED.emails ELSE orders_1c.emails END,"
-                " phones = CASE WHEN cardinality(EXCLUDED.phones) > 0 THEN EXCLUDED.phones ELSE orders_1c.phones END",
+                " phones = CASE WHEN cardinality(EXCLUDED.phones) > 0 THEN EXCLUDED.phones ELSE orders_1c.phones END,"
+                " company_key = coalesce(EXCLUDED.company_key, orders_1c.company_key),"
+                " inn_hash = coalesce(EXCLUDED.inn_hash, orders_1c.inn_hash)",
                 [(o.order_no, o.order_date, o.amount, o.status, o.client_hash, list(o.email_hashes),
                   list(o.phone_hashes), list(o.items), list(o.groups),
                   o.client_name if keep_contacts else None, list(o.emails) if keep_contacts else [],
-                  list(o.phones) if keep_contacts else [], totals) for o in parsed.orders],
+                  list(o.phones) if keep_contacts else [], o.company_key, o.inn_hash, totals) for o in parsed.orders],
             )
+        if kind == "companies":  # справочник: файл заменяет только свои строки
+            cur.execute("DELETE FROM company_contacts WHERE company_id IN (SELECT company_id FROM companies WHERE source = %s)",
+                        (sha,))
+            cur.execute("DELETE FROM companies WHERE source = %s", (sha,))
+            # пакетом: десятки тысяч компаний — строки по номеру, контакты одним запросом по (файл, номер строки)
+            cur.executemany("INSERT INTO companies (source, row_no, company_key, inn_hash, name, emails, phones)"
+                            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                            [(sha, i, c.company_key, c.inn_hash, c.name if keep_contacts else None,
+                              list(c.emails) if keep_contacts else [], list(c.phones) if keep_contacts else [])
+                             for i, c in enumerate(parsed.companies)])
+            rows = [(i, h, None) for i, c in enumerate(parsed.companies) for h in c.email_hashes] + [
+                (i, None, h) for i, c in enumerate(parsed.companies) for h in c.phone_hashes]
+            cur.execute("INSERT INTO company_contacts (company_id, email_hash, phone_hash)"
+                        " SELECT c.company_id, x.email_hash, x.phone_hash"
+                        " FROM unnest(%s::integer[], %s::text[], %s::text[]) AS x(row_no, email_hash, phone_hash)"
+                        " JOIN companies c ON c.source = %s AND c.row_no = x.row_no",
+                        ([r[0] for r in rows], [r[1] for r in rows], [r[2] for r in rows], sha))
         if kind in ("orders", "mailing_items"):
             # позиции заказов: выгрузка заменяет позиции своих заказов целиком
             lines = parsed.order_lines
@@ -470,6 +490,8 @@ def purge_email_contacts(conn: psycopg.Connection) -> None:
         conn.execute("UPDATE staff SET name = NULL, email = NULL WHERE name IS NOT NULL OR email IS NOT NULL")
         conn.execute("UPDATE orders_1c SET client_name = NULL, emails = '{}', phones = '{}'"
                      " WHERE client_name IS NOT NULL OR cardinality(emails) > 0 OR cardinality(phones) > 0")
+        conn.execute("UPDATE companies SET name = NULL, emails = '{}', phones = '{}'"
+                     " WHERE name IS NOT NULL OR cardinality(emails) > 0 OR cardinality(phones) > 0")
         conn.execute("UPDATE crm_imports SET contacts = false WHERE contacts")
 
 

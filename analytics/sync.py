@@ -331,8 +331,12 @@ def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], 
             known = conn.execute("SELECT count(*) FROM orders_1c WHERE order_no = ANY (%s)",
                                  ([o.order_no for o in parsed.orders],)).fetchone()[0]
         rows = db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION, keep_contacts)
-        text = (orders_summary(parsed, known) if parsed.kind in ("orders", "mailing_items")
-                else f"{crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
+        if parsed.kind == "orders" or parsed.kind == "mailing_items":
+            text = orders_summary(parsed, known)
+        elif parsed.kind == "companies":
+            text = companies_summary(conn, sha, parsed, keep_contacts)
+        else:
+            text = f"{crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк"
         _report(conn, sha, path.name, text, log)
         out.append(parsed)
     return out
@@ -342,6 +346,37 @@ def _report(conn: psycopg.Connection, sha: str, name: str, text: str, log: Calla
     """Итог разбора файла: в журнал и в базу — его видно на странице «Данные» дашборда."""
     log(f"  {name}: " + text.replace("\n", "\n    "))
     db.set_import_message(conn, sha, text)
+
+
+def companies_summary(conn: psycopg.Connection, sha: str, parsed, keep_contacts: bool) -> str:
+    """Что дал справочник компаний: сколько компаний и контактов и скольких клиентов из заказов 1С он нашёл —
+    по названию (без формы собственности), ИНН или общей почте и телефону."""
+    c = parsed.companies
+    found = conn.execute("""
+        WITH mine AS (SELECT company_id, company_key, inn_hash FROM companies WHERE source = %(sha)s),
+        clients AS (SELECT DISTINCT coalesce(company_key, client_hash, order_no) AS client, company_key, inn_hash,
+                           email_hashes, phone_hashes FROM orders_1c),
+        by_name AS (SELECT DISTINCT k.client FROM clients k JOIN mine m ON m.company_key = k.company_key
+                    UNION SELECT DISTINCT k.client FROM clients k JOIN mine m ON m.inn_hash = k.inn_hash),
+        by_contact AS (
+            SELECT DISTINCT k.client FROM clients k CROSS JOIN LATERAL unnest(k.email_hashes) h
+            JOIN company_contacts cc ON cc.email_hash = h JOIN mine m USING (company_id)
+            UNION
+            SELECT DISTINCT k.client FROM clients k CROSS JOIN LATERAL unnest(k.phone_hashes) h
+            JOIN company_contacts cc ON cc.phone_hash = h JOIN mine m USING (company_id)
+        )
+        SELECT (SELECT count(DISTINCT client) FROM clients), (SELECT count(*) FROM by_name),
+               (SELECT count(*) FROM by_contact), (SELECT count(*) FROM (SELECT client FROM by_name UNION
+                                                                          SELECT client FROM by_contact) z)
+    """, {"sha": sha}).fetchone()
+    total, by_name, by_contact, either = found
+    lines = [(f"справочник компаний Б24 — {len(c)} (с почтой {sum(1 for x in c if x.email_hashes)}, "
+              f"с телефоном {sum(1 for x in c if x.phone_hashes)})"),
+             (f"клиенты из заказов 1С, найденные в справочнике: {either} из {total} (по названию или ИНН — {by_name}, "
+              f"по общей почте или телефону — {by_contact})"),
+             "названия и контакты сохранены для списков" if keep_contacts
+             else "сохранены только отпечатки; названия и контакты — при EMAIL_LISTS=on в .env"]
+    return "\n".join(lines + parsed.sheets_info)
 
 
 def orders_summary(parsed, known: int) -> str:

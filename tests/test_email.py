@@ -330,3 +330,59 @@ def test_phone_from_custom_field():
     assert is_phone_field("Телефон") and is_phone_field("Mobile phone") and not is_phone_field("phone")
     session = FakeSession([ok([{"id": 1, "name": "Name", "type": "string"}, {"id": 2, "name": "Телефон", "type": "string"}])])
     assert UnisenderClient("key", session=session, backoff=0, pause=0, limit_wait=0).phone_fields() == ["Телефон"]
+
+
+@needs_db
+def test_company_directory_links_clients(tmp_path):
+    """Справочник компаний Б24 (HTML-«xls»): клиент 1С без почты в заказе находится в базе UniSender по названию
+    компании, другой — по общему с компанией телефону."""
+    import openpyxl
+
+    from analytics.sources.unisender import Contact, Delivery, parse_campaign
+    from analytics.sync import import_crm_folder
+
+    oct_ = date(2026, 10, 1)
+    h = privacy.email_hash
+    with db.connect(TEST_DATABASE_URL) as conn:
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        db.apply_schema(conn)
+        db.save_unisender(conn, {1: "Оптовики"}, [parse_campaign({"id": 501, "start_time": "2026-10-14 10:00:00",
+                                                                  "list_id": 1, "subject": "Новинки"})], [])
+        db.replace_email_base(conn, [Contact(h("ryba-aist@inbox.ru"), None, "active", (1,)),
+                                     Contact(h("romashka@x.ru"), None, "active", (1,))])
+        db.save_recipients(conn, 501, [Delivery(h("ryba-aist@inbox.ru"), "ok_read", 2),
+                                       Delivery(h("romashka@x.ru"), "ok_delivered", 1)], [])
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Дата", "Клиент", "Номер", "Сумма", "Текущее состояние", "Электронная почта", "Телефон"])
+        ws.append(["20.10.2026", "Карагод ИП", "АТЦБ-1", 15000, "Закрыт", "", "8 900 111 22 33"])
+        ws.append(["21.10.2026", "ООО Ромашка", "АТЦБ-2", 7000, "Закрыт", "", "+7 (917) 470-64-44"])
+        ws.append(["22.10.2026", "ООО «Новая»", "АТЦБ-3", 3000, "Закрыт", "", ""])
+        wb.save(tmp_path / "orders.xlsx")
+        import_crm_folder(conn, tmp_path, log=lambda _: None, keep_contacts=True)
+
+        def classes():
+            rows = q.mail_orders(conn, oct_)
+            ids = sorted({t["campaign_id"] for o in rows for t in o["touches"]})
+            stats = ins.mail_orders_stats(rows, q.mail_campaigns(conn, ids), [], None, None)
+            return {no: c["key"] for c in stats["classes"] for no in c.get("order_nos", [])}
+
+        assert classes() == {"АТЦБ-1": "outside", "АТЦБ-2": "outside", "АТЦБ-3": "outside"}  # почты в заказах нет
+
+        (tmp_path / "COMPANY_20261120.xls").write_text(
+            '<html><meta charset="utf-8"><table border="1">'
+            "<tr><th>ID</th><th>Название компании</th><th>Рабочий телефон</th><th>Рабочий e-mail</th></tr>"
+            "<tr><td>1</td><td>ИП «Карагод»</td><td></td><td>Ryba-Aist@inbox.ru</td></tr>"
+            "<tr><td>2</td><td>ООО «Ромашка Плюс»</td><td>8 (917) 470-64-44</td><td>romashka@x.ru</td></tr>"
+            "<tr><td>3</td><td>Новая ООО</td><td></td><td>new@x.ru</td></tr>"
+            "</table></html>", encoding="utf-8")
+        logs = []
+        import_crm_folder(conn, tmp_path, log=logs.append, keep_contacts=True)
+        text = "\n".join(logs)
+        assert "справочник компаний Б24 — 3 (с почтой 3, с телефоном 1)" in text
+        assert "найденные в справочнике: 3 из 3 (по названию или ИНН — 2, по общей почте или телефону — 1)" in text
+        # Карагод — по названию, открыла письмо 14.10 за 6 дней до заказа; Ромашка — по телефону, письмо не открывала;
+        # у «Новой» почта из Б24 есть, но её нет в базе рассылок — в списке «не нашли» с этой почтой (её можно добавить)
+        assert classes() == {"АТЦБ-1": "open_other", "АТЦБ-2": "unopened", "АТЦБ-3": "outside"}
+        listed = q.clients_of_orders(conn, ["АТЦБ-3"])
+        assert listed["with_email"] == 1 and listed["rows"][0]["emails"] == ["new@x.ru"]
