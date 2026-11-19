@@ -122,6 +122,7 @@ def test_every_section_renders(client):
                  "/traffic?tab=audience", "/traffic?tab=tech"):
         page = client.get(path, params={"month": "2026-09"})
         assert page.status_code == 200, path
+        assert "не построен" not in page.text and "Не всё удалось построить" not in page.text, path
     geo = client.get("/traffic", params={"month": "2026-09", "tab": "geo", "aud": "all"}).text
     assert "Аналитическая сводка" in geo and "Китай" in geo  # вывод про страны без продаж
     humans = client.get("/", params={"month": "2026-09", "aud": "humans"}).text
@@ -262,3 +263,112 @@ def test_broken_section_does_not_break_other_pages(client, monkeypatch):
     assert email.status_code == 200 and "Раздел не построен: RuntimeError: сломалось" in email.text
     assert "<h1>E-mail</h1>" in email.text
     assert 'href="/traffic' in email.text  # меню на месте
+
+
+def mailing_positions_file(path):
+    """Как «Заказы_по_позициям_рассылок»: листы «Совпадения», «Общий список», «Позиции рассылок»."""
+    import openpyxl
+
+    lotus, salmi = "МЕМБРАННАЯ ТКАНЬ ЛОТУС ВО ТПУ 3К/3К, 145г/м2 1,45м", "КУРТОЧНАЯ ТКАНЬ САЛМИ 22YSD"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Совпадения"
+    ws.append(["Заказ 1С", "Номенклатура 1С", "Цвет", "Количество для рассылки", "Цена из рассылки", "Сумма позиции, ₽",
+               "Телефон", "Электронная почта", "Дата заказа", "Дата рассылки", "Когда оформлен заказ", "Рассылка",
+               "Клиент / контрагент", "Источник количества"])
+    rows = [
+        ("АТЦБ-1", lotus, "черный", 246, 205, 50430, "17-344-51-40", "A@x.ru", "09.11.2026", "21.10.2026", "Мембранная ткань ЛОТУС", "Анна ИП"),
+        ("АТЦБ-1", lotus, "серый", 1, 205, 205, "17-344-51-40", "A@x.ru", "09.11.2026", "21.10.2026", "Мембранная ткань ЛОТУС", "Анна ИП"),
+        ("АТЦБ-2", lotus, "черный", 1, 205, 205, "Нет в исходном файле", "other@y.ru", "10.11.2026", "21.10.2026", "Мембранная ткань ЛОТУС", "Борис"),
+        ("АТЦБ-3", lotus, "серый", 5, 205, 1000, "Нет в исходном файле", "d@x.ru", "25.10.2026", "21.10.2026", "Мембранная ткань ЛОТУС", "Дина ИП"),
+        ("АТЦБ-4", salmi, "чёрный", 100, 122, 12200, "Нет в исходном файле", "a@x.ru", "12.11.2026", "29.10.2026", "Новые цвета САЛМИ", "Анна ИП"),
+        ("АТЦБ-5", "КАТАФОТ 50мм прямоугольник", "жёлтый", 200, 26, 5200, "Представление=8(495)544 51-97",
+         "Нет в исходном файле", "13.11.2026", "13.10.2026", "Акция на световозвращающие материалы", "Игнаткина ИП"),
+        ("АТЦБ-7", lotus, "черный", 1, 205, 205, "", "a@x.ru", "05.12.2026", "21.10.2026", "Мембранная ткань ЛОТУС", "Анна ИП"),
+    ]
+    for no, item, color, qty, price, amount, phone, email, day, sent, mailing, client in rows:
+        ws.append([no, item, color, qty, price, amount, phone, email, day, sent, "Заказ через N дней после рассылки",
+                   mailing, client, "Продано"])
+    ws = wb.create_sheet("Общий список")
+    ws.append(["Заказ 1С", "Дата заказа", "Номенклатура 1С", "Цвет", "Сумма позиции, ₽", "Клиент / контрагент", "Электронная почта"])
+    for no, day, item, color, amount, client, email in [
+        ("АТЦБ-1", "09.11.2026", lotus, "черный", 50430, "Анна ИП", "a@x.ru"),
+        ("АТЦБ-1", "09.11.2026", lotus, "серый", 205, "Анна ИП", "a@x.ru"),
+        ("АТЦБ-1", "09.11.2026", "ФЛИС 280", "синий", 3000, "Анна ИП", "a@x.ru"),
+        ("АТЦБ-6", "25.10.2026", "ФЛИС 280", "синий", 700, "Вера", "b@x.ru"),
+    ]:
+        ws.append([no, day, item, color, amount, client, email])
+    ws = wb.create_sheet("Позиции рассылок")
+    ws.append(["Рассылка", "Дата рассылки", "Номенклатура 1С", "Цвет", "Цена"])
+    for mailing, sent, item in [("Мембранная ткань ЛОТУС", "21.10.2026", lotus),
+                                ("Мембранная ткань ЛОТУС", "21.10.2026", "МЕМБРАНА ЛОТУС 2К"),
+                                ("Новые цвета САЛМИ", "29.10.2026", salmi),
+                                ("Акция на световозвращающие материалы", "13.10.2026", "КАТАФОТ 50мм прямоугольник")]:
+        ws.append([mailing, sent, item, "", 205])
+    wb.save(path)
+
+
+@needs_db
+def test_mailing_items_pivot(client, tmp_path):
+    """Позиции рассылок × позиции заказов × отчёт о доставке: кто купил товар из рассылки, получил ли он письмо."""
+    from analytics import privacy
+    from analytics.config import load_settings
+    from analytics.dashboard import pages
+    from analytics.sources.unisender import (
+        Contact,
+        Delivery,
+        parse_campaign,
+        parse_stats,
+    )
+    from analytics.sync import import_crm_folder
+
+    oct_ = date(2026, 10, 1)
+    mailing_positions_file(tmp_path / "Заказы_по_позициям_рассылок.xlsx")
+    h = privacy.email_hash
+    with db.connect(TEST_DATABASE_URL) as conn:
+        sync_metrika(conn, FakeMetrikaClient([], {("month", "total"): [(oct_, [], [1000, 800, 2500, 20.0, 2.5, 150.0], {})]}),
+                     42, frozenset(), "lastsign", since=oct_, until=date(2026, 10, 31), today=date(2026, 11, 2),
+                     log=lambda _: None)
+        logs = []
+        import_crm_folder(conn, tmp_path, log=logs.append)
+        text = "\n".join(logs)
+        assert "лист «Совпадения»: заказы" in text and "лист «Позиции рассылок»: позиции рассылок — 4 позиций в 3 рассылках" in text
+        assert "номенклатура ← «Номенклатура 1С»" in text and "рассылка ← «Рассылка»" in text
+        # у АТЦБ-1 позиции — с листа, где их больше (3 строки «Общего списка», а не 2 «Совпадений»)
+        assert conn.execute("SELECT count(*) FROM order_lines WHERE order_no = 'АТЦБ-1'").fetchone()[0] == 3
+        campaigns = [parse_campaign({"id": 201, "start_time": "2026-10-21 10:00:00", "list_id": 1, "subject": "Мембрана ЛОТУС — в наличии"}),
+                     parse_campaign({"id": 202, "start_time": "2026-10-29 10:00:00", "list_id": 1, "subject": "САЛМИ: новые цвета"}),
+                     parse_campaign({"id": 203, "start_time": "2026-10-21 12:00:00", "list_id": 2, "subject": "Тест ЛОТУС"})]
+        db.save_unisender(conn, {1: "Оптовики", 2: "Сотрудники"}, campaigns, [parse_stats(c.campaign_id, {}) for c in campaigns])
+        base = ["a@x.ru", "b@x.ru", "c@x.ru", "d@x.ru"] + [f"e{i}@x.ru" for i in range(20)]
+        db.replace_email_base(conn, [Contact(h(e), None, "active", (1,)) for e in base])
+        db.save_recipients(conn, 201, [Delivery(h("a@x.ru"), "ok_read", 2), Delivery(h("b@x.ru"), "ok_delivered", 1),
+                                       Delivery(h("c@x.ru"), "ok_link_visited", 3)], [])
+        db.save_recipients(conn, 202, [Delivery(h("a@x.ru"), "ok_delivered", 1), Delivery(h("d@x.ru"), "ok_delivered", 1)], [])
+        db.save_recipients(conn, 203, [Delivery(h("d@x.ru"), "ok_read", 2)], [])  # список сотрудников — не в счёт
+        # АТЦБ-6 — новый клиент со звонка (раздел «Продажи»): в общей таблице заказов — отдельно, не от рассылок
+        conn.execute("INSERT INTO crm_call_orders (month, order_no, category, order_date, amount) VALUES"
+                     " ('2026-10-01', 'АТЦБ-6', 'new', '2026-10-25', 700)")
+        f = pages.resolve_filters(conn, load_settings(), 42, "2026-10", None, date(2026, 11, 19))
+        data = pages.email_data(conn, load_settings(), f)
+        items = data["items"]
+    classes = {c["key"]: c["orders"] for c in data["mail"]["classes"]}
+    assert classes["new_lead"] == 1 and classes["no_mail"] == 1 and data["mail"]["mail_orders"] == 0
+    rows = {r["mailing"]: r for r in items["rows"]}
+    lotus, salmi, promo = rows["Мембранная ткань ЛОТУС"], rows["Новые цвета САЛМИ"], rows["Акция на световозвращающие материалы"]
+    assert [c["campaign_id"] for c in lotus["campaigns"]] == [201] and lotus["items"] == 2
+    # купили ЛОТУС за 35 дней: АТЦБ-1 (получила и открыла письмо), АТЦБ-3 (в базе, письма не было), АТЦБ-2 (не из базы);
+    # АТЦБ-7 — через 45 дней, не в счёт; ФЛИС из АТЦБ-1 — не товар рассылки
+    assert (lotus["bought"]["orders"], lotus["bought"]["amount"]) == (3, 51840.0)
+    assert (lotus["received"]["orders"], lotus["received"]["amount"], lotus["opened_buyers"]["orders"]) == (1, 50635.0, 1)
+    assert (lotus["rest_base"]["orders"], lotus["outside"]["orders"]) == (1, 1)
+    assert (lotus["delivered"], lotus["opened"]) == (3, 2)
+    assert round(lotus["rate_r"], 1) == 33.3 and round(lotus["rate_n"], 2) == 4.76 and round(lotus["uplift"], 2) == 0.86
+    assert (salmi["received"]["orders"], salmi["opened_buyers"]["orders"], salmi["received_14"]["orders"]) == (1, 0, 1)
+    assert not promo["campaigns"] and promo["bought"]["orders"] == 1 and promo["rate_r"] is None
+    page = client.get("/email", params={"month": "2026-10"}).text
+    assert "не построен" not in page and "Не всё удалось построить" not in page
+    assert "Рассылки октябрь 2026 и покупки товаров из них" in page and "письмо в UniSender не найдено" in page
+    assert "51 840 ₽" in page.replace("\xa0", " ")
+    assert "Товары из рассылок купили в 5" in page.replace("\xa0", " ")
+    assert "Новые клиенты из лидов с сайта и звонков" in page and "Не связаны с рассылками" in page

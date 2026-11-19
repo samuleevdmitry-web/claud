@@ -312,11 +312,11 @@ def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], 
             _report(conn, sha, path.name, f"не загружен — {exc}", log)
             continue
         known = 0
-        if parsed.kind == "orders":  # сколько заказов уже есть из других выгрузок — до того, как этот файл их дополнит
+        if parsed.orders:  # сколько заказов уже есть из других выгрузок — до того, как этот файл их дополнит
             known = conn.execute("SELECT count(*) FROM orders_1c WHERE order_no = ANY (%s)",
                                  ([o.order_no for o in parsed.orders],)).fetchone()[0]
         rows = db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION)
-        text = (orders_summary(parsed, known) if parsed.kind == "orders"
+        text = (orders_summary(parsed, known) if parsed.kind in ("orders", "mailing_items")
                 else f"{crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
         _report(conn, sha, path.name, text, log)
         out.append(parsed)
@@ -330,22 +330,27 @@ def _report(conn: psycopg.Connection, sha: str, name: str, text: str, log: Calla
 
 
 def orders_summary(parsed, known: int) -> str:
-    """Что дала выгрузка заказов — без данных: сколько заказов и строк, какие колонки узнаны, у скольких заказов есть
-    номенклатура и контакты и сколько из них уже было в базе из других выгрузок."""
+    """Что дала выгрузка заказов и позиций рассылок — без данных: сколько заказов, строк и позиций, что нашлось
+    на каждом листе (какие колонки узнаны), у скольких заказов есть номенклатура и контакты и сколько из них уже
+    было в базе из других выгрузок."""
     o = parsed.orders
-    dates = [x.order_date for x in o]
-    total = f"{sum(x.amount for x in o):,.0f}".replace(",", " ")
-    cols = ", ".join(f"{crm_files.COLUMN_NAMES.get(k, k)} ← «{v}»" for k, v in parsed.columns.items())
-    lines = [
-        (f"{crm_files.KIND_NAMES['orders']} — {len(o)} заказов ({parsed.lines} строк), "
-         f"{min(dates):%d.%m.%Y}–{max(dates):%d.%m.%Y}, сумма {total} ₽"),
-        f"колонки: {cols}",
-        (f"с номенклатурой или группой: {sum(1 for x in o if x.items or x.groups)}, "
-         f"с почтой или телефоном: {sum(1 for x in o if x.email_hashes or x.phone_hashes)}, "
-         f"уже были в базе из других выгрузок: {known}"),
-    ]
+    lines = []
+    if o:
+        dates = [x.order_date for x in o]
+        total = f"{sum(x.amount for x in o):,.0f}".replace(",", " ")
+        lines.append(f"{crm_files.KIND_NAMES['orders']} — {len(o)} заказов ({parsed.lines} строк), "
+                     f"{min(dates):%d.%m.%Y}–{max(dates):%d.%m.%Y}, сумма {total} ₽")
+        lines.append(f"с номенклатурой или группой: {sum(1 for x in o if x.items or x.groups)}, "
+                     f"с почтой или телефоном: {sum(1 for x in o if x.email_hashes or x.phone_hashes)}, "
+                     f"уже были в базе из других выгрузок: {known}")
+    if parsed.mailing_items:
+        mailings = {x.mailing for x in parsed.mailing_items}
+        undated = {x.mailing for x in parsed.mailing_items if not x.mailing_date}
+        lines.append(f"позиции рассылок: {len(parsed.mailing_items)} в {len(mailings)} рассылках"
+                     + (f" (без даты рассылки: {len(undated)})" if undated else ""))
+    lines += parsed.sheets_info
     notes = parsed.notes
-    if known and not any(x.email_hashes or x.phone_hashes for x in o):  # контакты придут из общего списка заказов
+    if known and o and not any(x.email_hashes or x.phone_hashes for x in o):  # контакты придут из общего списка
         notes = [n for n in notes if not n.startswith(("нет ни почты", "нет почты"))] + [
             f"контактов в файле нет — они берутся из других выгрузок по номеру заказа (совпало {known} из {len(o)})"]
     return "\n".join(lines + notes)

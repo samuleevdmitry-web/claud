@@ -792,6 +792,9 @@ def mail_orders(conn: psycopg.Connection, month: date, window: int = WINDOW_DAYS
             GROUP BY 1, 2
         )
         SELECT o.order_no, o.order_date, o.amount, o.items, o.groups,
+               (o.order_no IN (SELECT unnest(order_nos) FROM crm_form_leads
+                               WHERE in_1c AND category IS DISTINCT FROM 'existing')
+                OR o.order_no IN (SELECT order_no FROM crm_call_orders WHERE category = 'new')) AS new_lead,
                (EXISTS (SELECT 1 FROM contacts k JOIN email_base b USING (email_hash) WHERE k.order_no = o.order_no)
                 OR EXISTS (SELECT 1 FROM contacts k JOIN unisender_delivery d USING (email_hash)
                            WHERE k.order_no = o.order_no)
@@ -849,6 +852,124 @@ def mail_lift(conn: psycopg.Connection, month: date, window: int = WINDOW_DAYS) 
         GROUP BY 1, 2, 3, 4
         ORDER BY c.start_time
     """, {"from": month, "m_end": _next_month(month), "to": _next_month(month) + timedelta(days=window), "w": window})
+
+
+# ----- рассылки и покупки товаров из них (позиции рассылок × позиции заказов) -----
+
+ITEM_WINDOW_DAYS = 35  # заказ с товаром из рассылки считается после неё, если сделан в течение 35 дней
+
+
+def mailings_with_items(conn: psycopg.Connection, month: date) -> list[dict]:
+    """Рассылки месяца из файла позиций рассылок: тема, дата, сколько позиций; рассылки без даты — отдельно."""
+    return _all(conn, """
+        SELECT mailing, mailing_date AS day, count(DISTINCT item_norm) AS items
+        FROM mailing_items
+        WHERE mailing_date >= %s AND mailing_date < %s
+        GROUP BY 1, 2 ORDER BY 2, 1
+    """, (month, _next_month(month)))
+
+
+def has_mailing_items(conn: psycopg.Connection) -> dict | None:
+    return _one(conn, """
+        SELECT count(DISTINCT (mailing, mailing_date)) AS mailings, count(*) FILTER (WHERE mailing_date IS NULL) AS undated,
+               min(mailing_date) AS first, max(mailing_date) AS last
+        FROM mailing_items HAVING count(*) > 0
+    """)
+
+
+def campaigns_near(conn: psycopg.Connection, month: date, days: int = 2) -> list[dict]:
+    """Рассылки UniSender вокруг месяца (±2 дня) — чтобы найти письмо для каждой рассылки из файла."""
+    return _all(conn, f"""
+        SELECT c.campaign_id, c.start_time, c.start_time::date AS day, c.subject, l.title AS list_title
+        FROM unisender_campaigns c LEFT JOIN unisender_lists l ON l.list_id = c.list_id
+        WHERE c.start_time >= %s::date - %s AND c.start_time < %s::date + %s AND {MAILING}
+        ORDER BY c.start_time
+    """, (month, days, _next_month(month), days))
+
+
+def _values(rows: list[tuple], types: tuple[str, ...]) -> tuple[str, list]:
+    """VALUES-список для CTE; пустой — пустая выборка нужных типов."""
+    if not rows:
+        return "SELECT " + ", ".join(f"NULL::{t}" for t in types) + " WHERE false", []
+    one = "(" + ", ".join(f"%s::{t}" for t in types) + ")"
+    return "VALUES " + ", ".join([one] * len(rows)), [v for r in rows for v in r]
+
+
+def mail_item_orders(conn: psycopg.Connection, mailings: list[tuple[str, date]], mapping: list[tuple[str, date, int]],
+                     window: int = ITEM_WINDOW_DAYS) -> list[dict]:
+    """Заказы с товаром из рассылки в течение window дней после неё: сумма совпавших позиций, клиент в базе рассылок
+    или нет, и что клиент сделал с этим письмом (level: 3 перешёл, 2 открыл, 1 получил, 0 не доставлено,
+    None — письма не получал). mapping — какие письма UniSender относятся к рассылке из файла."""
+    if not mailings:
+        return []
+    m_sql, m_args = _values(mailings, ("text", "date"))
+    map_sql, map_args = _values(mapping, ("text", "date", "bigint"))
+    query = f"""
+        WITH m(mailing, day) AS ({m_sql}),
+        map(mailing, day, campaign_id) AS ({map_sql}),
+        items AS (SELECT DISTINCT i.mailing, i.mailing_date AS day, i.item_norm
+                  FROM mailing_items i JOIN m ON m.mailing = i.mailing AND m.day = i.mailing_date),
+        ml AS MATERIALIZED (
+            SELECT it.mailing, it.day, o.order_no, o.order_date, o.client_hash, o.email_hashes, o.phone_hashes,
+                   sum(l.amount) AS amount, array_agg(DISTINCT l.item) AS items
+            FROM items it
+            JOIN order_lines l ON l.item_norm = it.item_norm
+            JOIN orders_1c o ON o.order_no = l.order_no
+            WHERE o.order_date >= it.day AND o.order_date <= it.day + %s AND {NOT_CANCELLED.replace("status", "o.status")}
+            GROUP BY 1, 2, 3, 4, 5, 6, 7
+        ),
+        crowd AS MATERIALIZED (
+            SELECT client_hash FROM orders_1c CROSS JOIN LATERAL unnest(email_hashes) e
+            WHERE client_hash IS NOT NULL GROUP BY client_hash HAVING count(DISTINCT e) > 5
+        ),
+        same AS MATERIALIZED (
+            SELECT DISTINCT ml.order_no, x.email_hashes, x.phone_hashes FROM ml JOIN orders_1c x ON x.client_hash = ml.client_hash
+            WHERE ml.client_hash NOT IN (SELECT client_hash FROM crowd)
+            UNION
+            SELECT order_no, email_hashes, phone_hashes FROM ml
+        ),
+        oc AS MATERIALIZED (
+            SELECT DISTINCT order_no, email_hash FROM (
+                SELECT s.order_no, e AS email_hash FROM same s CROSS JOIN LATERAL unnest(s.email_hashes) e
+                UNION ALL
+                SELECT s.order_no, b.email_hash FROM same s CROSS JOIN LATERAL unnest(s.phone_hashes) p
+                JOIN email_base b ON b.phone_hash = p WHERE b.email_hash IS NOT NULL
+            ) z
+        ),
+        recv AS (
+            SELECT ml.mailing, ml.day, ml.order_no, max(d.level) AS level
+            FROM ml JOIN oc USING (order_no) JOIN map USING (mailing, day)
+            JOIN unisender_delivery d ON d.campaign_id = map.campaign_id AND d.email_hash = oc.email_hash
+            GROUP BY 1, 2, 3
+        )
+        SELECT ml.mailing, ml.day, ml.order_no, ml.order_date, ml.amount, ml.items, ml.client_hash,
+               (ml.order_date - ml.day) AS days, recv.level,
+               EXISTS (SELECT 1 FROM oc JOIN email_base b USING (email_hash) WHERE oc.order_no = ml.order_no) AS in_base,
+               array(SELECT email_hash FROM oc WHERE oc.order_no = ml.order_no ORDER BY 1) AS emails
+        FROM ml LEFT JOIN recv USING (mailing, day, order_no)
+        ORDER BY ml.day, ml.mailing, ml.order_date, ml.order_no
+    """
+    return _all(conn, query, tuple(m_args + map_args + [window]))
+
+
+def mail_item_audience(conn: psycopg.Connection, mapping: list[tuple[str, date, int]]) -> dict:
+    """Сколько адресов получили и открыли письма каждой рассылки, сколько из получивших есть в базе, и вся база."""
+    base = _one(conn, "SELECT count(DISTINCT email_hash) AS total FROM email_base WHERE email_hash IS NOT NULL")
+    out = {"base_total": base["total"] if base else 0, "mailings": {}}
+    if not mapping:
+        return out
+    map_sql, map_args = _values(mapping, ("text", "date", "bigint"))
+    rows = _all(conn, f"""
+        WITH map(mailing, day, campaign_id) AS ({map_sql}),
+        r AS (SELECT map.mailing, map.day, d.email_hash, max(d.level) AS level
+              FROM map JOIN unisender_delivery d USING (campaign_id) WHERE d.level >= 1 GROUP BY 1, 2, 3)
+        SELECT mailing, day, count(*) AS delivered, count(*) FILTER (WHERE level >= 2) AS opened,
+               count(*) FILTER (WHERE level >= 3) AS clicked,
+               count(*) FILTER (WHERE email_hash IN (SELECT email_hash FROM email_base)) AS delivered_in_base
+        FROM r GROUP BY 1, 2
+    """, tuple(map_args))
+    out["mailings"] = {(r["mailing"], r["day"]): r for r in rows}
+    return out
 
 
 def _next_month(month: date) -> date:

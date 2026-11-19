@@ -1156,16 +1156,122 @@ def email_stats(campaigns: list[dict], source_row: dict | None) -> dict:
 ORDER_CLASSES = [
     ("topic_click", "Перешли по ссылке письма и купили товар из него"),
     ("topic_open", "Открыли письмо и купили товар из него"),
-    ("open_other", "Открыли письмо, купили другое"),
+    ("open_other", "Открыли письмо за 14 дней до заказа, купили другое"),
     ("unopened", "Получили письмо, но не открывали"),
-    ("no_mail", "В базе рассылок, писем за 14 дней до заказа не было"),
-    ("outside", "Нет в базе рассылок"),
+    ("no_mail", "Клиент в базе рассылок, но писем за 14 дней до заказа не было"),
+    ("outside", "Клиента нет в базе рассылок"),
+    ("new_lead", "Новые клиенты из лидов с сайта и звонков"),
 ]
 MAIL_CLASSES = ("topic_click", "topic_open", "open_other")  # заказ после открытого письма
 LIFT_MIN_OPENED = 50  # меньше открывших — сравнение с не открывшими ненадёжно
 
 
-def _order_class(level: int, topic: bool, in_base: bool) -> str:
+# ----- Рассылки и покупки товаров из них -----
+
+ITEM_UPLIFT_MIN_DELIVERED = 200  # меньше получателей — сравнение с остальной базой ненадёжно
+
+
+def match_campaigns(mailings: list[dict], campaigns: list[dict]) -> dict[tuple, list[dict]]:
+    """Какие письма UniSender — рассылка из файла: отправлены в тот же день (±1 день) и тема письма похожа на название
+    рассылки; если похожих нет — все письма ровно того дня."""
+    out = {}
+    for m in mailings:
+        words = topics.stems(m["mailing"])
+        near = [c for c in campaigns if abs((c["day"] - m["day"]).days) <= 1]
+        same_topic = [c for c in near if words & topics.stems(c["subject"])]
+        out[(m["mailing"], m["day"])] = same_topic or [c for c in near if c["day"] == m["day"]]
+    return out
+
+
+def _client(o: dict) -> str:
+    return o["client_hash"] or (o["emails"][0] if o["emails"] else o["order_no"])
+
+
+def _part(rows: list[dict]) -> dict:
+    return {"orders": len({o["order_no"] for o in rows}), "clients": len({_client(o) for o in rows}),
+            "amount": sum(float(o["amount"] or 0) for o in rows)}
+
+
+def mail_items_stats(mailings: list[dict], matched: dict[tuple, list[dict]], orders: list[dict], audience: dict,
+                     window: int = 35) -> dict:
+    """Сводная по рассылкам: заказы с товаром из рассылки за window дней после неё — всего, от получивших письмо,
+    от открывших, от не получавших; доля купивших среди получателей против остальной базы и оценка влияния:
+    (доля у получателей − доля у остальной базы) × получатели — столько покупателей сверх обычного."""
+    rows = []
+    for m in mailings:
+        key = (m["mailing"], m["day"])
+        mine = [o for o in orders if (o["mailing"], o["day"]) == key]
+        got = [o for o in mine if (o["level"] or 0) >= 1]
+        opened = [o for o in got if o["level"] >= 2]
+        rest = [o for o in mine if (o["level"] or 0) < 1]
+        aud = audience["mailings"].get(key, {})
+        campaigns = matched.get(key, [])
+        delivered = aud.get("delivered", 0)
+        rest_base = max(audience["base_total"] - aud.get("delivered_in_base", 0), 0)
+        buyers_r = _part(got)["clients"]
+        buyers_n = _part([o for o in rest if o["in_base"]])["clients"]
+        rate_r = 100.0 * buyers_r / delivered if campaigns and delivered else None
+        rate_n = 100.0 * buyers_n / rest_base if campaigns and rest_base else None
+        uplift = max(0.0, (rate_r - rate_n) / 100.0 * delivered) if rate_r is not None and rate_n is not None else None
+        per_buyer = _part(got)["amount"] / buyers_r if buyers_r else 0.0
+        days = sorted(o["days"] for o in got)
+        rows.append({
+            "mailing": m["mailing"], "day": m["day"], "items": m["items"], "campaigns": campaigns,
+            "delivered": delivered, "opened": aud.get("opened", 0), "clicked": aud.get("clicked", 0),
+            "bought": _part(mine), "received": _part(got), "opened_buyers": _part(opened),
+            "received_14": _part([o for o in got if o["days"] <= 14]),
+            "rest_base": _part([o for o in rest if o["in_base"]]), "outside": _part([o for o in rest if not o["in_base"]]),
+            "rate_r": rate_r, "rate_n": rate_n, "uplift": uplift,
+            "uplift_amount": uplift * per_buyer if uplift is not None else None,
+            "reliable": delivered >= ITEM_UPLIFT_MIN_DELIVERED,
+            "days_median": days[len(days) // 2] if days else None,
+        })
+    def total(key):
+        return {k: sum(r[key][k] for r in rows) for k in ("orders", "clients", "amount")}
+    uplifts = [r for r in rows if r["uplift"] is not None]
+    return {
+        "rows": rows, "window": window,
+        "bought": total("bought"), "received": total("received"), "opened_buyers": total("opened_buyers"),
+        "rest_base": total("rest_base"), "outside": total("outside"),
+        "uplift": sum(r["uplift"] for r in uplifts) if uplifts else None,
+        "uplift_amount": sum(r["uplift_amount"] or 0 for r in uplifts) if uplifts else None,
+        "unmatched": [r for r in rows if not r["campaigns"]],
+    }
+
+
+def mail_items_findings(st: dict) -> list[Finding]:
+    out = []
+    if not st or not st["rows"]:
+        return out
+    b, r, o = st["bought"], st["received"], st["opened_buyers"]
+    out.append(Finding("plus" if r["orders"] else "question",
+                       f"Товары из рассылок купили в {plural(b['orders'], ORDERS)} на {fmt_int(b['amount'])} ₽ "
+                       f"(в течение {st['window']} дней после рассылки). Из них клиент получил это письмо — "
+                       f"{plural(r['orders'], ORDERS)} на {fmt_int(r['amount'])} ₽, открыл — {plural(o['orders'], ORDERS)} "
+                       f"на {fmt_int(o['amount'])} ₽."))
+    if st["uplift"] is not None:
+        best = max((x for x in st["rows"] if x["uplift"]), key=lambda x: x["uplift"], default=None)
+        text = (f"Оценка влияния: рассылки дали около {plural(round(st['uplift']), ('покупателя', 'покупателей', 'покупателей'))} "
+                f"товаров из них сверх обычного ≈ {fmt_int(st['uplift_amount'] or 0)} ₽ "
+                "(доля купивших среди получателей письма минус доля среди остальной базы).")
+        if best:
+            text += (f" Сильнее всего — «{best['mailing']}» {best['day']:%d.%m}: купили {fmt_pct(best['rate_r'], 2)} получателей "
+                     f"против {fmt_pct(best['rate_n'], 2)} остальной базы.")
+        out.append(Finding("plus" if st["uplift"] >= 1 else "minus", text))
+    weak = [x for x in st["rows"] if x["campaigns"] and x["delivered"] >= ITEM_UPLIFT_MIN_DELIVERED and not x["received"]["orders"]]
+    if weak:
+        out.append(Finding("check", "Товар из рассылки не купил ни один получатель: " + "; ".join(
+            f"«{x['mailing']}» {x['day']:%d.%m}" for x in weak[:4]) + ". Проверить предложение, цену и ссылки письма."))
+    if st["unmatched"]:
+        out.append(Finding("question", "Не найдено письмо UniSender по дате и теме для рассылок: " + "; ".join(
+            f"«{x['mailing']}» {x['day']:%d.%m}" for x in st["unmatched"][:4])
+            + ". Совпадают ли даты в файле с датами отправки?"))
+    return out
+
+
+def _order_class(level: int, topic: bool, in_base: bool, new_lead: bool = False) -> str:
+    if new_lead:
+        return "new_lead"
     if level >= 2:
         return ("topic_click" if level >= 3 else "topic_open") if topic else "open_other"
     if level == 1:
@@ -1196,7 +1302,7 @@ def mail_orders_stats(orders: list[dict], campaigns: dict[int, dict], lift_rows:
             if best is None or key > best[0]:
                 best = (key, t, c, common)
         level = best[1]["level"] if best else 0
-        cls = _order_class(level, bool(best and best[3]), o["in_base"] or bool(best))
+        cls = _order_class(level, bool(best and best[3]), o["in_base"] or bool(best), bool(o.get("new_lead")))
         amount = float(o["amount"] or 0)
         classes[cls]["orders"] += 1
         classes[cls]["amount"] += amount
@@ -1213,10 +1319,10 @@ def mail_orders_stats(orders: list[dict], campaigns: dict[int, dict], lift_rows:
                              "campaign": best[2], "days": (o["order_date"] - best[2]["start_time"].date()).days,
                              "matched": [x for x in (o["items"] or []) + (o["groups"] or [])
                                          if topics.stems(x) & best[3]][:2]})
-        if cls != "outside":
+        if cls not in ("outside", "new_lead"):
             for g in (o["groups"] or o["items"] or [])[:3]:
                 bought_groups[g] = bought_groups.get(g, 0) + 1
-    base_orders = [c for k, c in classes.items() if k != "outside"]
+    base_orders = [c for k, c in classes.items() if k not in ("outside", "new_lead")]
     mailed = [classes[k] for k in MAIL_CLASSES]
     for row in lift_rows:
         row.update(campaign_orders.get(row["campaign_id"], {"orders": 0, "amount": 0.0, "topic": 0, "topic_amount": 0.0}))
@@ -1261,7 +1367,8 @@ def _lift(rows: list[dict]) -> dict | None:
             "extra": max(0.0, (rate_open - rate_unopen) / 100.0 * opened), "reliable": opened >= LIFT_MIN_OPENED}
 
 
-def email_findings(s: dict, prev: dict | None, campaigns: list[dict], mail: dict | None) -> list[Finding]:
+def email_findings(s: dict, prev: dict | None, campaigns: list[dict], mail: dict | None,
+                   items: dict | None = None) -> list[Finding]:
     out = []
     if s["campaigns"]:
         text = (f"Рассылок: {s['campaigns']}, доставлено {fmt_int(s['delivered'])} писем; открыли {fmt_pct(s['open_rate'])}, "
@@ -1295,6 +1402,8 @@ def email_findings(s: dict, prev: dict | None, campaigns: list[dict], mail: dict
         out.append(Finding("plus" if s["channel_leads"] else "minus",
                            f"Метрика, канал «почтовые рассылки»: {plural(s['channel_visits'], VISITS)}, "
                            f"{plural(s['channel_leads'] or 0, LEADS)}."))
+    if items:
+        out += mail_items_findings(items)
     if mail:
         out += _mail_findings(mail)
     return out

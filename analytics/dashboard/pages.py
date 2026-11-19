@@ -984,7 +984,21 @@ def email_data(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
         return ins.mail_orders_stats(orders, q.mail_campaigns(conn, ids), lift_rows, coverage["first"], coverage["last"])
 
     mail = safe("Рассылки по базе и заказы", mail_part) if delivery_ready else None
+
+    def items_part():
+        mailings = q.mailings_with_items(conn, f.month)
+        if not mailings:
+            return None
+        matched = ins.match_campaigns(mailings, q.campaigns_near(conn, f.month))
+        mapping = [(m, d, c["campaign_id"]) for (m, d), cs in matched.items() for c in cs]
+        orders = q.mail_item_orders(conn, [(m["mailing"], m["day"]) for m in mailings], mapping)
+        return ins.mail_items_stats(mailings, matched, orders, q.mail_item_audience(conn, mapping),
+                                    q.ITEM_WINDOW_DAYS)
+
+    items_info = safe("Позиции рассылок", lambda: q.has_mailing_items(conn)) if primary else None
+    items = safe("Рассылки и покупки товаров из них", items_part) if items_info else None
     return {"stats": s, "prev": prev, "campaigns": campaigns, "base_info": base_info, "mail": mail,
+            "items": items, "items_info": items_info, "item_window": q.ITEM_WINDOW_DAYS,
             "orders_coverage": coverage, "delivery_ready": delivery_ready, "window": q.WINDOW_DAYS}
 
 
@@ -1018,7 +1032,7 @@ def email_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
         tile("Отписки", fmt_pct(s["unsub_rate"], 2), "unsub_rate", "pp", f"{fmt_int(s['unsubscribed'])} человек"),
         metrika_tile,
     ]
-    findings = ins.email_findings(s, prev, d["campaigns"], d["mail"])
+    findings = ins.email_findings(s, prev, d["campaigns"], d["mail"], d["items"])
     return {**d, "tiles": tiles, "charts": charts, "summary": ins.summarize(findings), "findings": findings,
             "utm": safe("Рассылки по меткам Метрики", lambda: q.email_utm_month(conn, f.counter_id, f.audience, f.month), []),
             "configured": bool(settings.unisender_api_key) or bool(d["campaigns"])}

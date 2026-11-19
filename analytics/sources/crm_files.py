@@ -27,15 +27,14 @@ KINDS = {
     "forms": {"Совпадения", "Все лиды"},
     "calls": {"Итог", "Все входящие лиды"},
 }
-KIND_NAMES = {"forms": "лиды с сайта (формы)", "calls": "входящие звонки", "orders": "заказы 1С"}
-COLUMN_NAMES = {"order_no": "номер", "date": "дата", "amount": "сумма", "line_amount": "сумма строки",
-                "status": "статус", "client": "клиент", "email": "почта", "phone": "телефон", "item": "номенклатура",
-                "group": "группа"}
+KIND_NAMES = {"forms": "лиды с сайта (формы)", "calls": "входящие звонки", "orders": "заказы 1С",
+              "mailing_items": "позиции рассылок"}
 # Версия разбора: файлы, загруженные прежней версией, загружаются заново, если ещё лежат в папке.
 # 3 — отпечатки почты и телефона лидов для сведения с базой рассылок.
 # 4 — выгрузка всех заказов 1С; нераспознанные раньше файлы разбираются заново.
 # 5 — итог разбора каждого файла сохраняется для страницы «Данные»: файлы читаются заново один раз.
-PARSER_VERSION = 5
+# 6 — колонки узнаются по смыслу («Заказ 1С», «Номенклатура 1С»…), все листы книги, позиции заказов и рассылок.
+PARSER_VERSION = 6
 
 
 class CrmFileError(Exception):
@@ -109,10 +108,15 @@ class CrmFile:
     notes: list[str] = field(default_factory=list)  # чего не хватает в выгрузке
     columns: dict[str, str] = field(default_factory=dict)  # что из выгрузки заказов взято: поле → название колонки
     lines: int = 0  # строк с заказами (у построчной выгрузки больше, чем заказов)
+    order_lines: list = field(default_factory=list)    # OrderLine: позиции заказов
+    mailing_items: list = field(default_factory=list)  # MailingItem: позиции рассылок
+    sheets_info: list[str] = field(default_factory=list)  # что нашлось на каждом листе
+    totals: bool = True  # суммы заказов целиком (список заказов), а не только части позиций
 
     @property
     def rows(self) -> int:
-        return len(self.form_leads) + len(self.call_leads) + len(self.call_orders) + len(self.orders)
+        return (len(self.form_leads) + len(self.call_leads) + len(self.call_orders) + len(self.orders)
+                + len(self.order_lines) + len(self.mailing_items))
 
 
 def sha256(path: Path) -> str:
@@ -131,9 +135,9 @@ def parse_file(path: Path, sheets: dict[str, list[tuple]] | None = None) -> CrmF
         return _parse_forms(sheets)
     if kind == "calls":
         return _parse_calls(sheets)
-    found = find_orders_sheet(sheets)
-    if found:
-        return _parse_orders(sheets[found[0]], found[1], found[2])
+    parsed = _parse_orders_workbook(sheets)
+    if parsed:
+        return parsed
     raise CrmFileError("не похоже ни на одну знакомую выгрузку. Листы и заголовки: " + "; ".join(
         f"«{name}»: {', '.join(headers_preview(rows)) or 'пусто'}" for name, rows in sheets.items()))
 
@@ -281,7 +285,7 @@ def _parse_calls(sheets: dict[str, list[tuple]]) -> CrmFile:
                    call_leads=leads, call_orders=orders)
 
 
-# ----- выгрузка всех заказов 1С -----
+# ----- выгрузка всех заказов 1С и позиции рассылок -----
 
 def _head(v) -> str:
     """Название колонки в едином виде: строчные, ё→е, без «, ₽» и лишних пробелов."""
@@ -291,6 +295,8 @@ def _head(v) -> str:
     return " ".join(s.split()).strip(" :,.")
 
 
+# Точные названия колонок; остальные узнаются по смыслу в _column_kind («Заказ 1С», «Номенклатура 1С»,
+# «Клиент / контрагент», «Сумма позиции», «Дата рассылки»…).
 ORDER_COLUMNS = {
     "order_no": ("номер заказа", "номер", "заказ", "заказ клиента", "номер документа", "документ", "№", "№ заказа"),
     "date": ("дата заказа", "дата", "дата документа", "дата создания", "создан", "дата создания заказа"),
@@ -302,37 +308,88 @@ ORDER_COLUMNS = {
     "group": ("группа номенклатуры", "группа", "товарная группа", "группа товаров", "вид номенклатуры",
               "категория товара", "категория номенклатуры", "раздел"),
 }
+_EXACT = {name: key for key, names in ORDER_COLUMNS.items() for name in names}
+COLUMN_NAMES = {"order_no": "номер", "date": "дата", "amount": "сумма", "line_amount": "сумма строки",
+                "status": "статус", "client": "клиент", "email": "почта", "phone": "телефон", "item": "номенклатура",
+                "group": "группа", "color": "цвет", "mailing": "рассылка", "mailing_date": "дата рассылки"}
+
+
+def _column_kind(h: str) -> str | None:
+    """Что за колонка — по названию. Порядок проверок важен: «Дата рассылки» — не дата заказа,
+    «Количество для рассылки» и «Когда оформлен заказ» — ни то ни другое."""
+    if not h:
+        return None
+    if "mail" in h or "почт" in h:
+        return "email"
+    if "телефон" in h:
+        return "phone"
+    if "рассыл" in h:
+        if "дата" in h:
+            return "mailing_date"
+        if any(w in h for w in ("цена", "колич", "сумм", "после", "источник", "через")):
+            return None
+        return "mailing"
+    if h in _EXACT:
+        return _EXACT[h]
+    if h.startswith(("когда", "через", "количество", "цена")) or "после" in h:
+        return None
+    if "дата" in h:
+        return "date" if "заказ" in h else None
+    if "групп" in h:
+        return "group"
+    if h.startswith(("номенклатур", "наименование", "товар")):
+        return "item"
+    if h.startswith(("заказ ", "номер заказа", "№ заказа", "номер документа")) and not h.startswith("заказов"):
+        return "order_no"
+    if h.startswith(("клиент", "контрагент", "покупатель", "партнер", "заказчик")):
+        return "client"
+    if "статус" in h or "состояни" in h:
+        return "status"
+    if h.startswith(("сумма", "стоимость")):
+        return "line_amount" if h.startswith("стоимость") or any(w in h for w in ("позиц", "строк", "товар")) else "amount"
+    if h.startswith("цвет"):
+        return "color"
+    return None
 
 
 def _match_columns(header: list[str]) -> dict[str, int]:
+    """Поле → номер колонки (первая подходящая). Почта и телефон — все такие колонки: email3, phone7…"""
     cols: dict[str, int] = {}
     for i, h in enumerate(header):
-        if not h:
-            continue
-        for key, names in ORDER_COLUMNS.items():
-            if key not in cols and h in names:
-                cols[key] = i
-        if "mail" in h or "почт" in h:
-            cols.setdefault("email", i)
-            cols.setdefault(f"email{i}", i)
-        elif "телефон" in h:
-            cols.setdefault("phone", i)
-            cols.setdefault(f"phone{i}", i)
+        kind = _column_kind(h)
+        if kind in ("email", "phone"):
+            cols.setdefault(kind, i)
+            cols[f"{kind}{i}"] = i
+        elif kind:
+            cols.setdefault(kind, i)
     return cols
 
 
-def find_orders_sheet(sheets: dict[str, list[tuple]]) -> tuple[str, int, dict[str, int]] | None:
-    """Лист и строка заголовков, где есть номер заказа, дата и сумма (заголовки ищутся в первых 30 строках)."""
-    for name, rows in sheets.items():
-        for i, row in enumerate(rows[:30]):
-            cols = _match_columns([_head(v) for v in row or ()])
-            if "order_no" not in cols or not ({"amount", "line_amount"} & cols.keys()):
-                continue
-            # дата — своей колонкой или внутри названия документа: «Заказ клиента ЦБ-1 от 05.10.2026»
+_ORDER_DATE = re.compile(r"от\s+(\d{2}\.\d{2}\.\d{4})")
+_ORDER_IN_NAME = re.compile(r"(\S+)\s+от\s+\d{2}\.\d{2}\.\d{4}")
+
+
+def _sheet_kind(rows: list[tuple]) -> tuple[str, int, dict[str, int]] | None:
+    """Что на листе: заказы (номер заказа и дата — своей колонкой или в названии документа) или позиции рассылок
+    (рассылка и номенклатура, без заказов). Заголовки ищутся в первых 30 строках."""
+    for i, row in enumerate(rows[:30]):
+        cols = _match_columns([_head(v) for v in row or ()])
+        if "order_no" in cols and cols.keys() & {"amount", "line_amount", "item"}:
             col = cols["order_no"]
             if "date" in cols or any(_ORDER_DATE.search(_text(r[col]) or "") for r in rows[i + 1:i + 6]
                                      if r and col < len(r)):
-                return name, i, cols
+                return "orders", i, cols
+        if "mailing" in cols and "item" in cols and "order_no" not in cols:
+            return "mailing_items", i, cols
+    return None
+
+
+def find_orders_sheet(sheets: dict[str, list[tuple]]) -> tuple[str, int, dict[str, int]] | None:
+    """Первый лист с заказами (для совместимости)."""
+    for name, rows in sheets.items():
+        found = _sheet_kind(rows)
+        if found and found[0] == "orders":
+            return name, found[1], found[2]
     return None
 
 
@@ -346,10 +403,6 @@ def headers_preview(rows: list[tuple], limit: int = 25) -> list[str]:
     return []
 
 
-_ORDER_DATE = re.compile(r"от\s+(\d{2}\.\d{2}\.\d{4})")
-_ORDER_IN_NAME = re.compile(r"(\S+)\s+от\s+\d{2}\.\d{2}\.\d{4}")
-
-
 def _order_no(v) -> str | None:
     """«Заказ клиента АТЦБ-026330 от 05.10.2026 12:00:00» → «АТЦБ-026330»; просто номер — как есть."""
     if isinstance(v, (int, float)):
@@ -361,22 +414,46 @@ def _order_no(v) -> str | None:
     return (m.group(1).lstrip("№") or None) if m else s
 
 
-def _parse_orders(rows: list[tuple], header_row: int, cols: dict[str, int]) -> CrmFile:
-    """Строка выгрузки — заказ или позиция заказа; строки одного заказа собираются вместе.
+def item_norm(name: str | None) -> str:
+    """Номенклатура в едином виде для сравнения позиций рассылки и заказа."""
+    s = (name or "").lower().replace("ё", "е").replace("\xa0", " ")
+    return " ".join(s.split())
 
-    Сумма заказа — из колонки суммы заказа или документа; если её нет, а есть номенклатура, суммы строк
-    складываются. Названия клиентов и контакты сразу превращаются в отпечатки.
-    """
+
+@dataclass(frozen=True)
+class OrderLine:
+    order_no: str
+    item: str
+    color: str | None
+    amount: float
+
+
+@dataclass(frozen=True)
+class MailingItem:
+    """Позиция рассылки: какой товар был в какой рассылке (тема рассылки — как её назвали в файле)."""
+    mailing: str
+    mailing_date: date | None
+    item: str
+
+
+def _names(rows: list[tuple], header_row: int, cols: dict[str, int]) -> dict[str, str]:
+    header = rows[header_row]
+    return {k: _text(header[i]) for k, i in cols.items() if not k[-1].isdigit() and i < len(header) and _text(header[i])}
+
+
+def _parse_order_sheet(rows: list[tuple], header_row: int, cols: dict[str, int]) -> dict:
+    """Строка листа — заказ или позиция заказа; строки одного заказа собираются вместе. Если на листе есть рассылка
+    и дата рассылки (лист совпадений), из него берутся и позиции рассылок. Контакты и клиент — сразу отпечатками."""
     def cell(row, key):
         i = cols.get(key)
         return row[i] if i is not None and i < len(row) else None
 
-    email_cols = [i for k, i in cols.items() if k.startswith("email") and k != "email"] or (
-        [cols["email"]] if "email" in cols else [])
-    phone_cols = [i for k, i in cols.items() if k.startswith("phone") and k != "phone"] or (
-        [cols["phone"]] if "phone" in cols else [])
+    email_cols = [i for k, i in cols.items() if k.startswith("email") and k != "email"]
+    phone_cols = [i for k, i in cols.items() if k.startswith("phone") and k != "phone"]
     acc: dict[str, dict] = {}
-    lines = 0
+    lines: list[OrderLine] = []
+    mailing_items: set[MailingItem] = set()
+    count = 0
     for row in rows[header_row + 1:]:
         if not row or all(v in (None, "") for v in row):
             continue
@@ -387,9 +464,10 @@ def _parse_orders(rows: list[tuple], header_row: int, cols: dict[str, int]) -> C
             when = _dt(m.group(1)) if m else None
         if not no or when is None or (_text(no) or "").lower().startswith("итог"):
             continue  # строка «Итого», подзаголовок или пустая
-        lines += 1
+        count += 1
         o = acc.setdefault(no, {"date": when.date(), "amounts": [], "lines": 0.0, "status": None, "client": None,
                                 "emails": [], "phones": [], "items": [], "groups": []})
+        line_value = 0.0
         for key in ("amount", "line_amount"):
             if key in cols:
                 try:
@@ -400,6 +478,7 @@ def _parse_orders(rows: list[tuple], header_row: int, cols: dict[str, int]) -> C
                     o["amounts"].append(value)
                 else:
                     o["lines"] += value
+                    line_value = value
         o["status"] = _text(cell(row, "status")) or o["status"]
         o["client"] = o["client"] or privacy.fingerprint("client", _client_key(cell(row, "client")))
         for i in email_cols:
@@ -410,6 +489,19 @@ def _parse_orders(rows: list[tuple], header_row: int, cols: dict[str, int]) -> C
             t = _text(cell(row, key))
             if t and t not in o[out]:
                 o[out].append(t[:200])
+        item = _text(cell(row, "item"))
+        if item:
+            if "line_amount" not in cols and "amount" in cols:
+                try:
+                    line_value = _num(cell(row, "amount"))
+                except ValueError:
+                    line_value = 0.0
+            lines.append(OrderLine(no, item[:300], _text(cell(row, "color")), line_value))
+            mailing = _text(cell(row, "mailing"))
+            if mailing:
+                sent = _dt(cell(row, "mailing_date"))
+                mailing_items.add(MailingItem(mailing[:200], sent.date() if sent else None, item[:300]))
+
     def total(o) -> float:
         amounts = o["amounts"]
         if not amounts:
@@ -420,22 +512,98 @@ def _parse_orders(rows: list[tuple], header_row: int, cols: dict[str, int]) -> C
         # одинаковые — сумма заказа, повторённая в каждой строке
         return sum(amounts) if "item" in cols and len(set(amounts)) > 1 else max(amounts)
 
-    orders = [Order(no, o["date"], total(o), o["status"], o["client"], tuple(o["emails"]), tuple(o["phones"]),
-                    tuple(o["items"]), tuple(o["groups"]))
-              for no, o in acc.items()]
-    if not orders:
-        raise CrmFileError("в выгрузке заказов нет ни одной строки с номером и датой")
+    orders = {no: Order(no, o["date"], total(o), o["status"], o["client"], tuple(o["emails"]), tuple(o["phones"]),
+                        tuple(o["items"]), tuple(o["groups"]))
+              for no, o in acc.items()}
+    return {"orders": orders, "lines": lines, "mailing_items": mailing_items, "count": count,
+            "totals": "item" not in cols, "columns": _names(rows, header_row, cols), "cols": cols}
+
+
+def _parse_mailing_sheet(rows: list[tuple], header_row: int, cols: dict[str, int]) -> set[MailingItem]:
+    def get(row, key):
+        return row[cols[key]] if key in cols and cols[key] < len(row) else None
+
+    out = set()
+    for row in rows[header_row + 1:]:
+        if not row:
+            continue
+        mailing, item = _text(get(row, "mailing")), _text(get(row, "item"))
+        if mailing and item:
+            sent = _dt(get(row, "mailing_date"))
+            out.add(MailingItem(mailing[:200], sent.date() if sent else None, item[:300]))
+    return out
+
+
+def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
+    """Все листы книги: заказы (список заказов, заказы по позициям, совпадения с рассылками) и позиции рассылок.
+    Заказы с разных листов сводятся по номеру; позиции заказа берутся с листа, где их у этого заказа больше всего."""
+    parts, items, info = [], set(), []
+    for name, rows in sheets.items():
+        found = _sheet_kind(rows)
+        if not found:
+            info.append(f"лист «{name}»: не распознан (колонки: {', '.join(headers_preview(rows)) or 'нет'})")
+            continue
+        kind, header_row, cols = found
+        names = _names(rows, header_row, cols)
+        cols_text = ", ".join(f"{COLUMN_NAMES.get(k, k)} ← «{v}»" for k, v in names.items())
+        if kind == "mailing_items":
+            got = _parse_mailing_sheet(rows, header_row, cols)
+            items |= got
+            info.append(f"лист «{name}»: позиции рассылок — {len(got)} позиций в "
+                        f"{len({x.mailing for x in got})} рассылках; колонки: {cols_text}")
+            continue
+        part = _parse_order_sheet(rows, header_row, cols)
+        if not part["orders"]:
+            info.append(f"лист «{name}»: заказов с номером и датой нет; колонки: {cols_text}")
+            continue
+        parts.append(part)
+        items |= part["mailing_items"]
+        extra = f", позиций рассылок {len(part['mailing_items'])}" if part["mailing_items"] else ""
+        info.append(f"лист «{name}»: заказы — {len(part['orders'])} заказов ({part['count']} строк, с номенклатурой "
+                    f"{len(part['lines'])}){extra}; колонки: {cols_text}")
+    if not parts and not items:
+        return None
+    orders: dict[str, Order] = {}
+    for part in sorted(parts, key=lambda x: not x["totals"]):  # сначала листы с суммой заказа целиком
+        for no, o in part["orders"].items():
+            was = orders.get(no)
+            if was is None:
+                orders[no] = o
+                continue
+            orders[no] = Order(no, was.order_date, was.amount or o.amount, was.status or o.status,
+                               was.client_hash or o.client_hash,
+                               tuple(dict.fromkeys(was.email_hashes + o.email_hashes)),
+                               tuple(dict.fromkeys(was.phone_hashes + o.phone_hashes)),
+                               tuple(dict.fromkeys(was.items + o.items)), tuple(dict.fromkeys(was.groups + o.groups)))
+    lines: list[OrderLine] = []
+    by_order: dict[str, list[OrderLine]] = {}
+    for part in parts:
+        mine: dict[str, list[OrderLine]] = {}
+        for x in part["lines"]:
+            mine.setdefault(x.order_no, []).append(x)
+        for no, xs in mine.items():
+            if len(xs) > len(by_order.get(no, [])):
+                by_order[no] = xs
+    for xs in by_order.values():
+        lines += xs
+    order_list = list(orders.values())
     notes = []
-    if not email_cols and not phone_cols and "client" not in cols:
-        notes.append("нет ни почты, ни телефона, ни клиента — заказы не связать с базой рассылок")
-    elif not email_cols and not phone_cols:
-        notes.append("нет почты и телефона клиента — связать с базой рассылок можно только через другие выгрузки")
-    if "item" not in cols and "group" not in cols:
-        notes.append("нет номенклатуры — тему письма с купленным не сравнить")
-    header = rows[header_row]
-    names = {k: _text(header[i]) for k, i in cols.items() if not k[-1].isdigit() and i < len(header) and _text(header[i])}
-    return CrmFile("orders", _month([o.order_date for o in orders]), orders=orders, notes=notes, columns=names,
-                   lines=lines)
+    if order_list:
+        cols_all = set().union(*(set(p["cols"]) for p in parts))
+        if not cols_all & {"email", "phone", "client"}:
+            notes.append("нет ни почты, ни телефона, ни клиента — заказы не связать с базой рассылок")
+        elif not cols_all & {"email", "phone"}:
+            notes.append("нет почты и телефона клиента — связать с базой рассылок можно только через другие выгрузки")
+        if not cols_all & {"item", "group"}:
+            notes.append("нет номенклатуры — тему письма с купленным не сравнить")
+    dates = [o.order_date for o in order_list] or [x.mailing_date for x in items if x.mailing_date]
+    if not dates:
+        raise CrmFileError("позиции рассылок без дат рассылки и без заказов — не к чему привязать")
+    columns = {k: v for p in parts for k, v in p["columns"].items()}
+    return CrmFile("orders" if order_list else "mailing_items", _month(dates), orders=order_list, notes=notes,
+                   columns=columns, lines=sum(p["count"] for p in parts), order_lines=lines,
+                   mailing_items=sorted(items, key=lambda x: (x.mailing, x.item)), sheets_info=info,
+                   totals=any(p["totals"] for p in parts))
 
 
 # «Клиенты», под которыми в 1С идут разные люди: их заказы вместе не собираются, иначе смешаются чужие контакты.

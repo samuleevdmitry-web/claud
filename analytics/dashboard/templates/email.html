@@ -71,50 +71,106 @@
 {% endif %}
 
 <h2>Рассылки по базе и заказы</h2>
-{% guard "Рассылки по базе и заказы" %}
-<div class="card">
-  {% if base_info and base_info.contacts %}
-  <p>В базе UniSender {{ base_info.contacts|int }} контактов, активных {{ base_info.active|int }}
-    (с почтой {{ base_info.emails|int }}, с телефоном {{ base_info.phones|int }}); выгружена {{ base_info.loaded_at|local }}.</p>
+{% if base_info and base_info.contacts %}
+<p class="note">В базе UniSender {{ base_info.contacts|int }} контактов, активных {{ base_info.active|int }}
+  (с почтой {{ base_info.emails|int }}, с телефоном {{ base_info.phones|int }}); выгружена {{ base_info.loaded_at|local }}.</p>
+{% endif %}
+
+{% guard "Рассылки и покупки товаров из них" %}
+<div class="card table-card">
+  <div class="chart-title">Рассылки {{ f.month|month|lower }} и покупки товаров из них</div>
+  {% if not items_info %}
+  <p class="muted">Нужен файл с позициями рассылок: колонки «Рассылка», «Дата рассылки», «Номенклатура» (можно на одном листе
+    с заказами по позициям) — и заказы по позициям: номер заказа, дата, номенклатура, сумма позиции, почта или телефон клиента.
+    Положите его в папку <code>imports</code>.</p>
+  {% elif not items %}
+  <p class="muted">Рассылок за {{ f.month|month|lower }} в файле позиций рассылок нет (есть с {{ items_info.first.strftime('%d.%m.%Y') if items_info.first else '—' }}
+    по {{ items_info.last.strftime('%d.%m.%Y') if items_info.last else '—' }}).</p>
+  {% else %}
+  <p class="hint">Для каждой рассылки — заказы, в которых есть товар из неё (номенклатура из позиций рассылки совпала с позицией
+    заказа), сделанные в течение {{ item_window }} дней после рассылки. Клиент узнаётся по почте и телефону из 1С и сверяется с
+    отчётом UniSender: получил ли он это письмо и открыл ли. «Влияние» — сколько покупателей товара сверх обычного: доля
+    купивших среди получателей письма минус доля среди остальной базы, умноженная на число получателей; в рублях — по средней
+    сумме покупки получателя.</p>
+  <table class="wrap-head">
+    <thead><tr><th>Рассылка</th><th class="num">Получили / открыли</th><th class="num">Купили товар из рассылки</th>
+      <th class="num">Из них получили письмо</th><th class="num">Из них открыли</th>
+      <th class="num">Доля купивших: получатели / остальная база</th><th class="num">Влияние ≈</th></tr></thead>
+    <tbody>{% for r in items.rows %}
+      <tr><td class="label" title="{{ r.mailing }}{% if r.campaigns %} — письмо: {{ r.campaigns|map(attribute='subject')|join('; ') }}{% endif %}">
+            {{ r.day.strftime('%d.%m') }} · {{ r.mailing }}<br><span class="muted">{{ r['items']|plural('позиция', 'позиции', 'позиций') }}</span></td>
+          <td class="num">{% if r.campaigns %}{{ r.delivered|int }} / {{ r.opened|int }}{% else %}<span class="bad">письмо в UniSender не найдено</span>{% endif %}</td>
+          <td class="num">{{ r.bought.orders|int }} · {{ r.bought.amount|int }} ₽<br><span class="muted">без письма: {{ r.rest_base.orders|int }} из базы, {{ r.outside.orders|int }} вне базы</span></td>
+          <td class="num">{{ r.received.orders|int }} · {{ r.received.amount|int }} ₽{% if r.received.orders %}<br><span class="muted">за 14 дн.: {{ r.received_14.orders|int }} · медиана {{ r.days_median }} дн.</span>{% endif %}</td>
+          <td class="num">{{ r.opened_buyers.orders|int }} · {{ r.opened_buyers.amount|int }} ₽</td>
+          <td class="num">{% if r.rate_r is not none %}{{ r.rate_r|pct(2) }} / {{ r.rate_n|pct(2) }}{% else %}—{% endif %}</td>
+          <td class="num">{% if r.uplift is not none %}+{{ r.uplift|round|int }} покуп.<br><span class="muted">≈ {{ (r.uplift_amount or 0)|int }} ₽{% if not r.reliable %}*{% endif %}</span>{% else %}—{% endif %}</td></tr>
+    {% endfor %}
+      <tr class="total"><td>Всего</td><td></td>
+          <td class="num">{{ items.bought.orders|int }} · {{ items.bought.amount|int }} ₽</td>
+          <td class="num">{{ items.received.orders|int }} · {{ items.received.amount|int }} ₽</td>
+          <td class="num">{{ items.opened_buyers.orders|int }} · {{ items.opened_buyers.amount|int }} ₽</td><td></td>
+          <td class="num">{% if items.uplift is not none %}+{{ items.uplift|round|int }} покуп.<br>≈ {{ (items.uplift_amount or 0)|int }} ₽{% else %}—{% endif %}</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Заказ с товарами из двух рассылок считается в обеих. Влияние — оценка: если письмо шло только тем, кто уже
+    покупает такой товар, доля у получателей выше и без письма. * — получателей меньше 200, оценка ненадёжна.
+    {% if items_info.undated %}В файле {{ items_info.undated }} позиций без даты рассылки — они не учтены.{% endif %}</p>
   {% endif %}
+</div>
+{% endguard %}
+
+{% guard "Все заказы месяца и рассылки" %}
+<div class="card">
+  <div class="chart-title">Все заказы {{ f.month|month|lower }}: какие связаны с рассылками</div>
   {% if not orders_coverage %}
   <p class="muted">Выгрузки всех заказов 1С ещё нет. Положите её в папку <code>imports</code> (Excel: номер заказа, дата,
-    сумма, статус, клиент, почта и телефон, номенклатура и её группа) — заказы сведутся с письмами, которые клиент
-    получил за {{ window }} дней до заказа.</p>
+    сумма, статус, клиент, почта и телефон) — каждый заказ сверится с письмами, которые клиент получил за {{ window }} дней
+    до заказа.</p>
   {% elif not delivery_ready %}
   <p class="muted">Выгрузка заказов 1С есть (по {{ orders_coverage.last.strftime('%d.%m.%Y') }}), но отчётов о доставке
     UniSender по адресам за {{ f.month|month|lower }} нет: они загружаются вместе с рассылками по понедельникам
     (UniSender отдаёт их только за последние 180 дней). Без них не видно, кто получил и открыл письмо.</p>
   {% elif not mail or not mail.orders %}
-  <p class="muted">Заказов за {{ f.month|month|lower }} в выгрузках 1С нет (есть с {{ orders_coverage.first.strftime('%d.%m.%Y') }}
-    по {{ orders_coverage.last.strftime('%d.%m.%Y') }}).{% if mail and mail.campaigns %} Ниже — рассылки месяца: заказы после
-    них видны за те дни из {{ window }}, на которые есть выгрузка.{% endif %}</p>
+  <p class="muted">Заказов за {{ f.month|month|lower }} в выгрузке всех заказов 1С нет (есть с {{ orders_coverage.first.strftime('%d.%m.%Y') }}
+    по {{ orders_coverage.last.strftime('%d.%m.%Y') }}).</p>
   {% else %}
-  <p class="hint">Для каждого заказа месяца — письма, которые клиент получил за {{ window }} дней до заказа, и что он с ними
-    сделал (отчёт о доставке UniSender по адресам). Клиент узнаётся по почте и телефону из 1С — по отпечаткам, сами адреса
-    не хранятся. Товар «из письма» — общие слова номенклатуры заказа и темы, ссылок письма.</p>
+  {% set linked = mail.classes|selectattr('key', 'in', ['topic_click', 'topic_open', 'open_other'])|list %}
+  {% set linked_orders = linked|sum(attribute='orders') %}{% set linked_amount = linked|sum(attribute='amount') %}
+  <p>С рассылками связаны <strong>{{ linked_orders|int }} из {{ mail.orders|int }} заказов</strong> на {{ linked_amount|int }} ₽
+    ({{ (100.0 * linked_orders / mail.orders)|pct }}): клиент открыл письмо за {{ window }} дней до заказа. Остальные заказы
+    с рассылками не связаны — ниже по причинам. Это верхняя оценка: такие клиенты заказывают и без писем.</p>
   <table>
     <thead><tr><th>Заказы {{ f.month|month|lower }}</th><th class="num">Заказов</th><th class="num">Сумма, ₽</th>
       <th class="num">Доля заказов</th></tr></thead>
-    <tbody>{% for c in mail.classes %}{% if c.orders or c.key in ('topic_click', 'topic_open', 'open_other') %}
-      {% if mail.has_items or c.key not in ('topic_click', 'topic_open') %}
-      <tr><td>{{ 'Открыли или перешли по ссылке' if (c.key == 'open_other' and not mail.has_items) else c.title }}</td>
+    <tbody>
+      <tr class="total"><td>Связаны с рассылками</td><td class="num">{{ linked_orders|int }}</td><td class="num">{{ linked_amount|int }}</td>
+          <td class="num">{{ (100.0 * linked_orders / mail.orders)|pct }}</td></tr>
+      {% for c in linked %}{% if c.orders or c.key == 'open_other' %}{% if mail.has_items or c.key == 'open_other' %}
+      <tr><td class="indent">{{ 'Открыли письмо за ' ~ window ~ ' дней до заказа' if (c.key == 'open_other' and not mail.has_items) else c.title }}</td>
           <td class="num">{{ c.orders|int }}</td><td class="num">{{ c.amount|int }}</td>
           <td class="num">{{ (100.0 * c.orders / mail.orders)|pct }}</td></tr>
       {% endif %}{% endif %}{% endfor %}
-      <tr class="total"><td>Всего</td><td class="num">{{ mail.orders|int }}</td><td class="num">{{ mail.amount|int }}</td>
+      <tr class="total"><td>Не связаны с рассылками</td><td class="num">{{ (mail.orders - linked_orders)|int }}</td>
+          <td class="num">{{ (mail.amount - linked_amount)|int }}</td>
+          <td class="num">{{ (100.0 * (mail.orders - linked_orders) / mail.orders)|pct }}</td></tr>
+      {% for c in mail.classes %}{% if c.key not in ['topic_click', 'topic_open', 'open_other'] and c.orders %}
+      <tr><td class="indent">{{ c.title }}</td><td class="num">{{ c.orders|int }}</td><td class="num">{{ c.amount|int }}</td>
+          <td class="num">{{ (100.0 * c.orders / mail.orders)|pct }}</td></tr>
+      {% endif %}{% endfor %}
+      <tr class="total"><td>Всего заказов</td><td class="num">{{ mail.orders|int }}</td><td class="num">{{ mail.amount|int }}</td>
           <td class="num">100%</td></tr>
     </tbody>
   </table>
-  {% if not mail.has_items %}<p class="note">В выгрузке заказов нет номенклатуры — сравнить тему письма с покупкой нельзя.</p>{% endif %}
   {% if mail.lift %}
   <p class="note">Открывшие письмо сделали заказ за {{ window }} дней в {{ mail.lift.rate_open|pct(1) }} случаев, не открывшие —
     в {{ mail.lift.rate_unopen|pct(1) }} ({{ mail.lift.campaigns|plural('рассылка', 'рассылки', 'рассылок') }}{% if mail.lift.pending %};
     по {{ mail.lift.pending|plural('рассылке', 'рассылкам', 'рассылкам') }} ещё не прошло {{ window }} дней или нет выгрузки
     заказов за них{% endif %}).
-    {% if mail.lift.extra >= 1 %}Разница — около {{ mail.lift.extra|plural('заказа', 'заказов', 'заказов') }}: верхняя оценка вклада рассылок,
-    потому что открывают и так более активные клиенты.{% endif %}</p>
+    {% if mail.lift.extra >= 1 %}Разница — около {{ mail.lift.extra|plural('заказа', 'заказов', 'заказов') }}: столько заказов
+    можно приписать рассылкам, остальные открывшие заказали бы и так.{% endif %}</p>
   {% endif %}
+  <p class="note">Новые клиенты — заказы, найденные по выгрузкам лидов с сайта и звонков (раздел «Продажи»).</p>
   {% endif %}
 </div>
 {% endguard %}

@@ -10,6 +10,7 @@ import psycopg
 from psycopg import sql
 
 from analytics.keywords import Keyword
+from analytics.sources.crm_files import item_norm
 from analytics.sources.metrika import GoalRow, TrafficRow
 from analytics.sources.webmaster import Problem
 from analytics.sources.wordstat import MonthCount
@@ -272,11 +273,11 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
         cur.execute("DELETE FROM crm_summary WHERE month = %s AND kind = %s", (month, kind))
         cur.executemany("INSERT INTO crm_summary (month, kind, metric, value, note) VALUES (%s, %s, %s, %s, %s)"
                         " ON CONFLICT DO NOTHING", [(month, kind, m, v, n) for m, v, n in parsed.summary])
-        if kind == "orders":
+        if kind == "orders" and parsed.orders:
             # Выгрузки заказов дополняют друг друга по номеру заказа: список заказов с контактами и построчный отчёт
             # с номенклатурой. Новое значение заменяет прежнее, только если оно есть (пустое не затирает). Сумму заказа
             # построчный отчёт не меняет: в нём могут быть не все позиции (например, только товары из рассылок).
-            totals = "item" not in getattr(parsed, "columns", {})
+            totals = parsed.totals
             cur.executemany(
                 "INSERT INTO orders_1c (order_no, order_date, amount, status, client_hash, email_hashes, phone_hashes,"
                 " items, groups) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
@@ -294,6 +295,26 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
                 [(o.order_no, o.order_date, o.amount, o.status, o.client_hash, list(o.email_hashes),
                   list(o.phone_hashes), list(o.items), list(o.groups), totals) for o in parsed.orders],
             )
+        if kind in ("orders", "mailing_items"):
+            # позиции заказов: выгрузка заменяет позиции своих заказов целиком
+            lines = parsed.order_lines
+            if lines:
+                cur.execute("DELETE FROM order_lines WHERE order_no = ANY (%s)", (sorted({x.order_no for x in lines}),))
+                numbers: dict[str, int] = {}
+                rows = []
+                for x in lines:
+                    numbers[x.order_no] = numbers.get(x.order_no, 0) + 1
+                    rows.append((x.order_no, numbers[x.order_no], x.item, item_norm(x.item), x.color, x.amount))
+                cur.executemany("INSERT INTO order_lines (order_no, line_no, item, item_norm, color, amount)"
+                                " VALUES (%s, %s, %s, %s, %s, %s)", rows)
+            # позиции рассылок: файл заменяет позиции своих рассылок; дата берётся и из других строк той же рассылки
+            items = parsed.mailing_items
+            if items:
+                dates = {x.mailing: x.mailing_date for x in items if x.mailing_date}
+                cur.execute("DELETE FROM mailing_items WHERE mailing = ANY (%s)", (sorted({x.mailing for x in items}),))
+                cur.executemany("INSERT INTO mailing_items (mailing, mailing_date, item, item_norm) VALUES (%s, %s, %s, %s)",
+                                sorted({(x.mailing, x.mailing_date or dates.get(x.mailing), x.item, item_norm(x.item))
+                                        for x in items}, key=lambda r: (r[0], str(r[1]), r[3])))
         elif kind == "forms":
             cur.execute("DELETE FROM crm_form_leads WHERE month = %s", (month,))
             cur.executemany(
