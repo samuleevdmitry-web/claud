@@ -116,16 +116,16 @@ class FakeUnisender:
         return parse_stats(campaign_id, {"sent": 1000, "delivered": 900, "read_unique": 200, "clicked_unique": 40,
                                          "unsubscribed": 9})
 
-    def export_contacts(self):
-        return parse_contacts(CSV)
+    def export_contacts(self, keep_emails=False):
+        return parse_contacts(CSV, keep_emails)
 
-    def delivery(self, campaign_id):
+    def delivery(self, campaign_id, keep_emails=False):
         rows = {101: [{"email": "buyer@example.ru", "send_result": "ok_link_visited"},
                       {"email": "other@example.ru", "send_result": "ok_delivered"},
                       {"email": "third@example.ru", "send_result": "ok_read"}],
                 102: [{"email": "buyer@example.ru", "send_result": "ok_read"},
                       {"email": "other@example.ru", "send_result": "err_user_unknown"}]}[campaign_id]
-        return parse_delivery(rows)
+        return parse_delivery(rows, keep_emails)
 
     def message_links(self, message_id):
         return [Link("https://oldos.ru/catalog/membrannye_tkani/", "Мембраны")]
@@ -244,3 +244,17 @@ def test_shared_client_does_not_borrow_contacts():
                                   rows)
         touched = {r["order_no"]: [t["campaign_id"] for t in r["touches"]] for r in q.mail_orders(conn, sep)}
         assert touched["Р-0"] == [101] and touched["Р-без-почты"] == []
+
+
+@needs_db
+def test_addresses_are_kept_only_with_email_lists():
+    with db.connect(TEST_DATABASE_URL) as conn:
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        db.apply_schema(conn)
+        sep = date(2026, 9, 1)
+        sync_unisender(conn, FakeUnisender(), sep, date(2026, 9, 30), log=lambda _: None, keep_emails=True)
+        emails = {e for (e,) in conn.execute("SELECT email FROM email_contacts")}
+        assert {"buyer@example.ru", "third@example.ru"} <= emails
+        conn.execute("DELETE FROM unisender_recipients_runs")
+        sync_unisender(conn, FakeUnisender(), sep, date(2026, 9, 30), log=lambda _: None)
+        assert conn.execute("SELECT count(*) FROM email_contacts").fetchone()[0] == 0

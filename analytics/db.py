@@ -260,10 +260,11 @@ def mark_backfilled(conn: psycopg.Connection, counter_id: int, reports: set[str]
                         [(counter_id, r) for r in sorted(reports)])
 
 
-def imported_files(conn: psycopg.Connection, version: int = 1) -> set[str]:
-    """Файлы, уже разобранные этой версией разбора (и нераспознанные ею): новая версия разбирает их заново."""
+def imported_files(conn: psycopg.Connection, version: int = 1, reread_kinds: tuple[str, ...] = ()) -> set[str]:
+    """Файлы, уже разобранные этой версией разбора (и нераспознанные ею): новая версия разбирает их заново.
+    reread_kinds — виды файлов, которые нужно разобрать заново (список сотрудников без имён, когда списки включили)."""
     return {sha for (sha,) in conn.execute(
-        "SELECT sha256 FROM crm_imports WHERE parser_version >= %s", (version,))}
+        "SELECT sha256 FROM crm_imports WHERE parser_version >= %s AND NOT (kind = ANY (%s))", (version, list(reread_kinds)))}
 
 
 def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, version: int = 1) -> int:
@@ -330,7 +331,7 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
                   x.manager_1c, list(x.order_nos), x.category, list(x.email_hashes), x.phone_hash)
                  for x in parsed.form_leads],
             )
-        else:
+        elif kind == "calls":
             cur.execute("DELETE FROM crm_call_leads WHERE month = %s", (month,))
             cur.execute("DELETE FROM crm_call_orders WHERE month = %s", (month,))
             cur.executemany(
@@ -440,6 +441,32 @@ def recipients_due(conn: psycopg.Connection, campaigns: list, today: date, fresh
         if age <= max_age_days and not settled:
             out.append(c)
     return out
+
+
+def save_email_contacts(conn: psycopg.Connection, pairs: list[tuple[str, str]]) -> int:
+    """Адреса получателей по отпечаткам — для списков «кто открыл» (только при EMAIL_LISTS=on)."""
+    rows = sorted({h: e for h, e in pairs if h and e}.items())
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany("INSERT INTO email_contacts (email_hash, email) VALUES (%s, %s) ON CONFLICT (email_hash)"
+                        " DO UPDATE SET email = EXCLUDED.email, updated_at = now()", rows)
+    return len(rows)
+
+
+def purge_email_contacts(conn: psycopg.Connection) -> None:
+    """EMAIL_LISTS выключили: стереть адреса и имена, оставить отпечатки."""
+    with conn.transaction():
+        conn.execute("DELETE FROM email_contacts")
+        conn.execute("UPDATE staff SET name = NULL, email = NULL WHERE name IS NOT NULL OR email IS NOT NULL")
+
+
+def replace_staff(conn: psycopg.Connection, members: list, keep: bool) -> int:
+    """Сотрудники из файла: отпечатки всегда, имя и адрес — только при keep (EMAIL_LISTS=on)."""
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM staff")
+        cur.executemany("INSERT INTO staff (email_hash, phone_hash, name, email) VALUES (%s, %s, %s, %s)",
+                        [(m.email_hash, m.phone_hash, m.name if keep else None, m.email if keep else None)
+                         for m in members])
+    return len(members)
 
 
 def replace_email_base(conn: psycopg.Connection, contacts: list) -> int:

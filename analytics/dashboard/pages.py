@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import tomllib
 from collections import defaultdict
 from dataclasses import dataclass
@@ -921,9 +923,6 @@ def keywords_page(conn: psycopg.Connection, settings: Settings, f: Filters, para
 
 def keywords_csv(conn: psycopg.Connection, settings: Settings, f: Filters, params: dict) -> str:
     """Таблица ключей с текущими фильтрами целиком — CSV для Excel (точка с запятой, BOM)."""
-    import csv
-    import io
-
     host_id = q.host_for_site(conn, f.counter_id)
     kf = keyword_filters(params, q.query_days(conn, host_id) if host_id else None)
     rows, _ = _keyword_rows(conn, f, kf, None) if host_id else ([], 0)
@@ -995,11 +994,62 @@ def email_data(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
         return ins.mail_items_stats(mailings, matched, orders, q.mail_item_audience(conn, mapping),
                                     q.ITEM_WINDOW_DAYS)
 
+    def lists_part():
+        staff_campaigns = q.staff_campaigns(conn, f.month)
+        ids = [c["campaign_id"] for c in staff_campaigns]
+        by_campaign: dict[int, list] = {}
+        for r in q.staff_recipients(conn, ids):
+            by_campaign.setdefault(r["campaign_id"], []).append(r)
+        for c in staff_campaigns:
+            got = by_campaign.get(c["campaign_id"], [])
+            c["readers"] = [x for x in got if x["level"] >= 2]
+            c["silent"] = [x for x in got if x["level"] < 2]
+        people = q.staff_people(conn, ids)
+        return {
+            "staff_campaigns": staff_campaigns,
+            "staff_readers": [x for x in people if x["opened"]],
+            "staff_silent": [x for x in people if x["received"] and not x["opened"]],
+            "staff_missing": [x for x in people if not x["received"] and x["in_file"]],
+            "base": q.base_activity_counts(conn, f.month),
+            "active": q.base_activity(conn, f.month, True) if settings.email_lists else [],
+            "passive": q.base_activity(conn, f.month, False) if settings.email_lists else [],
+            "limit": q.LIST_LIMIT,
+        }
+
+    lists = safe("Списки получателей", lists_part) if primary and campaigns else None
     items_info = safe("Позиции рассылок", lambda: q.has_mailing_items(conn)) if primary else None
     items = safe("Рассылки и покупки товаров из них", items_part) if items_info else None
     return {"stats": s, "prev": prev, "campaigns": campaigns, "base_info": base_info, "mail": mail,
             "items": items, "items_info": items_info, "item_window": q.ITEM_WINDOW_DAYS,
+            "lists": lists, "email_lists": settings.email_lists,
             "orders_coverage": coverage, "delivery_ready": delivery_ready, "window": q.WINDOW_DAYS}
+
+
+CONTACT_LISTS = {"active": "открывают письма", "passive": "получают, но не открывают", "staff": "сотрудники"}
+
+
+def contacts_csv(conn: psycopg.Connection, settings: Settings, f: Filters, kind: str) -> str:
+    """Список получателей целиком: открывают / не открывают (месяц из фильтра) или сотрудники. Только при EMAIL_LISTS."""
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    if not settings.email_lists or kind not in CONTACT_LISTS:
+        w.writerow(["Списки получателей выключены: EMAIL_LISTS=on в .env"])
+        return "\ufeff" + buf.getvalue()
+    if kind == "staff":
+        ids = [c["campaign_id"] for c in q.staff_campaigns(conn, f.month)]
+        w.writerow(["Сотрудник", "Адрес", "Писем получено", "Открыто", "Переходов", "Есть в файле сотрудников"])
+        for x in q.staff_people(conn, ids):
+            w.writerow([x["name"] or "", x["email"] or "", x["received"], x["opened"], x["clicked"],
+                        "да" if x["in_file"] else "нет"])
+    else:
+        w.writerow(["Адрес", "Писем получено", "Открыто", "Переходов", "Последнее открытие", "Последнее письмо",
+                    "Заказов в 1С", "Сумма заказов", "Последний заказ"])
+        for x in q.base_activity(conn, f.month, kind == "active", limit=None):
+            w.writerow([x["email"] or "", x["received"], x["opened"], x["clicked"],
+                        f"{x['last_open']:%d.%m.%Y}" if x["last_open"] else "", f"{x['last_received']:%d.%m.%Y}",
+                        x["orders"], f"{x['amount']:.0f}" if x["amount"] else "",
+                        f"{x['last_order']:%d.%m.%Y}" if x["last_order"] else ""])
+    return "\ufeff" + buf.getvalue()
 
 
 def email_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:

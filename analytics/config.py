@@ -27,6 +27,9 @@ class Settings:
     unisender_api_key: str = ""  # ключ API UniSender: рассылки, статистика, база (отпечатки)
     site_search_param: str = "q"  # параметр адреса с запросом поиска по сайту (oldos.ru: /catalog/?q=…)
     not_found_title: str = "Страница не найдена"  # заголовок страницы 404 на сайте
+    # Хранить адреса получателей рассылок и имена сотрудников — для списков «кто открыл, кто нет» в разделе E-mail.
+    # Выключено: в базе только отпечатки адресов, списки показывают только количество.
+    email_lists: bool = False
 
 
 def _list(name: str) -> tuple[str, ...]:
@@ -54,4 +57,5 @@ def load_settings() -> Settings:
         unisender_api_key=os.environ.get("UNISENDER_API_KEY", "").strip(),
         site_search_param=os.environ.get("SITE_SEARCH_PARAM", "").strip() or "q",
         not_found_title=os.environ.get("NOT_FOUND_TITLE", "").strip() or "Страница не найдена",
+        email_lists=os.environ.get("EMAIL_LISTS", "").strip().lower() in ("1", "on", "true", "yes", "да"),
     )

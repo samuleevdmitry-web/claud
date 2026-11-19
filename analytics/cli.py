@@ -247,14 +247,14 @@ def _sync_semantics(conn: psycopg.Connection, settings: Settings, since: date, u
     folder = Path(settings.imports_dir)
     folder.mkdir(parents=True, exist_ok=True)
     semantics_download(settings.semantics_url, folder / "semantics.xlsx")
-    loaded = import_crm_folder(conn, folder)
+    loaded = import_crm_folder(conn, folder, keep_contacts=settings.email_lists)
     rows = conn.execute("SELECT count(*) FROM semantic_keywords").fetchone()[0]
     print(f"  семантика: {rows} фраз" + ("" if loaded else " (таблица не менялась)"))
     return rows
 
 
 def _sync_unisender(conn: psycopg.Connection, settings: Settings, since: date, until: date) -> int:
-    return sync_unisender(conn, UnisenderClient(settings.unisender_api_key), since, until)
+    return sync_unisender(conn, UnisenderClient(settings.unisender_api_key), since, until, keep_emails=settings.email_lists)
 
 
 SYNCS = {"metrika": _sync_metrika, "maps": _sync_maps, "webmaster": _sync_webmaster, "wordstat": _sync_wordstat,
@@ -346,7 +346,7 @@ def import_crm(settings: Settings, today: date) -> list:
     """Новые выгрузки Битрикс24 и 1С из папки imports. Если пришли за уже закрытый месяц, отчёт за него пересобирается."""
     with db.connect(settings.database_url) as conn:
         db.apply_schema(conn)
-        parsed = import_crm_folder(conn, Path(settings.imports_dir))
+        parsed = import_crm_folder(conn, Path(settings.imports_dir), keep_contacts=settings.email_lists)
     current = today.replace(day=1)
     for month in sorted({p.month for p in parsed if getattr(p, "month", None) and p.month < current}):
         reports = Path(settings.reports_dir)

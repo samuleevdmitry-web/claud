@@ -271,7 +271,8 @@ def sync_rabbit(conn: psycopg.Connection, client: RabbitClient, until: date,
     return db.replace_rabbit_positions(conn, project, date_from, until, rows)
 
 
-def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], None] = print) -> list:
+def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], None] = print,
+                      keep_contacts: bool = False) -> list:
     """Загружает из папки новые выгрузки (*.xlsx): Битрикс24 и 1С, таблицу семантики; уже загруженные (по содержимому)
     пропускает.
 
@@ -282,7 +283,7 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
     # сборщик и ручной import-crm не должны разбирать одни и те же файлы одновременно: второй ждёт первого
     conn.execute("SELECT pg_advisory_lock(%s)", (IMPORT_LOCK,))
     try:
-        return _import_folder(conn, folder, log)
+        return _import_folder(conn, folder, log, keep_contacts)
     finally:
         conn.execute("SELECT pg_advisory_unlock(%s)", (IMPORT_LOCK,))
 
@@ -290,8 +291,10 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
 IMPORT_LOCK = 4207732
 
 
-def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], None]) -> list:
-    done, out = db.imported_files(conn, crm_files.PARSER_VERSION), []
+def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], None], keep_contacts: bool = False) -> list:
+    # список сотрудников, разобранный без имён, перечитывается, когда списки получателей включили
+    done = db.imported_files(conn, crm_files.PARSER_VERSION, ("staff_hidden",) if keep_contacts else ())
+    out = []
     for path in sorted(x for x in folder.iterdir() if x.suffix.lower() in excel.EXTENSIONS):
         if path.name.startswith("~$"):
             continue  # временный файл открытого Excel
@@ -310,6 +313,15 @@ def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], 
         except Exception as exc:  # noqa: BLE001 — битый или чужой файл не должен останавливать загрузку остальных
             db.skip_crm_file(conn, sha, path.name, crm_files.PARSER_VERSION)
             _report(conn, sha, path.name, f"не загружен — {exc}", log)
+            continue
+        if parsed.kind == "staff":
+            db.replace_staff(conn, parsed.staff, keep_contacts)
+            parsed.kind = "staff" if keep_contacts else "staff_hidden"
+            db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION)
+            note = ("имена и адреса сохранены для списков" if keep_contacts
+                    else "сохранены только отпечатки; имена и адреса — при EMAIL_LISTS=on в .env")
+            _report(conn, sha, path.name, "\n".join([f"сотрудники — {len(parsed.staff)}; {note}"] + parsed.sheets_info), log)
+            out.append(parsed)
             continue
         known = 0
         if parsed.orders:  # сколько заказов уже есть из других выгрузок — до того, как этот файл их дополнит
@@ -358,7 +370,7 @@ def orders_summary(parsed, known: int) -> str:
 
 def sync_unisender(conn: psycopg.Connection, client, since: date, until: date,
                    log: Callable[[str], None] = print, refresh_days: int = 60, base: bool = True,
-                   recipients: bool = True) -> int:
+                   recipients: bool = True, keep_emails: bool = False) -> int:
     """Рассылки UniSender за период и их статистика, база контактов (отпечатки), затем по каждой рассылке —
     кому ушло письмо и что с ним сделали, и ссылки из письма.
 
@@ -378,16 +390,21 @@ def sync_unisender(conn: psycopg.Connection, client, since: date, until: date,
     log(f"  unisender: списков {len(lists)}, рассылок {len(campaigns)} ({since}…{until}), статистика {len(stats)}")
     if base:
         log("  unisender: выгружаю базу контактов (UniSender готовит файл, бывает несколько минут)…")
-        contacts = client.export_contacts()
+        contacts = client.export_contacts(keep_emails=True) if keep_emails else client.export_contacts()
         loaded += db.replace_email_base(conn, contacts)
-        log(f"  unisender: база — {len(contacts)} контактов (сохранены только отпечатки почты и телефона)")
+        if keep_emails:
+            db.save_email_contacts(conn, [(c.email_hash, c.email) for c in contacts])
+            log(f"  unisender: база — {len(contacts)} контактов (адреса сохранены для списков: EMAIL_LISTS=on)")
+        else:
+            db.purge_email_contacts(conn)
+            log(f"  unisender: база — {len(contacts)} контактов (сохранены только отпечатки почты и телефона)")
     if recipients:
-        loaded += sync_recipients(conn, client, campaigns, until, log)
+        loaded += sync_recipients(conn, client, campaigns, until, log, keep_emails)
     return loaded
 
 
 def sync_recipients(conn: psycopg.Connection, client, campaigns: list, today: date,
-                    log: Callable[[str], None] = print) -> int:
+                    log: Callable[[str], None] = print, keep_emails: bool = False) -> int:
     """Отчёт о доставке (статус письма у каждого адреса) и ссылки письма — для рассылок, где их пора обновить."""
     due = db.recipients_due(conn, campaigns, today)
     if not due:
@@ -396,7 +413,7 @@ def sync_recipients(conn: psycopg.Connection, client, campaigns: list, today: da
     loaded, failed = 0, []
     for i, c in enumerate(due, 1):
         try:
-            deliveries = client.delivery(c.campaign_id)
+            deliveries = client.delivery(c.campaign_id, keep_emails=True) if keep_emails else client.delivery(c.campaign_id)
         except unisender.UnisenderError as exc:
             failed.append(f"{c.campaign_id}: {exc}")
             continue
@@ -407,6 +424,8 @@ def sync_recipients(conn: psycopg.Connection, client, campaigns: list, today: da
             except unisender.UnisenderError as exc:
                 log(f"  рассылка {c.campaign_id}: ссылки письма не получены — {exc}")
         loaded += db.save_recipients(conn, c.campaign_id, deliveries, links)
+        if keep_emails:
+            db.save_email_contacts(conn, [(d.email_hash, d.email) for d in deliveries])
         if i % 10 == 0 or i == len(due):
             log(f"  unisender: готово {i} из {len(due)}")
     if failed:

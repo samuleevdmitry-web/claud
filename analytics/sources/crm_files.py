@@ -28,13 +28,14 @@ KINDS = {
     "calls": {"Итог", "Все входящие лиды"},
 }
 KIND_NAMES = {"forms": "лиды с сайта (формы)", "calls": "входящие звонки", "orders": "заказы 1С",
-              "mailing_items": "позиции рассылок"}
+              "mailing_items": "позиции рассылок", "staff": "сотрудники", "staff_hidden": "сотрудники"}
 # Версия разбора: файлы, загруженные прежней версией, загружаются заново, если ещё лежат в папке.
 # 3 — отпечатки почты и телефона лидов для сведения с базой рассылок.
 # 4 — выгрузка всех заказов 1С; нераспознанные раньше файлы разбираются заново.
 # 5 — итог разбора каждого файла сохраняется для страницы «Данные»: файлы читаются заново один раз.
 # 6 — колонки узнаются по смыслу («Заказ 1С», «Номенклатура 1С»…), все листы книги, позиции заказов и рассылок.
-PARSER_VERSION = 6
+# 7 — список сотрудников («Сотрудник», «E-Mail»): нераспознанный раньше файл пользователей читается заново.
+PARSER_VERSION = 7
 
 
 class CrmFileError(Exception):
@@ -111,12 +112,13 @@ class CrmFile:
     order_lines: list = field(default_factory=list)    # OrderLine: позиции заказов
     mailing_items: list = field(default_factory=list)  # MailingItem: позиции рассылок
     sheets_info: list[str] = field(default_factory=list)  # что нашлось на каждом листе
+    staff: list = field(default_factory=list)  # StaffMember: сотрудники из файла пользователей
     totals: bool = True  # суммы заказов целиком (список заказов), а не только части позиций
 
     @property
     def rows(self) -> int:
         return (len(self.form_leads) + len(self.call_leads) + len(self.call_orders) + len(self.orders)
-                + len(self.order_lines) + len(self.mailing_items))
+                + len(self.order_lines) + len(self.mailing_items) + len(self.staff))
 
 
 def sha256(path: Path) -> str:
@@ -311,7 +313,8 @@ ORDER_COLUMNS = {
 _EXACT = {name: key for key, names in ORDER_COLUMNS.items() for name in names}
 COLUMN_NAMES = {"order_no": "номер", "date": "дата", "amount": "сумма", "line_amount": "сумма строки",
                 "status": "статус", "client": "клиент", "email": "почта", "phone": "телефон", "item": "номенклатура",
-                "group": "группа", "color": "цвет", "mailing": "рассылка", "mailing_date": "дата рассылки"}
+                "group": "группа", "color": "цвет", "mailing": "рассылка", "mailing_date": "дата рассылки",
+                "person": "сотрудник"}
 
 
 def _column_kind(h: str) -> str | None:
@@ -329,6 +332,8 @@ def _column_kind(h: str) -> str | None:
         if any(w in h for w in ("цена", "колич", "сумм", "после", "источник", "через")):
             return None
         return "mailing"
+    if h.startswith(("сотрудник", "фио", "ф.и.о", "пользователь")) or h in ("имя", "имя сотрудника"):
+        return "person"
     if h in _EXACT:
         return _EXACT[h]
     if h.startswith(("когда", "через", "количество", "цена")) or "после" in h:
@@ -381,6 +386,8 @@ def _sheet_kind(rows: list[tuple]) -> tuple[str, int, dict[str, int]] | None:
                 return "orders", i, cols
         if "mailing" in cols and "item" in cols and "order_no" not in cols:
             return "mailing_items", i, cols
+        if "person" in cols and "email" in cols and not cols.keys() & {"order_no", "mailing"}:
+            return "staff", i, cols
     return None
 
 
@@ -426,6 +433,31 @@ class OrderLine:
     item: str
     color: str | None
     amount: float
+
+
+@dataclass(frozen=True)
+class StaffMember:
+    """Сотрудник из файла пользователей: отпечатки адреса и телефона; имя и адрес хранятся только при EMAIL_LISTS."""
+    name: str
+    email: str | None
+    email_hash: str | None
+    phone_hash: str | None
+
+
+def _parse_staff_sheet(rows: list[tuple], header_row: int, cols: dict[str, int]) -> list[StaffMember]:
+    email_cols = [i for k, i in cols.items() if k.startswith("email") and k != "email"]
+    phone_cols = [i for k, i in cols.items() if k.startswith("phone") and k != "phone"]
+    out = []
+    for row in rows[header_row + 1:]:
+        if not row:
+            continue
+        name = _text(row[cols["person"]]) if cols["person"] < len(row) else None
+        emails = [e for i in email_cols if i < len(row) for e in privacy.emails(row[i])]
+        phones = [h for i in phone_cols if i < len(row) for h in privacy.phone_hashes(row[i])]
+        if name and (emails or phones):
+            out.append(StaffMember(name[:200], emails[0] if emails else None,
+                                   privacy.email_hash(emails[0]) if emails else None, phones[0] if phones else None))
+    return out
 
 
 @dataclass(frozen=True)
@@ -537,7 +569,7 @@ def _parse_mailing_sheet(rows: list[tuple], header_row: int, cols: dict[str, int
 def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
     """Все листы книги: заказы (список заказов, заказы по позициям, совпадения с рассылками) и позиции рассылок.
     Заказы с разных листов сводятся по номеру; позиции заказа берутся с листа, где их у этого заказа больше всего."""
-    parts, items, info = [], set(), []
+    parts, items, info, staff = [], set(), [], []
     for name, rows in sheets.items():
         found = _sheet_kind(rows)
         if not found:
@@ -546,6 +578,11 @@ def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
         kind, header_row, cols = found
         names = _names(rows, header_row, cols)
         cols_text = ", ".join(f"{COLUMN_NAMES.get(k, k)} ← «{v}»" for k, v in names.items())
+        if kind == "staff":
+            got = _parse_staff_sheet(rows, header_row, cols)
+            staff += got
+            info.append(f"лист «{name}»: сотрудники — {len(got)}; колонки: {cols_text}")
+            continue
         if kind == "mailing_items":
             got = _parse_mailing_sheet(rows, header_row, cols)
             items |= got
@@ -562,6 +599,8 @@ def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
         info.append(f"лист «{name}»: заказы — {len(part['orders'])} заказов ({part['count']} строк, с номенклатурой "
                     f"{len(part['lines'])}){extra}; колонки: {cols_text}")
     if not parts and not items:
+        if staff:
+            return CrmFile("staff", date(1970, 1, 1), staff=staff, sheets_info=info)  # список без месяца
         return None
     orders: dict[str, Order] = {}
     for part in sorted(parts, key=lambda x: not x["totals"]):  # сначала листы с суммой заказа целиком

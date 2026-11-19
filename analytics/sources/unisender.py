@@ -63,6 +63,7 @@ class Delivery:
     email_hash: str
     status: str
     level: int  # 0 — не доставлено, 1 — доставлено, 2 — открыто, 3 — переход по ссылке
+    email: str | None = None  # сам адрес — только если включены списки получателей (EMAIL_LISTS)
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ class Contact:
     phone_hash: str | None
     status: str | None
     list_ids: tuple[int, ...]
+    email: str | None = None  # сам адрес — только если включены списки получателей (EMAIL_LISTS)
 
 
 class UnisenderClient:
@@ -127,14 +129,15 @@ class UnisenderClient:
     def stats(self, campaign_id: int) -> CampaignStats:
         return parse_stats(campaign_id, self.call("getCampaignCommonStats", campaign_id=campaign_id) or {})
 
-    def export_contacts(self, wait: float = 15.0, timeout: float = 1800.0) -> list[Contact]:
+    def export_contacts(self, wait: float = 15.0, timeout: float = 1800.0, keep_emails: bool = False) -> list[Contact]:
         params = {f"field_names[{i}]": name for i, name in enumerate(EXPORT_FIELDS)}
         result = self._task("async/exportContacts", "выгрузка базы", wait, timeout, **params)
-        return parse_contacts(self._download(result.get("file_to_download") or ""))
+        return parse_contacts(self._download(result.get("file_to_download") or ""), keep_emails)
 
-    def delivery(self, campaign_id: int, wait: float = 15.0, timeout: float = 1800.0) -> list[Delivery]:
+    def delivery(self, campaign_id: int, wait: float = 15.0, timeout: float = 1800.0,
+                 keep_emails: bool = False) -> list[Delivery]:
         """Кому ушло письмо и что с ним сделали: статус по каждому адресу (только за последние 180 дней)."""
-        return parse_delivery(self.delivery_table(campaign_id, wait, timeout))
+        return parse_delivery(self.delivery_table(campaign_id, wait, timeout), keep_emails)
 
     def delivery_table(self, campaign_id: int, wait: float = 15.0, timeout: float = 1800.0) -> list[dict]:
         result = self._task("async/getCampaignDeliveryStats", f"отчёт о доставке рассылки {campaign_id}", wait, timeout,
@@ -243,15 +246,17 @@ def table_rows(result) -> list[dict]:
 STATUS_KEYS = ("send_result", "status", "state", "delivery_status", "result")
 
 
-def parse_delivery(rows: list[dict]) -> list[Delivery]:
-    """Строки отчёта о доставке → отпечаток адреса и статус; при повторе адреса остаётся лучший статус."""
+def parse_delivery(rows: list[dict], keep_emails: bool = False) -> list[Delivery]:
+    """Строки отчёта о доставке → отпечаток адреса и статус; при повторе адреса остаётся лучший статус.
+    Сам адрес остаётся, только если keep_emails (списки получателей включены)."""
     best: dict[str, Delivery] = {}
     for row in rows:
+        found = privacy.emails(row.get("email"))
         h = privacy.email_hash(row.get("email"))
         status = next((str(row[k]) for k in STATUS_KEYS if row.get(k)), "")
         if not h:
             continue
-        d = Delivery(h, status, delivery_level(status))
+        d = Delivery(h, status, delivery_level(status), found[0] if keep_emails and found else None)
         if h not in best or d.level > best[h].level:
             best[h] = d
     return list(best.values())
@@ -280,8 +285,9 @@ def extract_links(html: str) -> list[Link]:
     return out
 
 
-def parse_contacts(text: str) -> list[Contact]:
-    """CSV выгрузки базы → отпечатки. Сами адреса и телефоны дальше этой функции не уходят."""
+def parse_contacts(text: str, keep_emails: bool = False) -> list[Contact]:
+    """CSV выгрузки базы → отпечатки. Сами адреса и телефоны дальше этой функции не уходят, кроме адреса при
+    keep_emails (списки получателей включены)."""
     text = text.lstrip("﻿")
     sample = text[:2000]
     delimiter = ";" if sample.count(";") > sample.count(",") else ","
@@ -292,5 +298,7 @@ def parse_contacts(text: str) -> list[Contact]:
         if not email and not phone:
             continue
         lists = tuple(_int(x) for x in str(row.get("email_list_ids") or "").replace(";", ",").split(",") if _int(x))
-        out.append(Contact(privacy.email_hash(email), privacy.phone_hash(phone), row.get("email_status") or None, lists))
+        found = privacy.emails(email)
+        out.append(Contact(privacy.email_hash(email), privacy.phone_hash(phone), row.get("email_status") or None, lists,
+                           found[0] if keep_emails and found else None))
     return out

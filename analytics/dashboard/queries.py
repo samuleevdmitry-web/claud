@@ -972,6 +972,104 @@ def mail_item_audience(conn: psycopg.Connection, mapping: list[tuple[str, date, 
     return out
 
 
+# ----- списки получателей: сотрудники и активность базы -----
+
+STAFF_LIST = "coalesce(l.title, '') ~* 'сотрудник'"
+LIST_LIMIT = 300  # строк списка на странице; целиком — в CSV
+
+
+def staff_campaigns(conn: psycopg.Connection, month: date) -> list[dict]:
+    """Рассылки месяца по списку сотрудников, у которых есть отчёт о доставке по адресам."""
+    return _all(conn, f"""
+        SELECT c.campaign_id, c.start_time, c.subject,
+               count(d.email_hash) FILTER (WHERE d.level >= 1) AS delivered,
+               count(d.email_hash) FILTER (WHERE d.level >= 2) AS opened
+        FROM unisender_campaigns c LEFT JOIN unisender_lists l ON l.list_id = c.list_id
+        JOIN unisender_delivery d USING (campaign_id)
+        WHERE c.start_time >= %s AND c.start_time < %s AND {STAFF_LIST}
+        GROUP BY 1, 2, 3 ORDER BY c.start_time
+    """, (month, _next_month(month)))
+
+
+def staff_recipients(conn: psycopg.Connection, campaign_ids: list[int]) -> list[dict]:
+    """Кто из сотрудников получил и открыл каждое письмо: имя — из файла сотрудников, адрес — оттуда или из базы."""
+    if not campaign_ids:
+        return []
+    return _all(conn, """
+        SELECT d.campaign_id, d.email_hash, d.level, s.name, coalesce(s.email, e.email) AS email
+        FROM unisender_delivery d
+        LEFT JOIN staff s ON s.email_hash = d.email_hash
+        LEFT JOIN email_contacts e ON e.email_hash = d.email_hash
+        WHERE d.campaign_id = ANY (%s) AND d.level >= 1
+        ORDER BY coalesce(s.name, e.email, d.email_hash)
+    """, (campaign_ids,))
+
+
+def staff_people(conn: psycopg.Connection, campaign_ids: list[int]) -> list[dict]:
+    """По каждому сотруднику за месяц: сколько писем сотрудникам получил, открыл, по скольким перешёл; сотрудники из
+    файла, которым письма не приходили, — тоже (received = 0)."""
+    return _all(conn, """
+        WITH d AS (
+            SELECT email_hash, count(*) FILTER (WHERE level >= 1) AS received, count(*) FILTER (WHERE level >= 2) AS opened,
+                   count(*) FILTER (WHERE level >= 3) AS clicked
+            FROM unisender_delivery WHERE campaign_id = ANY (%s) GROUP BY 1
+        ),
+        people AS (
+            SELECT email_hash FROM d UNION SELECT email_hash FROM staff WHERE email_hash IS NOT NULL
+        )
+        SELECT p.email_hash, s.name, coalesce(s.email, e.email) AS email, coalesce(d.received, 0) AS received,
+               coalesce(d.opened, 0) AS opened, coalesce(d.clicked, 0) AS clicked, s.email_hash IS NOT NULL AS in_file
+        FROM people p
+        LEFT JOIN d USING (email_hash)
+        LEFT JOIN (SELECT DISTINCT ON (email_hash) * FROM staff WHERE email_hash IS NOT NULL) s USING (email_hash)
+        LEFT JOIN email_contacts e USING (email_hash)
+        ORDER BY coalesce(d.opened, 0) DESC, coalesce(d.received, 0) DESC, coalesce(s.name, e.email, p.email_hash)
+    """, (campaign_ids,))
+
+
+_ACTIVITY = f"""
+    WITH c AS MATERIALIZED (
+        SELECT c.campaign_id, c.start_time FROM unisender_campaigns c LEFT JOIN unisender_lists l ON l.list_id = c.list_id
+        WHERE c.start_time >= %(m)s AND c.start_time < %(m_end)s AND {MAILING}
+    ),
+    a AS MATERIALIZED (
+        SELECT d.email_hash, count(*) AS received, count(*) FILTER (WHERE d.level >= 2) AS opened,
+               count(*) FILTER (WHERE d.level >= 3) AS clicked,
+               max(c.start_time) FILTER (WHERE d.level >= 2) AS last_open, max(c.start_time) AS last_received
+        FROM unisender_delivery d JOIN c USING (campaign_id)
+        WHERE d.level >= 1 AND d.email_hash NOT IN (SELECT email_hash FROM staff WHERE email_hash IS NOT NULL)
+        GROUP BY 1
+    )
+"""
+
+
+def base_activity_counts(conn: psycopg.Connection, month: date) -> dict:
+    """Получатели рассылок месяца (без сотрудников): сколько открывали хотя бы одно письмо, сколько не открыли ни одного."""
+    return _one(conn, _ACTIVITY + """
+        SELECT count(*) AS received, count(*) FILTER (WHERE opened > 0) AS active,
+               count(*) FILTER (WHERE opened = 0) AS passive, count(*) FILTER (WHERE clicked > 0) AS clicked
+        FROM a
+    """, {"m": month, "m_end": _next_month(month)}) or {"received": 0, "active": 0, "passive": 0, "clicked": 0}
+
+
+def base_activity(conn: psycopg.Connection, month: date, active: bool, limit: int | None = LIST_LIMIT) -> list[dict]:
+    """Список получателей месяца: открывавшие (по числу открытий) или не открывшие ни одного письма (по числу писем),
+    с адресом (если списки включены) и заказами клиента в 1С."""
+    order = "a.opened DESC, a.clicked DESC, a.received DESC" if active else "a.received DESC, a.last_received DESC"
+    return _all(conn, _ACTIVITY + f""",
+        oe AS (
+            SELECT e AS email_hash, count(*) AS orders, sum(o.amount) AS amount, max(o.order_date) AS last_order
+            FROM orders_1c o CROSS JOIN LATERAL unnest(o.email_hashes) e
+            WHERE {NOT_CANCELLED.replace("status", "o.status")} GROUP BY 1
+        )
+        SELECT a.*, e.email, coalesce(oe.orders, 0) AS orders, oe.amount, oe.last_order
+        FROM a LEFT JOIN email_contacts e USING (email_hash) LEFT JOIN oe USING (email_hash)
+        WHERE {"a.opened > 0" if active else "a.opened = 0"}
+        ORDER BY {order}, a.email_hash
+        {"LIMIT %(limit)s" if limit else ""}
+    """, {"m": month, "m_end": _next_month(month), "limit": limit})
+
+
 def _next_month(month: date) -> date:
     return (month.replace(day=1) + timedelta(days=32)).replace(day=1)
 

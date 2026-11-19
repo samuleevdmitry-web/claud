@@ -372,3 +372,76 @@ def test_mailing_items_pivot(client, tmp_path):
     assert "51 840 ₽" in page.replace("\xa0", " ")
     assert "Товары из рассылок купили в 5" in page.replace("\xa0", " ")
     assert "Новые клиенты из лидов с сайта и звонков" in page and "Не связаны с рассылками" in page
+
+
+@needs_db
+def test_recipient_lists(client, tmp_path, monkeypatch):
+    """EMAIL_LISTS=on: кто из сотрудников открыл письма (имена из файла сотрудников), кто из базы открывает, а кто нет."""
+    import openpyxl
+
+    from analytics import privacy
+    from analytics.config import load_settings
+    from analytics.sources.unisender import Delivery, parse_campaign, parse_stats
+    from analytics.sync import import_crm_folder
+
+    monkeypatch.setenv("EMAIL_LISTS", "on")
+    oct_ = date(2026, 10, 1)
+    h = privacy.email_hash
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "users (6)"
+    ws.append(["Сотрудник", "E-Mail", "Мобильный телефон"])
+    for row in (["Иванов Иван", "ivanov@oldos.ru", "+7 900 000-00-01"], ["Петрова Анна", "petrova@oldos.ru", ""],
+                ["Сидоров Олег", "sidorov@oldos.ru", ""], ["Новиков Пётр", "novikov@oldos.ru", ""]):
+        ws.append(row)
+    wb.save(tmp_path / "пользователи битрикс.xlsx")
+    with db.connect(TEST_DATABASE_URL) as conn:
+        sync_metrika(conn, FakeMetrikaClient([], {("month", "total"): [(oct_, [], [1000, 800, 2500, 20.0, 2.5, 150.0], {})]}),
+                     42, frozenset(), "lastsign", since=oct_, until=date(2026, 10, 31), today=date(2026, 11, 2),
+                     log=lambda _: None)
+        logs = []
+        import_crm_folder(conn, tmp_path, log=logs.append, keep_contacts=True)
+        assert any("сотрудники — 4; имена и адреса сохранены" in x for x in logs)
+        campaigns = [parse_campaign({"id": 301, "start_time": "2026-10-05 10:00:00", "list_id": 2, "subject": "Новинки для отдела продаж"}),
+                     parse_campaign({"id": 302, "start_time": "2026-10-06 10:00:00", "list_id": 1, "subject": "Мембраны"})]
+        db.save_unisender(conn, {1: "Оптовики", 2: "Сотрудники"}, campaigns, [parse_stats(c.campaign_id, {}) for c in campaigns])
+        db.save_recipients(conn, 301, [Delivery(h("ivanov@oldos.ru"), "ok_link_visited", 3),
+                                       Delivery(h("petrova@oldos.ru"), "ok_delivered", 1),
+                                       Delivery(h("sidorov@oldos.ru"), "ok_read", 2)], [])
+        clients = [Delivery(h("buyer@x.ru"), "ok_read", 2, "buyer@x.ru"), Delivery(h("sleep@x.ru"), "ok_delivered", 1, "sleep@x.ru"),
+                   Delivery(h("ivanov@oldos.ru"), "ok_read", 2, "ivanov@oldos.ru")]  # сотрудник в базе — не клиент
+        db.save_recipients(conn, 302, clients, [])
+        db.save_email_contacts(conn, [(d.email_hash, d.email) for d in clients])
+        conn.execute("INSERT INTO orders_1c (order_no, order_date, amount, status, email_hashes) VALUES"
+                     " ('А-1', '2026-10-10', 5000, 'Закрыт', %s)", ([h("buyer@x.ru")],))
+        assert load_settings().email_lists
+    page = " ".join(client.get("/email", params={"month": "2026-10"}).text.split())
+    assert "не построен" not in page and "Не всё удалось построить" not in page
+    assert "Открывали хотя бы одно — <strong>2</strong> из 3" in page  # сотрудники: Иванов и Сидоров
+    assert "Петрова Анна" in page and "Иванов Иван · перешёл по ссылке" in page
+    assert "Есть в файле сотрудников, но письма не приходили — 1" in page and "Новиков Пётр" in page
+    assert "buyer@x.ru" in page and "sleep@x.ru" in page and '<details class="list">' in page
+    # база без сотрудников: получили buyer и sleep, открыл только buyer
+    assert "получили 2 адресов (без сотрудников). Открывали хотя бы одно — <strong>1</strong>" in page
+    csv_text = client.get("/email/contacts.csv", params={"month": "2026-10", "kind": "active"}).text
+    assert "buyer@x.ru;1;1;0;06.10.2026;06.10.2026;1;5000;10.10.2026" in csv_text and "ivanov" not in csv_text
+    monkeypatch.setenv("EMAIL_LISTS", "")
+    page = client.get("/email", params={"month": "2026-10"}).text
+    assert "Списки с адресами и именами выключены" in page and "buyer@x.ru" not in page and "Петрова" not in page
+    assert "выключены" in client.get("/email/contacts.csv", params={"month": "2026-10", "kind": "active"}).text
+
+
+def test_staff_file_is_recognised(tmp_path):
+    import openpyxl
+
+    from analytics import privacy
+    from analytics.sources.crm_files import parse_file
+
+    wb = openpyxl.Workbook()
+    wb.active.title = "users (6)"
+    wb.active.append(["Сотрудник", "E-Mail", "Мобильный телефон"])
+    wb.active.append(["Иванов Иван", "Ivanov@Oldos.ru", "+7 900 000-00-01"])
+    wb.save(tmp_path / "u.xlsx")
+    f = parse_file(tmp_path / "u.xlsx")
+    assert f.kind == "staff" and f.staff[0].name == "Иванов Иван"
+    assert f.staff[0].email_hash == privacy.email_hash("ivanov@oldos.ru") and f.staff[0].phone_hash

@@ -146,6 +146,17 @@ def keywords_csv(request: Request, site: int | None = None) -> Response:
                     headers={"Content-Disposition": 'attachment; filename="keywords.csv"'})
 
 
+@app.get("/email/contacts.csv")
+def email_contacts_csv(site: int | None = None, month: str | None = None, kind: str = "active") -> Response:
+    settings = load_settings()
+    with db.connect(settings.database_url) as conn:
+        f = pages.resolve_filters(conn, settings, site, month, None, date.today())
+        body = pages.contacts_csv(conn, settings, f, kind) if f else "\ufeff"
+    name = f"email-{kind}-{f.month:%Y-%m}.csv" if f else "email.csv"
+    return Response(body, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @app.get("/email", response_class=HTMLResponse)
 def email(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
     return render(request, "email", pages.email_page, site, month, aud)

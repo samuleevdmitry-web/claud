@@ -229,4 +229,97 @@
 </div>
 {% endguard %}
 {% endif %}
+{% if lists %}
+<h2>Кто читает рассылки — {{ f.month|month|lower }}</h2>
+{% if not email_lists %}
+<div class="card muted">Списки с адресами и именами выключены: в базе дашборда только отпечатки адресов, поэтому ниже —
+  только количество. Чтобы видеть, кто именно открывает письма, добавьте в <code>.env</code> строку
+  <code>EMAIL_LISTS=on</code>, пересоберите (<code>docker compose up -d --build</code>) и загрузите UniSender
+  (<code>docker compose exec collector python -m analytics sync-unisender</code>). Адреса получателей и имена сотрудников
+  будут храниться в базе дашборда на этом компьютере.</div>
+{% endif %}
+
+{% guard "Активность базы" %}
+<div class="card">
+  <div class="chart-title">База: кто открывает письма</div>
+  {% set b = lists.base %}
+  <p>Письма рассылок за месяц получили {{ b.received|int }} адресов (без сотрудников). Открывали хотя бы одно —
+    <strong>{{ b.active|int }}</strong>{% if b.received %} ({{ (100.0 * b.active / b.received)|pct }}){% endif %}, из них
+    переходили по ссылкам — {{ b.clicked|int }}. Получали, но не открыли ни одного — <strong>{{ b.passive|int }}</strong>.</p>
+  {% if email_lists %}
+  {% for kind, rows, total, title in [('active', lists.active, b.active, 'Открывают письма'),
+                                       ('passive', lists.passive, b.passive, 'Получают, но не открывают')] %}
+  <details class="list">
+    <summary>{{ title }} — {{ total|int }}{% if total > lists.limit %} (показаны первые {{ lists.limit }}){% endif %}</summary>
+    {% if rows %}
+    <div class="table-card">
+    <table>
+      <thead><tr><th>Адрес</th><th class="num">Писем</th><th class="num">Открыто</th><th class="num">Переходов</th>
+        <th class="num">{{ 'Последнее открытие' if kind == 'active' else 'Последнее письмо' }}</th>
+        <th class="num">Заказов в 1С</th><th class="num">Сумма, ₽</th><th class="num">Последний заказ</th></tr></thead>
+      <tbody>{% for x in rows %}
+        <tr><td class="label">{{ x.email or 'адрес не сохранён' }}</td><td class="num">{{ x.received|int }}</td>
+            <td class="num">{{ x.opened|int }}</td><td class="num">{{ x.clicked|int }}</td>
+            <td class="num">{{ (x.last_open if kind == 'active' else x.last_received).strftime('%d.%m') }}</td>
+            <td class="num">{{ x.orders|int if x.orders else '—' }}</td><td class="num">{{ x.amount|int if x.amount else '—' }}</td>
+            <td class="num">{{ x.last_order.strftime('%d.%m.%Y') if x.last_order else '—' }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    </div>
+    <p class="note"><a href="/email/contacts.csv{{ f.query(kind=kind) }}">Скачать весь список (CSV)</a></p>
+    {% else %}<p class="muted">Таких адресов нет.</p>{% endif %}
+  </details>
+  {% endfor %}
+  <p class="note">«Адрес не сохранён» — письмо получено до того, как включили списки; адрес появится после следующей
+    загрузки UniSender. Заказы — по адресу из выгрузок 1С.</p>
+  {% endif %}
+</div>
+{% endguard %}
+
+{% guard "Рассылки сотрудникам" %}
+<div class="card">
+  <div class="chart-title">Сотрудники: кто читает рассылки</div>
+  {% set people = lists.staff_readers|length + lists.staff_silent|length %}
+  {% if not lists.staff_campaigns and not lists.staff_missing %}
+  <p class="muted">Писем по списку «Сотрудники» в этом месяце не было (или для них ещё нет отчёта о доставке).
+    Имена берутся из файла сотрудников в папке <code>imports</code> (колонки «Сотрудник», «E-Mail»).</p>
+  {% else %}
+  <p>Писем сотрудникам за месяц — {{ lists.staff_campaigns|length }}. Открывали хотя бы одно —
+    <strong>{{ lists.staff_readers|length }}</strong> из {{ people }}, получали, но не открыли ни одного —
+    <strong>{{ lists.staff_silent|length }}</strong>{% if lists.staff_missing %}; есть в файле сотрудников, но письма им не
+    приходили — {{ lists.staff_missing|length }}{% endif %}.</p>
+  {% if email_lists %}
+  {% for title, rows in [('Открывают', lists.staff_readers), ('Не открывают', lists.staff_silent),
+                         ('Есть в файле сотрудников, но письма не приходили', lists.staff_missing)] %}{% if rows %}
+  <details class="list">
+    <summary>{{ title }} — {{ rows|length }}</summary>
+    <table>
+      <thead><tr><th>Сотрудник</th><th>Адрес</th><th class="num">Писем</th><th class="num">Открыто</th>
+        <th class="num">Переходов</th></tr></thead>
+      <tbody>{% for x in rows %}
+        <tr><td>{{ x.name or '—' }}</td><td class="muted">{{ x.email or 'адрес не сохранён' }}</td>
+            <td class="num">{{ x.received|int }}</td><td class="num">{{ x.opened|int }}</td><td class="num">{{ x.clicked|int }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </details>
+  {% endif %}{% endfor %}
+  {% for c in lists.staff_campaigns %}
+  <details class="list">
+    <summary>{{ c.start_time.strftime('%d.%m') }} · {{ c.subject or c.campaign_id }} — открыли {{ c.readers|length }}
+      из {{ (c.readers|length) + (c.silent|length) }}</summary>
+    <div class="grid-2 people">
+      <div><strong>Открыли</strong>
+        <ul>{% for x in c.readers %}<li>{{ x.name or x.email or 'адрес не сохранён' }}{% if x.level >= 3 %} · перешёл по ссылке{% endif %}</li>{% else %}<li class="muted">никто</li>{% endfor %}</ul></div>
+      <div><strong>Не открыли</strong>
+        <ul>{% for x in c.silent %}<li>{{ x.name or x.email or 'адрес не сохранён' }}</li>{% else %}<li class="muted">все открыли</li>{% endfor %}</ul></div>
+    </div>
+  </details>
+  {% endfor %}
+  <p class="note"><a href="/email/contacts.csv{{ f.query(kind='staff') }}">Скачать список сотрудников (CSV)</a>.
+    Имена — из файла сотрудников в папке <code>imports</code>; кого нет в файле, показан адресом.</p>
+  {% endif %}
+  {% endif %}
+</div>
+{% endguard %}
+{% endif %}
 {% endblock %}
