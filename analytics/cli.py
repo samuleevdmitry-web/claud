@@ -24,7 +24,7 @@ from analytics.sources.unisender import UnisenderClient, UnisenderError
 from analytics.sources.semantics import download as semantics_download
 from analytics.sources.webmaster import WebmasterClient, WebmasterError, parse_search_history
 from analytics.sources.wordstat import WordstatClient, WordstatError
-from analytics.trace import trace_email
+from analytics.trace import trace_client, trace_email
 from analytics.sync import import_crm_folder, sync_metrika, sync_rabbit, sync_unisender, sync_webmaster, sync_wordstat
 
 # Сколько последних дней перезагружать при плановом сборе: неделя и запас. Вебмастер отдаёт данные с задержкой
@@ -119,6 +119,13 @@ def check_unisender(settings: Settings) -> None:
     client = UnisenderClient(settings.unisender_api_key)
     lists = client.lists()
     print(f"Списков: {len(lists)} — " + ", ".join(f"{t} ({i})" for i, t in list(lists.items())[:5]))
+    try:
+        names = [str(x.get("name")) for x in client.fields()]
+        phones = [n for n in names if unisender.is_phone_field(n)]
+        print("Поля контактов: " + (", ".join(names) or "только системные")
+              + (f"; телефоны берутся из: {', '.join(phones)}" if phones else ""))
+    except UnisenderError as exc:
+        print(f"Поля контактов: не получены — {exc}")
     campaigns = client.campaigns(date.today() - timedelta(days=30), date.today())
     print(f"Рассылок за 30 дней: {len(campaigns)}")
     if campaigns:
@@ -436,6 +443,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("schedule", help="сбор по расписанию в бесконечном цикле (для Docker)")
     imp = sub.add_parser("import-crm", help="загрузить новые выгрузки Битрикс24 и 1С (*.xlsx, *.xls) из папки imports")
     imp.add_argument("--again", action="store_true", help="перечитать все файлы папки заново (например, после смены DATA_SALT)")
+    tc = sub.add_parser("trace-client", help="проверить клиента по названию: почта и телефон в 1С, база UniSender, заказы")
+    tc.add_argument("name", help="часть названия клиента из 1С, например «Карагод»")
+    tc.add_argument("--month", help="месяц ГГГГ-ММ (по умолчанию — прошлый)")
     tr = sub.add_parser("trace-email", help="проверить один адрес: база UniSender, письма, заказы 1С, строка таблицы")
     tr.add_argument("email", help="адрес почты клиента")
     tr.add_argument("--month", help="месяц ГГГГ-ММ (по умолчанию — прошлый)")
@@ -482,6 +492,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "report":
             month = date.fromisoformat(args.month + "-01") if args.month else previous_month(date.today())
             return 0 if make_reports(settings, month, date.today()) else 1
+        if args.command == "trace-client":
+            month = date.fromisoformat(args.month + "-01") if args.month else previous_month(date.today())
+            with db.connect(settings.database_url) as conn:
+                db.apply_schema(conn)
+                return 0 if trace_client(conn, args.name, month) else 1
         if args.command == "trace-email":
             month = date.fromisoformat(args.month + "-01") if args.month else previous_month(date.today())
             with db.connect(settings.database_url) as conn:

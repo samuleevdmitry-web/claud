@@ -393,7 +393,13 @@ def sync_unisender(conn: psycopg.Connection, client, since: date, until: date,
     log(f"  unisender: списков {len(lists)}, рассылок {len(campaigns)} ({since}…{until}), статистика {len(stats)}")
     if base:
         log("  unisender: выгружаю базу контактов (UniSender готовит файл, бывает несколько минут)…")
-        contacts = client.export_contacts(keep_emails=True) if keep_emails else client.export_contacts()
+        extra = client.phone_fields() if hasattr(client, "phone_fields") else []
+        if extra:
+            log(f"  unisender: телефоны берутся и из полей {', '.join(extra)}")
+        kwargs = {"keep_emails": True} if keep_emails else {}
+        if extra:
+            kwargs["extra_fields"] = extra
+        contacts = client.export_contacts(**kwargs)
         loaded += db.replace_email_base(conn, contacts)
         if keep_emails:
             db.save_email_contacts(conn, [(c.email_hash, c.email) for c in contacts])

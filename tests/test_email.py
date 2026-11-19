@@ -268,7 +268,7 @@ def test_trace_email_follows_one_address(tmp_path, monkeypatch):
 
     from analytics.sources.unisender import Contact, Delivery, parse_campaign
     from analytics.sync import import_crm_folder
-    from analytics.trace import trace_email
+    from analytics.trace import trace_client, trace_email
 
     oct_ = date(2026, 10, 1)
     with db.connect(TEST_DATABASE_URL) as conn:
@@ -304,6 +304,14 @@ def test_trace_email_follows_one_address(tmp_path, monkeypatch):
         assert "АТЦБ-026900 20.10.2026 15 000 ₽ Закрыт Карагод ИП — в таблице: «Открыли письмо за 14 дней до заказа" in text
         assert "расхождений" in text and "всё сходится" in text
 
+        # проверка по названию клиента: какие почта и телефон в 1С и есть ли они в базе
+        out.clear()
+        assert len(trace_client(conn, "карагод", oct_, log=out.append)) == 2
+        text = "\n".join(out)
+        assert "АТЦБ-026900 20.10.2026 15 000 ₽ Закрыт Карагод ИП — в таблице за 10.2026: «Открыли письмо" in text
+        assert "почта ryba-aist@inbox.ru — есть в базе UniSender" in text and "почты в выгрузке нет" in text
+        assert "телефон +79001112233 — в базе UniSender телефонов нет" in text
+
         # соль поменяли после загрузки UniSender: отпечатки базы больше не совпадают — trace это находит
         monkeypatch.setenv("DATA_SALT", "другая-соль")
         out.clear()
@@ -311,3 +319,14 @@ def test_trace_email_follows_one_address(tmp_path, monkeypatch):
         text = "\n".join(out)
         assert not result["in_base"] and "под другим отпечатком" in text and "другой солью" in text
         assert "соль менялась" in text
+
+
+def test_phone_from_custom_field():
+    """Системное поле phone пустое, номер — в пользовательском поле «Телефон»: берётся оттуда."""
+    from analytics.sources.unisender import is_phone_field
+    contacts = parse_contacts("email,email_status,email_list_ids,phone,Телефон\n"
+                              "a@b.ru,active,1,,+7 (917) 470-64-44\n")
+    assert contacts[0].phone_hash == privacy.phone_hash("9174706444")
+    assert is_phone_field("Телефон") and is_phone_field("Mobile phone") and not is_phone_field("phone")
+    session = FakeSession([ok([{"id": 1, "name": "Name", "type": "string"}, {"id": 2, "name": "Телефон", "type": "string"}])])
+    assert UnisenderClient("key", session=session, backoff=0, pause=0, limit_wait=0).phone_fields() == ["Телефон"]

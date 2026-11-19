@@ -129,8 +129,22 @@ class UnisenderClient:
     def stats(self, campaign_id: int) -> CampaignStats:
         return parse_stats(campaign_id, self.call("getCampaignCommonStats", campaign_id=campaign_id) or {})
 
-    def export_contacts(self, wait: float = 15.0, timeout: float = 1800.0, keep_emails: bool = False) -> list[Contact]:
-        params = {f"field_names[{i}]": name for i, name in enumerate(EXPORT_FIELDS)}
+    def fields(self) -> list[dict]:
+        """Пользовательские поля контактов (getFields): название и тип."""
+        return [x for x in self.call("getFields") or [] if isinstance(x, dict)]
+
+    def phone_fields(self) -> list[str]:
+        """Пользовательские поля, похожие на телефон: в системном поле phone у базы может быть пусто, а номера —
+        в своём поле вроде «Телефон»."""
+        try:
+            return [x["name"] for x in self.fields() if x.get("name") and is_phone_field(str(x["name"]))]
+        except (UnisenderError, KeyError, TypeError):
+            return []
+
+    def export_contacts(self, wait: float = 15.0, timeout: float = 1800.0, keep_emails: bool = False,
+                        extra_fields: list[str] | None = None) -> list[Contact]:
+        names = EXPORT_FIELDS + [f for f in extra_fields or [] if f not in EXPORT_FIELDS]
+        params = {f"field_names[{i}]": name for i, name in enumerate(names)}
         result = self._task("async/exportContacts", "выгрузка базы", wait, timeout, **params)
         return parse_contacts(self._download(result.get("file_to_download") or ""), keep_emails)
 
@@ -285,6 +299,11 @@ def extract_links(html: str) -> list[Link]:
     return out
 
 
+def is_phone_field(name: str) -> bool:
+    n = name.strip().lower()
+    return any(w in n for w in ("phone", "телефон", "мобил", "tel")) and n != "phone"
+
+
 def parse_contacts(text: str, keep_emails: bool = False) -> list[Contact]:
     """CSV выгрузки базы → отпечатки. Сами адреса и телефоны дальше этой функции не уходят, кроме адреса при
     keep_emails (списки получателей включены)."""
@@ -294,7 +313,9 @@ def parse_contacts(text: str, keep_emails: bool = False) -> list[Contact]:
     out = []
     for row in csv.DictReader(io.StringIO(text), delimiter=delimiter):
         row = {(k or "").strip().lower(): v for k, v in row.items()}
-        email, phone = row.get("email"), row.get("phone")
+        email = row.get("email")
+        # телефон — системное поле phone, а если оно пустое — пользовательское поле с телефоном
+        phone = row.get("phone") or next((v for k, v in row.items() if v and is_phone_field(k)), None)
         if not email and not phone:
             continue
         lists = tuple(_int(x) for x in str(row.get("email_list_ids") or "").replace(";", ",").split(",") if _int(x))

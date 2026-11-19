@@ -93,3 +93,47 @@ def trace_email(conn: psycopg.Connection, email: str, month: date, log: Callable
             f"заказы 1С — {check['bad_orders']} из {check['orders']}"
             + (" — соль менялась, нужна перезагрузка" if check["bad_contacts"] or check["bad_orders"] else " — всё сходится"))
     return {"hash": h, "in_base": bool(base), "letters": letters, "orders": orders, "classes": where, "check": check}
+
+
+def _order_classes(conn: psycopg.Connection, month: date) -> dict[str, str]:
+    rows = q.mail_orders(conn, month)
+    ids = sorted({t["campaign_id"] for o in rows for t in o["touches"]})
+    stats = ins.mail_orders_stats(rows, q.mail_campaigns(conn, ids), [], None, None)
+    return {no: c["key"] for c in stats["classes"] for no in c.get("order_nos", [])}
+
+
+def trace_client(conn: psycopg.Connection, name: str, month: date, log: Callable[[str], None] = print) -> list:
+    """Клиент по части названия из 1С: какие почта и телефоны у его заказов, есть ли они в базе UniSender и в отчётах
+    о доставке, в какую строку таблицы попал каждый заказ месяца. Названия и контакты есть только при EMAIL_LISTS=on."""
+    if not conn.execute("SELECT 1 FROM orders_1c WHERE client_name IS NOT NULL LIMIT 1").fetchone():
+        log("Названия клиентов из 1С не сохранены: нужна строка EMAIL_LISTS=on в .env (и пересборка) — выгрузки "
+            "перечитаются с контактами. Пока можно проверить по адресу: trace-email адрес@почта")
+        return []
+    orders = conn.execute("""
+        SELECT order_no, order_date, amount, status, client_name, emails, phones
+        FROM orders_1c WHERE client_name ILIKE %s ORDER BY client_name, order_date
+    """, (f"%{name.strip()}%",)).fetchall()
+    if not orders:
+        log(f"Клиентов с «{name}» в названии в выгрузках 1С нет")
+        return []
+    base_emails = {h for (h,) in conn.execute("SELECT email_hash FROM email_base WHERE email_hash IS NOT NULL")}
+    base_phones = {h for (h,) in conn.execute("SELECT phone_hash FROM email_base WHERE phone_hash IS NOT NULL")}
+    sent = {h for (h,) in conn.execute("SELECT DISTINCT email_hash FROM unisender_delivery")}
+    where = _order_classes(conn, month) if any(month <= o[1] < q._next_month(month) for o in orders) else {}
+    log(f"Заказы 1С клиентов с «{name}» в названии: {len(orders)}")
+    for no, day, amount, status, client, emails, phones in orders:
+        line = f"  {no} {day:%d.%m.%Y} {amount:,.0f} ₽ {status or ''} {client}".replace(",", " ")
+        if no in where:
+            line += f" — в таблице за {month:%m.%Y}: «{CLASS_TITLES.get(where[no], where[no])}»"
+        log(line)
+        for e in emails or []:
+            h = privacy.email_hash(e)
+            state = "есть в базе UniSender" if h in base_emails else "письма получал" if h in sent else "нет в базе UniSender"
+            log(f"      почта {e} — {state}")
+        if not emails:
+            log("      почты в выгрузке нет")
+        for p in phones or []:
+            state = "есть в базе UniSender" if privacy.phone_hash(p) in base_phones else (
+                "в базе UniSender телефонов нет" if not base_phones else "нет в базе UniSender")
+            log(f"      телефон +7{p} — {state}")
+    return orders
