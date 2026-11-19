@@ -260,15 +260,21 @@ def mark_backfilled(conn: psycopg.Connection, counter_id: int, reports: set[str]
                         [(counter_id, r) for r in sorted(reports)])
 
 
-def imported_files(conn: psycopg.Connection, version: int = 1, reread_kinds: tuple[str, ...] = ()) -> set[str]:
+CONTACT_KINDS = ["orders", "staff", "staff_hidden"]  # файлы, в которых есть имена и контакты для списков
+
+
+def imported_files(conn: psycopg.Connection, version: int = 1, need_contacts: bool = False) -> set[str]:
     """Файлы, уже разобранные этой версией разбора (и нераспознанные ею): новая версия разбирает их заново.
-    reread_kinds — виды файлов, которые нужно разобрать заново (список сотрудников без имён, когда списки включили)."""
+    need_contacts (списки включили): заказы и сотрудники, разобранные без имён и контактов, разбираются заново."""
     return {sha for (sha,) in conn.execute(
-        "SELECT sha256 FROM crm_imports WHERE parser_version >= %s AND NOT (kind = ANY (%s))", (version, list(reread_kinds)))}
+        "SELECT sha256 FROM crm_imports WHERE parser_version >= %s AND NOT (%s AND kind = ANY (%s) AND NOT contacts)",
+        (version, need_contacts, CONTACT_KINDS))}
 
 
-def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, version: int = 1) -> int:
-    """Заменяет данные месяца этого вида выгрузки содержимым файла; повторная выгрузка за месяц — новая версия."""
+def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, version: int = 1,
+                  keep_contacts: bool = False) -> int:
+    """Заменяет данные месяца этого вида выгрузки содержимым файла; повторная выгрузка за месяц — новая версия.
+    keep_contacts (EMAIL_LISTS=on) — сохранить у заказов название клиента, адреса и номера (для списков клиентов)."""
     month, kind = parsed.month, parsed.kind
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("DELETE FROM crm_summary WHERE month = %s AND kind = %s", (month, kind))
@@ -281,7 +287,7 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
             totals = parsed.totals
             cur.executemany(
                 "INSERT INTO orders_1c (order_no, order_date, amount, status, client_hash, email_hashes, phone_hashes,"
-                " items, groups) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                " items, groups, client_name, emails, phones) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                 " ON CONFLICT (order_no) DO UPDATE SET order_date = EXCLUDED.order_date,"
                 " amount = CASE WHEN EXCLUDED.amount > 0 AND (%s OR orders_1c.amount = 0) THEN EXCLUDED.amount"
                 "  ELSE orders_1c.amount END,"
@@ -292,9 +298,14 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
                 " phone_hashes = CASE WHEN cardinality(EXCLUDED.phone_hashes) > 0 THEN EXCLUDED.phone_hashes"
                 "  ELSE orders_1c.phone_hashes END,"
                 " items = CASE WHEN cardinality(EXCLUDED.items) > 0 THEN EXCLUDED.items ELSE orders_1c.items END,"
-                " groups = CASE WHEN cardinality(EXCLUDED.groups) > 0 THEN EXCLUDED.groups ELSE orders_1c.groups END",
+                " groups = CASE WHEN cardinality(EXCLUDED.groups) > 0 THEN EXCLUDED.groups ELSE orders_1c.groups END,"
+                " client_name = coalesce(EXCLUDED.client_name, orders_1c.client_name),"
+                " emails = CASE WHEN cardinality(EXCLUDED.emails) > 0 THEN EXCLUDED.emails ELSE orders_1c.emails END,"
+                " phones = CASE WHEN cardinality(EXCLUDED.phones) > 0 THEN EXCLUDED.phones ELSE orders_1c.phones END",
                 [(o.order_no, o.order_date, o.amount, o.status, o.client_hash, list(o.email_hashes),
-                  list(o.phone_hashes), list(o.items), list(o.groups), totals) for o in parsed.orders],
+                  list(o.phone_hashes), list(o.items), list(o.groups),
+                  o.client_name if keep_contacts else None, list(o.emails) if keep_contacts else [],
+                  list(o.phones) if keep_contacts else [], totals) for o in parsed.orders],
             )
         if kind in ("orders", "mailing_items"):
             # позиции заказов: выгрузка заменяет позиции своих заказов целиком
@@ -350,10 +361,10 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
                  for x in parsed.call_orders],
             )
         cur.execute(
-            "INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded, parser_version)"
-            " VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (sha256) DO UPDATE SET imported_at = now(),"
-            " rows_loaded = EXCLUDED.rows_loaded, parser_version = EXCLUDED.parser_version",
-            (sha, file_name, kind, month, parsed.rows, version),
+            "INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded, parser_version, contacts)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (sha256) DO UPDATE SET imported_at = now(),"
+            " rows_loaded = EXCLUDED.rows_loaded, parser_version = EXCLUDED.parser_version, contacts = EXCLUDED.contacts",
+            (sha, file_name, kind, month, parsed.rows, version, keep_contacts),
         )
     return parsed.rows
 
@@ -453,10 +464,13 @@ def save_email_contacts(conn: psycopg.Connection, pairs: list[tuple[str, str]]) 
 
 
 def purge_email_contacts(conn: psycopg.Connection) -> None:
-    """EMAIL_LISTS выключили: стереть адреса и имена, оставить отпечатки."""
+    """EMAIL_LISTS выключили: стереть адреса, имена и номера, оставить отпечатки."""
     with conn.transaction():
         conn.execute("DELETE FROM email_contacts")
         conn.execute("UPDATE staff SET name = NULL, email = NULL WHERE name IS NOT NULL OR email IS NOT NULL")
+        conn.execute("UPDATE orders_1c SET client_name = NULL, emails = '{}', phones = '{}'"
+                     " WHERE client_name IS NOT NULL OR cardinality(emails) > 0 OR cardinality(phones) > 0")
+        conn.execute("UPDATE crm_imports SET contacts = false WHERE contacts")
 
 
 def replace_staff(conn: psycopg.Connection, members: list, keep: bool) -> int:

@@ -292,8 +292,11 @@ IMPORT_LOCK = 4207732
 
 
 def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], None], keep_contacts: bool = False) -> list:
-    # список сотрудников, разобранный без имён, перечитывается, когда списки получателей включили
-    done = db.imported_files(conn, crm_files.PARSER_VERSION, ("staff_hidden",) if keep_contacts else ())
+    # заказы и сотрудники, разобранные без имён и контактов, перечитываются, когда списки включили;
+    # списки выключили — имена и контакты стираются (отпечатки остаются)
+    if not keep_contacts:
+        db.purge_email_contacts(conn)
+    done = db.imported_files(conn, crm_files.PARSER_VERSION, keep_contacts)
     out = []
     for path in sorted(x for x in folder.iterdir() if x.suffix.lower() in excel.EXTENSIONS):
         if path.name.startswith("~$"):
@@ -317,7 +320,7 @@ def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], 
         if parsed.kind == "staff":
             db.replace_staff(conn, parsed.staff, keep_contacts)
             parsed.kind = "staff" if keep_contacts else "staff_hidden"
-            db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION)
+            db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION, keep_contacts)
             note = ("имена и адреса сохранены для списков" if keep_contacts
                     else "сохранены только отпечатки; имена и адреса — при EMAIL_LISTS=on в .env")
             _report(conn, sha, path.name, "\n".join([f"сотрудники — {len(parsed.staff)}; {note}"] + parsed.sheets_info), log)
@@ -327,7 +330,7 @@ def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], 
         if parsed.orders:  # сколько заказов уже есть из других выгрузок — до того, как этот файл их дополнит
             known = conn.execute("SELECT count(*) FROM orders_1c WHERE order_no = ANY (%s)",
                                  ([o.order_no for o in parsed.orders],)).fetchone()[0]
-        rows = db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION)
+        rows = db.save_crm_file(conn, sha, path.name, parsed, crm_files.PARSER_VERSION, keep_contacts)
         text = (orders_summary(parsed, known) if parsed.kind in ("orders", "mailing_items")
                 else f"{crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк")
         _report(conn, sha, path.name, text, log)

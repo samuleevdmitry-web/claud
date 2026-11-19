@@ -1306,6 +1306,7 @@ def mail_orders_stats(orders: list[dict], campaigns: dict[int, dict], lift_rows:
         amount = float(o["amount"] or 0)
         classes[cls]["orders"] += 1
         classes[cls]["amount"] += amount
+        classes[cls].setdefault("order_nos", []).append(o["order_no"])
         if cls in MAIL_CLASSES:
             cid = best[2]["campaign_id"]
             agg = campaign_orders.setdefault(cid, {"orders": 0, "amount": 0.0, "topic": 0, "topic_amount": 0.0})

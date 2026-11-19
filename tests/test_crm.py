@@ -186,7 +186,10 @@ def test_orders_export_by_lines(tmp_path):
     assert a.items == ("Мембрана 3-слойная", "Флис 280") and a.groups == ("Мембранные ткани", "Флис")
     assert a.email_hashes == (privacy.email_hash("ivanov@mail.ru"),) and a.phone_hashes == (privacy.phone_hash("9174706444"),)
     assert a.client_hash == privacy.fingerprint("client", "ип иванов") and b.amount == 9000.0
-    assert "Иванов" not in repr(f.orders) and "ivanov" not in repr(f.orders).lower()
+    hashed = repr([(o.client_hash, o.email_hashes, o.phone_hashes) for o in f.orders])
+    assert "Иванов" not in hashed and "ivanov" not in hashed.lower()
+    # сами название и контакты — в памяти; в базу они попадают только при EMAIL_LISTS=on
+    assert (a.client_name, a.emails, a.phones) == ("ИП Иванов", ("ivanov@mail.ru",), ("9174706444",))
 
 
 def test_orders_export_documents_with_title_rows(tmp_path):
@@ -311,3 +314,26 @@ def test_order_exports_complement_each_other(tmp_path):
         assert files["b_lines.xlsx"].startswith("заказы 1С — 1 заказов (2 строк)")
         assert "номенклатура ← «Номенклатура»" in files["b_lines.xlsx"]
         assert "не связать" not in files["b_lines.xlsx"] and "совпало 1 из 1" in files["b_lines.xlsx"]
+
+
+@needs_db
+def test_order_contacts_follow_email_lists(tmp_path):
+    """Без EMAIL_LISTS у заказов только отпечатки; включили — файл перечитывается с контактами; выключили — стираются."""
+    with db.connect(TEST_DATABASE_URL) as conn:
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        db.apply_schema(conn)
+        sheet_file(tmp_path / "orders.xlsx", [["Номер", "Дата", "Сумма", "Клиент", "Email", "Телефон"],
+                                              ["А-1", "05.10.2026", 100, "ООО Ромашка", "a@b.ru", "8 917 470 64 44"]])
+        def stored():
+            return conn.execute("SELECT client_name, emails, phones FROM orders_1c").fetchone()
+
+        import_crm_folder(conn, tmp_path, log=lambda _: None)
+        assert stored() == (None, [], [])
+        logs = []
+        import_crm_folder(conn, tmp_path, log=logs.append, keep_contacts=True)
+        assert logs and stored() == ("ООО Ромашка", ["a@b.ru"], ["9174706444"])
+        logs.clear()
+        import_crm_folder(conn, tmp_path, log=logs.append, keep_contacts=True)
+        assert logs == []  # уже с контактами — не перечитывается
+        import_crm_folder(conn, tmp_path, log=lambda _: None)
+        assert stored() == (None, [], [])

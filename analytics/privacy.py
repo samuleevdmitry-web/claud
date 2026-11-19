@@ -62,8 +62,8 @@ def email_hashes(value) -> list[str]:
     return [fingerprint("email", e) for e in emails(value)]
 
 
-def phone_hashes(value) -> list[str]:
-    """Отпечатки всех номеров ячейки: «+7 (917) 470-64-44, 8 999 000-11-22», «т.=(3452) 12-34-56 доб. 12»,
+def phones(value) -> list[str]:
+    """Все номера ячейки в едином виде (10 цифр): «+7 (917) 470-64-44, 8 999 000-11-22», «т.=(3452) 12-34-56 доб. 12»,
     два номера через пробел. Городские номера без кода (меньше 10 цифр) не берутся — их не сравнить."""
     out = []
     for run in _PHONE_RUN.findall(str(value or "")):
@@ -75,10 +75,15 @@ def phone_hashes(value) -> list[str]:
             if not candidates and len(digits) % 2 == 0:
                 candidates = [digits[:len(digits) // 2], digits[len(digits) // 2:]]
         for d in candidates:
-            h = phone_hash(d)
-            if h and h not in out:
-                out.append(h)
+            n = norm_phone(d)
+            if n and n not in out:
+                out.append(n)
     return out
+
+
+def phone_hashes(value) -> list[str]:
+    """Отпечатки всех номеров ячейки (см. phones)."""
+    return [fingerprint("phone", n) for n in phones(value)]
 
 
 def phone_hash(value) -> str | None:

@@ -15,3 +15,10 @@ CREATE TABLE IF NOT EXISTS staff (
     email      text   -- только при EMAIL_LISTS=on
 );
 CREATE INDEX IF NOT EXISTS staff_email ON staff (email_hash);
+
+-- Клиенты из выгрузок 1С для списка «нет в базе рассылок»: название, адреса и номера — только при EMAIL_LISTS=on.
+ALTER TABLE orders_1c ADD COLUMN IF NOT EXISTS client_name text;
+ALTER TABLE orders_1c ADD COLUMN IF NOT EXISTS emails text[] NOT NULL DEFAULT '{}';
+ALTER TABLE orders_1c ADD COLUMN IF NOT EXISTS phones text[] NOT NULL DEFAULT '{}';
+-- Файл разобран с сохранением контактов (EMAIL_LISTS=on): если списки включат позже, файл перечитается.
+ALTER TABLE crm_imports ADD COLUMN IF NOT EXISTS contacts boolean NOT NULL DEFAULT false;

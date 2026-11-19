@@ -95,6 +95,10 @@ class Order:
     phone_hashes: tuple[str, ...] = ()
     items: tuple[str, ...] = ()   # номенклатура
     groups: tuple[str, ...] = ()  # группы номенклатуры
+    # Сами название клиента, адреса и номера — в базу попадают только при EMAIL_LISTS=on (списки клиентов).
+    client_name: str | None = None
+    emails: tuple[str, ...] = ()
+    phones: tuple[str, ...] = ()
 
 
 @dataclass
@@ -498,7 +502,8 @@ def _parse_order_sheet(rows: list[tuple], header_row: int, cols: dict[str, int])
             continue  # строка «Итого», подзаголовок или пустая
         count += 1
         o = acc.setdefault(no, {"date": when.date(), "amounts": [], "lines": 0.0, "status": None, "client": None,
-                                "emails": [], "phones": [], "items": [], "groups": []})
+                                "emails": [], "phones": [], "items": [], "groups": [], "name": None,
+                                "plain_emails": [], "plain_phones": []})
         line_value = 0.0
         for key in ("amount", "line_amount"):
             if key in cols:
@@ -513,10 +518,15 @@ def _parse_order_sheet(rows: list[tuple], header_row: int, cols: dict[str, int])
                     line_value = value
         o["status"] = _text(cell(row, "status")) or o["status"]
         o["client"] = o["client"] or privacy.fingerprint("client", _client_key(cell(row, "client")))
+        o["name"] = o["name"] or (_text(cell(row, "client")) or "")[:200] or None
         for i in email_cols:
-            o["emails"] += [h for h in privacy.email_hashes(row[i] if i < len(row) else None) if h not in o["emails"]]
+            value = row[i] if i < len(row) else None
+            o["emails"] += [h for h in privacy.email_hashes(value) if h not in o["emails"]]
+            o["plain_emails"] += [e for e in privacy.emails(value) if e not in o["plain_emails"]]
         for i in phone_cols:
-            o["phones"] += [h for h in privacy.phone_hashes(row[i] if i < len(row) else None) if h not in o["phones"]]
+            value = row[i] if i < len(row) else None
+            o["phones"] += [h for h in privacy.phone_hashes(value) if h not in o["phones"]]
+            o["plain_phones"] += [n for n in privacy.phones(value) if n not in o["plain_phones"]]
         for key, out in (("item", "items"), ("group", "groups")):
             t = _text(cell(row, key))
             if t and t not in o[out]:
@@ -545,7 +555,8 @@ def _parse_order_sheet(rows: list[tuple], header_row: int, cols: dict[str, int])
         return sum(amounts) if "item" in cols and len(set(amounts)) > 1 else max(amounts)
 
     orders = {no: Order(no, o["date"], total(o), o["status"], o["client"], tuple(o["emails"]), tuple(o["phones"]),
-                        tuple(o["items"]), tuple(o["groups"]))
+                        tuple(o["items"]), tuple(o["groups"]), o["name"], tuple(o["plain_emails"]),
+                        tuple(o["plain_phones"]))
               for no, o in acc.items()}
     return {"orders": orders, "lines": lines, "mailing_items": mailing_items, "count": count,
             "totals": "item" not in cols, "columns": _names(rows, header_row, cols), "cols": cols}
@@ -613,7 +624,9 @@ def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
                                was.client_hash or o.client_hash,
                                tuple(dict.fromkeys(was.email_hashes + o.email_hashes)),
                                tuple(dict.fromkeys(was.phone_hashes + o.phone_hashes)),
-                               tuple(dict.fromkeys(was.items + o.items)), tuple(dict.fromkeys(was.groups + o.groups)))
+                               tuple(dict.fromkeys(was.items + o.items)), tuple(dict.fromkeys(was.groups + o.groups)),
+                               was.client_name or o.client_name, tuple(dict.fromkeys(was.emails + o.emails)),
+                               tuple(dict.fromkeys(was.phones + o.phones)))
     lines: list[OrderLine] = []
     by_order: dict[str, list[OrderLine]] = {}
     for part in parts:

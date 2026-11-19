@@ -171,6 +171,33 @@
     можно приписать рассылкам, остальные открывшие заказали бы и так.{% endif %}</p>
   {% endif %}
   <p class="note">Новые клиенты — заказы, найденные по выгрузкам лидов с сайта и звонков (раздел «Продажи»).</p>
+  {% set oc = mail.outside_clients %}
+  {% if oc and oc.clients %}
+  <details class="list">
+    <summary>Клиенты, которых нет в базе рассылок — {{ oc.clients|int }}, с почтой — {{ oc.with_email|int }}{% if email_lists and oc.clients > (oc.rows|length) %} (показаны первые {{ oc.rows|length }}){% endif %}</summary>
+    {% if email_lists %}
+    <div class="table-card">
+    <table>
+      <thead><tr><th>Клиент</th><th>Почта</th><th>Телефон</th><th class="num">Заказов</th><th class="num">Сумма, ₽</th>
+        <th class="num">Последний заказ</th></tr></thead>
+      <tbody>{% for x in oc.rows %}
+        <tr><td class="label" title="{{ x.name or '' }}">{{ x.name or '—' }}</td>
+            <td>{{ (x.emails or [])|join(', ') or '—' }}</td>
+            <td class="muted">{% for p in (x.phones or [])[:2] %}+7 {{ p[:3] }} {{ p[3:6] }}-{{ p[6:8] }}-{{ p[8:] }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
+            <td class="num">{{ x.orders|int }}</td><td class="num">{{ x.amount|int }}</td>
+            <td class="num">{{ x.last_order.strftime('%d.%m.%Y') }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    </div>
+    <p class="note"><a href="/email/contacts.csv{{ f.query(kind='outside') }}">Скачать для загрузки в UniSender (CSV)</a> —
+      колонки email и Name, по строке на адрес. Сначала клиенты с почтой, по сумме заказов за месяц. «—» вместо
+      названия и почты — файл разобран до включения списков: он перечитается сам.</p>
+    {% else %}
+    <p class="muted">Названия и контакты клиентов не сохраняются: включите списки строкой <code>EMAIL_LISTS=on</code> в
+      <code>.env</code> и пересоберите — выгрузки 1С перечитаются с контактами.</p>
+    {% endif %}
+  </details>
+  {% endif %}
   {% endif %}
 </div>
 {% endguard %}

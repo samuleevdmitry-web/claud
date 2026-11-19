@@ -414,6 +414,13 @@ def test_recipient_lists(client, tmp_path, monkeypatch):
         db.save_email_contacts(conn, [(d.email_hash, d.email) for d in clients])
         conn.execute("INSERT INTO orders_1c (order_no, order_date, amount, status, email_hashes) VALUES"
                      " ('А-1', '2026-10-10', 5000, 'Закрыт', %s)", ([h("buyer@x.ru")],))
+        # клиенты, которых нет в базе рассылок: один с почтой и двумя заказами, другой только с телефоном
+        conn.execute("INSERT INTO orders_1c (order_no, order_date, amount, status, client_hash, email_hashes, phone_hashes,"
+                     " client_name, emails, phones) VALUES"
+                     " ('Б-1', '2026-10-12', 1000, 'Закрыт', 'c-new', %s, '{}', 'ООО Новый', '{new@client.ru}', '{}'),"
+                     " ('Б-2', '2026-10-20', 2000, 'Закрыт', 'c-new', %s, '{}', 'ООО Новый', '{new@client.ru}', '{}'),"
+                     " ('Б-3', '2026-10-21', 700, 'Закрыт', NULL, '{}', %s, 'Физическое лицо', '{}', '{9174706444}')",
+                     ([h("new@client.ru")], [h("new@client.ru")], [privacy.phone_hash("9174706444")]))
         assert load_settings().email_lists
     page = " ".join(client.get("/email", params={"month": "2026-10"}).text.split())
     assert "не построен" not in page and "Не всё удалось построить" not in page
@@ -423,6 +430,11 @@ def test_recipient_lists(client, tmp_path, monkeypatch):
     assert "buyer@x.ru" in page and "sleep@x.ru" in page and '<details class="list">' in page
     # база без сотрудников: получили buyer и sleep, открыл только buyer
     assert "получили 2 адресов (без сотрудников). Открывали хотя бы одно — <strong>1</strong>" in page
+    assert "Клиенты, которых нет в базе рассылок — 2, с почтой — 1" in page
+    assert "ООО Новый" in page and "new@client.ru" in page and "+7 917 470-64-44" in page
+    outside = client.get("/email/contacts.csv", params={"month": "2026-10", "kind": "outside"}).text
+    assert outside.splitlines()[1:] == ["new@client.ru;ООО Новый;;2;3000;20.10.2026",
+                                        ";Физическое лицо;+79174706444;1;700;21.10.2026"]
     csv_text = client.get("/email/contacts.csv", params={"month": "2026-10", "kind": "active"}).text
     assert "buyer@x.ru;1;1;0;06.10.2026;06.10.2026;1;5000;10.10.2026" in csv_text and "ivanov" not in csv_text
     monkeypatch.setenv("EMAIL_LISTS", "")

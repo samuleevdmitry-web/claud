@@ -1070,6 +1070,34 @@ def base_activity(conn: psycopg.Connection, month: date, active: bool, limit: in
     """, {"m": month, "m_end": _next_month(month), "limit": limit})
 
 
+def clients_of_orders(conn: psycopg.Connection, order_nos: list[str], limit: int | None = LIST_LIMIT) -> dict:
+    """Клиенты этих заказов: заказы одного клиента вместе (по отпечатку названия, иначе по почте, иначе — заказ сам
+    по себе); название, адреса и номера — если списки включены. Сначала клиенты с почтой, по сумме заказов."""
+    if not order_nos:
+        return {"clients": 0, "with_email": 0, "rows": []}
+    base = """
+        WITH k AS (
+            SELECT o.*, coalesce(o.client_hash, o.email_hashes[1], o.phone_hashes[1], o.order_no) AS ckey
+            FROM orders_1c o WHERE o.order_no = ANY (%(nos)s)
+        ),
+        c AS (
+            SELECT ckey, max(client_name) AS name, count(*) AS orders, sum(amount) AS amount, max(order_date) AS last_order,
+                   bool_or(cardinality(email_hashes) > 0) AS has_email,
+                   (SELECT array_agg(DISTINCT e) FROM k k2 CROSS JOIN LATERAL unnest(k2.emails) e WHERE k2.ckey = k.ckey)
+                       AS emails,
+                   (SELECT array_agg(DISTINCT p) FROM k k2 CROSS JOIN LATERAL unnest(k2.phones) p WHERE k2.ckey = k.ckey)
+                       AS phones
+            FROM k GROUP BY ckey
+        )
+    """
+    counts = _one(conn, base + "SELECT count(*) AS clients, count(*) FILTER (WHERE has_email) AS with_email FROM c",
+                  {"nos": order_nos})
+    rows = _all(conn, base + f"""
+        SELECT * FROM c ORDER BY has_email DESC, amount DESC NULLS LAST, ckey {"LIMIT %(limit)s" if limit else ""}
+    """, {"nos": order_nos, "limit": limit})
+    return {**counts, "rows": rows}
+
+
 def _next_month(month: date) -> date:
     return (month.replace(day=1) + timedelta(days=32)).replace(day=1)
 

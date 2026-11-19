@@ -983,6 +983,10 @@ def email_data(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
         return ins.mail_orders_stats(orders, q.mail_campaigns(conn, ids), lift_rows, coverage["first"], coverage["last"])
 
     mail = safe("Рассылки по базе и заказы", mail_part) if delivery_ready else None
+    if mail:
+        outside = next((c.get("order_nos", []) for c in mail["classes"] if c["key"] == "outside"), [])
+        mail["outside_clients"] = safe("Клиенты, которых нет в базе рассылок",
+                                       lambda: q.clients_of_orders(conn, outside))
 
     def items_part():
         mailings = q.mailings_with_items(conn, f.month)
@@ -1025,7 +1029,8 @@ def email_data(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
             "orders_coverage": coverage, "delivery_ready": delivery_ready, "window": q.WINDOW_DAYS}
 
 
-CONTACT_LISTS = {"active": "открывают письма", "passive": "получают, но не открывают", "staff": "сотрудники"}
+CONTACT_LISTS = {"active": "открывают письма", "passive": "получают, но не открывают", "staff": "сотрудники",
+                 "outside": "клиенты не из базы рассылок"}
 
 
 def contacts_csv(conn: psycopg.Connection, settings: Settings, f: Filters, kind: str) -> str:
@@ -1034,6 +1039,17 @@ def contacts_csv(conn: psycopg.Connection, settings: Settings, f: Filters, kind:
     w = csv.writer(buf, delimiter=";")
     if not settings.email_lists or kind not in CONTACT_LISTS:
         w.writerow(["Списки получателей выключены: EMAIL_LISTS=on в .env"])
+        return "\ufeff" + buf.getvalue()
+    if kind == "outside":
+        # по адресу в строке — так файл можно сразу загрузить в UniSender (колонки email и Name)
+        mail = email_data(conn, settings, f)["mail"] or {"classes": []}
+        nos = next((c.get("order_nos", []) for c in mail["classes"] if c["key"] == "outside"), [])
+        w.writerow(["email", "Name", "phone", "Заказов", "Сумма заказов", "Последний заказ"])
+        for x in q.clients_of_orders(conn, nos, limit=None)["rows"]:
+            phone = f"+7{x['phones'][0]}" if x["phones"] else ""
+            for email in x["emails"] or [""]:
+                w.writerow([email, x["name"] or "", phone, x["orders"], f"{x['amount']:.0f}",
+                            f"{x['last_order']:%d.%m.%Y}"])
         return "\ufeff" + buf.getvalue()
     if kind == "staff":
         ids = [c["campaign_id"] for c in q.staff_campaigns(conn, f.month)]
