@@ -10,14 +10,21 @@
       (по понедельникам) или сразу: <code>docker compose exec collector python -m analytics sync-unisender</code>.</p>
   </div>
 {% endif %}
+{% guard "Показатели" %}
 {{ show_tiles(tiles) }}
+{% endguard %}
+{% guard "Аналитическая сводка" %}
 {{ insights(summary) }}
+{% endguard %}
+{% guard "Письма по месяцам: доставлено, открыли, перешли (UniSender)" %}
 <section class="grid-2">
   {{ chart_block(charts, 'email_letters', 'Письма по месяцам: доставлено, открыли, перешли (UniSender)') }}
   {{ chart_block(charts, 'email_metrika', 'Визиты и заявки с рассылок по месяцам (Метрика)') }}
 </section>
+{% endguard %}
 
 {% if configured %}
+{% guard "Рассылки" %}
 <div class="card table-card">
   <div class="chart-title">Рассылки за {{ f.month|month|lower }}</div>
   <p class="hint">Открыли и перешли — от доставленных, уникальные контакты (UniSender). Визиты и заявки — по меткам письма
@@ -39,9 +46,11 @@
   </table>
   {% else %}<p class="muted">Рассылок в этом месяце нет.</p>{% endif %}
 </div>
+{% endguard %}
 {% endif %}
 
 {% if utm %}
+{% guard "Рассылки по меткам Метрики" %}
 <div class="card table-card">
   <div class="chart-title">Рассылки по меткам Метрики за {{ f.month|month|lower }}</div>
   <p class="hint">Визиты и заявки в этом месяце по ссылкам из писем (utm_medium=email, utm_campaign = номер рассылки
@@ -58,9 +67,11 @@
   </table>
   {% if utm|length > 30 %}<p class="note">Показаны 30 рассылок с наибольшим числом визитов из {{ utm|length }}.</p>{% endif %}
 </div>
+{% endguard %}
 {% endif %}
 
 <h2>Рассылки по базе и заказы</h2>
+{% guard "Рассылки по базе и заказы" %}
 <div class="card">
   {% if base_info and base_info.contacts %}
   <p>В базе UniSender {{ base_info.contacts|int }} контактов, активных {{ base_info.active|int }}
@@ -106,8 +117,10 @@
   {% endif %}
   {% endif %}
 </div>
+{% endguard %}
 
 {% if mail and mail.campaigns %}
+{% guard "Рассылки и заказы после них" %}
 <div class="card table-card">
   <div class="chart-title">Рассылки {{ f.month|month|lower }} и заказы после них</div>
   <p class="hint">По адресам из отчёта о доставке; списки сотрудников и тестовые не считаются. «Заказали» — адрес клиента,
@@ -137,9 +150,11 @@
     {{ orders_coverage.last.strftime('%d.%m.%Y') }}): такие рассылки не входят в сравнение открывших и не открывших,
     а их цифры вырастут, когда появятся выгрузки за недостающие дни.</p>{% endif %}
 </div>
+{% endguard %}
 {% endif %}
 
 {% if mail and mail.examples %}
+{% guard "Заказы с товаром из письма" %}
 <div class="card table-card">
   <div class="chart-title">Заказы с товаром из письма</div>
   <p class="hint">Клиент открыл письмо или перешёл по ссылке и за {{ window }} дней купил то, о чём оно было: в «Что купили из
@@ -156,5 +171,6 @@
     {% endfor %}</tbody>
   </table>
 </div>
+{% endguard %}
 {% endif %}
 {% endblock %}

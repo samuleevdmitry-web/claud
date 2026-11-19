@@ -10,28 +10,41 @@
 {% endmacro %}
 
 {% block content %}
+  {% guard "Итог" %}
   <div class="card verdict verdict-{{ status }}">
     <div class="verdict-title">Итог</div>
     <p>{{ verdict }}</p>
     <p class="note">По последним данным, независимо от выбранного месяца. Пересчитывается после каждой загрузки (по понедельникам);
       тревоги дублируются в «Обзоре».</p>
   </div>
+  {% endguard %}
 
   <h2>Следы накрутки <span class="h2-note">что Яндекс видит в поведении на выдаче</span></h2>
+  {% guard "Следы накрутки" %}
   <div class="signals">{% for s in signals if s.group == 'traces' %}{{ signal_card(s) }}{% endfor %}</div>
+  {% endguard %}
 
   <h2>Признаки санкций <span class="h2-note">Google — контрольная группа: накрутка на него не влияет</span></h2>
+  {% guard "Признаки санкций" %}
   <div class="signals">{% for s in signals if s.group == 'sanctions' %}{{ signal_card(s) }}{% endfor %}</div>
+  {% endguard %}
+  {% guard "Визиты из Яндекса и Google по неделям" %}
   <section class="grid-2">
     {{ chart_block(charts, 'pf_engines', 'Визиты из Яндекса и Google по неделям') }}
     {{ chart_block(charts, 'pf_share', 'Доля Яндекса в визитах из двух поисковиков') }}
   </section>
+  {% endguard %}
 
   <h2>Отдача</h2>
+  {% guard "Отдача" %}
   <div class="signals">{% for s in signals if s.group == 'benefit' %}{{ signal_card(s) }}{% endfor %}</div>
+  {% endguard %}
 
+  {% guard "Клики по дням: запросы проекта RabbitSeo и «запрос + домен» (Вебмастер)" %}
   {{ chart_block(charts, 'pf_clicks', 'Клики по дням: запросы проекта RabbitSeo и «запрос + домен» (Вебмастер)') }}
+  {% endguard %}
 
+  {% guard "Кликов почти столько же, сколько показов" %}
   <div class="grid-2">
     <div class="card table-card">
       <div class="chart-title">Кликов почти столько же, сколько показов
@@ -59,8 +72,10 @@
       {% else %}<p class="muted">Таких запросов нет.</p>{% endif %}
     </div>
   </div>
+  {% endguard %}
 
   {% if frequent %}
+  {% guard "Частотные запросы проекта RabbitSeo" %}
   <div class="card table-card">
     <div class="chart-title">Частотные запросы проекта RabbitSeo <span class="h2-note">позиция сейчас и {{ benefit_from.strftime('%d.%m') }}</span></div>
     <table>
@@ -73,6 +88,7 @@
     </table>
     {% if frequent_absent %}<p class="note">Ещё {{ frequent_absent }} частотных запросов проекта сайт не находит в проверяемой части выдачи.</p>{% endif %}
   </div>
+  {% endguard %}
   {% endif %}
   <p class="note">Как считается — docs/metrics.md, раздел «ПФ и риски». Аналитика запросов Вебмастера хранит 14 дней,
     сборщик копит историю с первого запуска; данные Вебмастера бывают с задержкой.</p>

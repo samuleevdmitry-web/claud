@@ -5,14 +5,23 @@
 {% if not demand %}
   <div class="card muted">Вордстат не настроен или ещё не загружен (WORDSTAT_FOLDER_ID, файл wordstat.toml).</div>
 {% else %}
+  {% guard "Пояснение" %}
   <p class="note">Вордстат, {{ demand.region }}, {{ demand.month|month|lower }}.
     {% if demand.lagging %}Вордстат публикует месячные данные с задержкой: последний доступный месяц — {{ demand.month|month|lower }}.{% endif %}</p>
+  {% endguard %}
+  {% guard "Показатели" %}
   {{ show_tiles(demand.tiles) }}
+  {% endguard %}
+  {% guard "Аналитическая сводка" %}
   {{ insights(demand.summary) }}
+  {% endguard %}
+  {% guard "Брендовый спрос (B2B) по месяцам" %}
   <section class="grid-2">
     {{ chart_block(charts, 'demand_brand', 'Брендовый спрос (B2B) по месяцам') }}
     {{ chart_block(charts, 'demand_directions', 'Спрос по направлениям каталога') }}
   </section>
+  {% endguard %}
+  {% guard "Спрос по категориям каталога" %}
   <div class="card table-card">
     <div class="chart-title">Спрос по категориям каталога</div>
     <p class="note">Сумма запросов по ключам категории (наведите на название, чтобы увидеть ключи). Пик · спад — месяцы
@@ -41,7 +50,9 @@
       {% endfor %}
     </table>
   </div>
+  {% endguard %}
   {% if demand.brand_queries %}
+  {% guard "Брендовые запросы за 30 дней" %}
   <div class="card table-card">
     <div class="chart-title">Брендовые запросы за 30 дней</div>
     <table>
@@ -51,6 +62,7 @@
       </tbody>
     </table>
   </div>
+  {% endguard %}
   {% endif %}
 {% endif %}
 {% endblock %}

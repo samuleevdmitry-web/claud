@@ -224,3 +224,41 @@ def test_email_month_without_orders(client):
     assert rows[1]["coverage"] == "none" and rows[2]["coverage"] == "partial"
     assert rows[2]["opened_ordered"] == 1 and mail["lift"] is None
     assert "нет выгрузки заказов" in resp.text
+
+
+def test_guard_keeps_the_rest_of_the_page():
+    from analytics.dashboard import guard
+    from analytics.dashboard.app import templates
+
+    problems = guard.start()
+    html = templates.env.from_string('до {% guard "Таблица X" %}{{ 1 / 0 }}{% endguard %} после').render()
+    assert html.startswith("до ") and html.endswith(" после")
+    assert "Таблица X</strong> — не построен: ZeroDivisionError" in html
+    assert guard.safe("Блок Y", lambda: 1 / 0, default=[]) == []
+    assert [p.title for p in problems] == ["Таблица X", "Блок Y"]
+
+
+@needs_db
+def test_broken_section_does_not_break_other_pages(client, monkeypatch):
+    """E-mail сломался: обзор и рекомендации строятся без него и пишут, что не построено; сам раздел показывает
+    причину вместо «Internal Server Error», меню остаётся."""
+    from analytics.dashboard import pages
+
+    sep = date(2026, 9, 1)
+    with db.connect(TEST_DATABASE_URL) as conn:
+        sync_metrika(conn, FakeMetrikaClient([], {("month", "total"): [(sep, [], [1000, 800, 2500, 20.0, 2.5, 150.0], {})]}),
+                     42, frozenset(), "lastsign", since=sep, until=date(2026, 9, 30), today=date(2026, 10, 2),
+                     log=lambda _: None)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("сломалось")
+
+    monkeypatch.setattr(pages, "email_data", broken)
+    for path in ("/", "/recs", "/report"):
+        page = client.get(path, params={"month": "2026-09"})
+        assert page.status_code == 200, path
+        assert "«E-mail» — RuntimeError: сломалось" in page.text, path
+    email = client.get("/email", params={"month": "2026-09"})
+    assert email.status_code == 200 and "Раздел не построен: RuntimeError: сломалось" in email.text
+    assert "<h1>E-mail</h1>" in email.text
+    assert 'href="/traffic' in email.text  # меню на месте

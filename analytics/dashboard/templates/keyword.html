@@ -2,9 +2,16 @@
 {% from "macros.html" import chart_block %}
 {% block title %}{{ norm }}{% endblock %}
 {% block content %}
+{% guard "Навигация" %}
 <p><a href="/keywords?{{ back | dictsort | list | urlencode_pairs }}">← к таблице ключей</a></p>
+{% endguard %}
+{% guard "Пояснение" %}
 <p class="note">Вебмастер, по дням за {{ kf.d1.strftime('%d.%m.%Y') }}–{{ kf.d2.strftime('%d.%m.%Y') }}. Период меняется в таблице ключей.</p>
+{% endguard %}
+{% guard "Показы и клики по дням" %}
 {{ chart_block(charts, 'kw_daily', 'Показы и клики по дням') }}
+{% endguard %}
+{% guard "По дням" %}
 <div class="card table-card">
   <div class="chart-title">По дням</div>
   {% if daily %}
@@ -18,6 +25,8 @@
   </table>
   {% else %}<p class="muted">За этот период в аналитике запросов Вебмастера по этой фразе ничего нет.</p>{% endif %}
 </div>
+{% endguard %}
+{% guard "Позиции из таблицы семантики" %}
 <div class="grid-2">
   <div class="card table-card">
     <div class="chart-title">Позиции из таблицы семантики</div>
@@ -35,4 +44,5 @@
     {% else %}<p class="muted">Фразы нет в проекте RabbitSeo.</p>{% endif %}
   </div>
 </div>
+{% endguard %}
 {% endblock %}

@@ -2,10 +2,17 @@
 {% from "macros.html" import tiles as show_tiles, chart_block, insights, slice_table %}
 {% block title %}Заявки и цели{% endblock %}
 {% block content %}
+{% guard "Показатели" %}
 {{ show_tiles(tiles) }}
+{% endguard %}
+{% guard "Аналитическая сводка" %}
 {{ insights(summary) }}
+{% endguard %}
+{% guard "Заявки и контакты по месяцам" %}
 {{ chart_block(charts, 'leads_trend', 'Заявки и контакты по месяцам') }}
+{% endguard %}
 
+{% guard "Цели Метрики" %}
 <div class="card table-card">
   <div class="chart-title">Цели Метрики</div>
   <table>
@@ -26,9 +33,11 @@
     визит с кликом по телефону и формой — одна заявка, поэтому достижений у целей в сумме больше, чем заявок.
     Контакты — клики по телефону, почте и мессенджерам, которые заявками не считаются.</p>
 </div>
+{% endguard %}
 
 {% if shop.cart_visits or shop.products %}
 <h2>Интернет-магазин</h2>
+{% guard "Корзина → заказ" %}
 <div class="card table-card">
   <div class="chart-title">Корзина → заказ</div>
   <p class="hint">Визиты с добавлением в корзину и визиты с оформленным заказом (цели электронной коммерции).</p>
@@ -44,7 +53,9 @@
   <p class="note">Добавлено в корзину на {{ shop.totals.basket_sum|int }} ₽, куплено на {{ shop.totals.purchased_sum|int }} ₽.</p>
   {% endif %}
 </div>
+{% endguard %}
 {% if shop.products %}
+{% guard "Товары" %}
 <div class="card table-card">
   <div class="chart-title">Товары</div>
   <p class="hint">{{ shop.hint }}</p>
@@ -57,11 +68,14 @@
     {% endfor %}</tbody>
   </table>
 </div>
+{% endguard %}
 {% endif %}
 {% endif %}
 
 <h2>Откуда приходят заявки</h2>
+{% guard "Таблица" %}
 <div class="grid-2">
   {% for report in cross %}{{ slice_table(report, f, limit=10, compact=True) }}{% endfor %}
 </div>
+{% endguard %}
 {% endblock %}

@@ -3,21 +3,33 @@
 {% block title %}Обзор{% endblock %}
 {% block content %}
 {% if pf_alert %}
+{% guard "Предупреждение" %}
 <div class="alert{% if pf_status == 'alert' %} alert-bad{% endif %}" role="status"><span class="alert-icon" aria-hidden="true">!</span>
   <span>ПФ: {{ pf_alert }} <a href="/pf{{ f.query() }}">Подробнее</a></span></div>
+{% endguard %}
 {% endif %}
+{% guard "Показатели" %}
 <section>
   {{ show_tiles(tiles) }}
 </section>
+{% endguard %}
 {% if todo %}
+{% guard "Что сделать в первую очередь" %}
 <h2>Что сделать в первую очередь <span class="h2-note"><a href="/recs{{ f.query() }}">все рекомендации ({{ todo_total }})</a></span></h2>
+{% endguard %}
+{% guard "Рекомендации" %}
 {{ rec_list(todo, priorities) }}
+{% endguard %}
 {% endif %}
+{% guard "Аналитическая сводка" %}
 {{ insights(summary, "Главное за месяц") }}
+{% endguard %}
+{% guard "Визиты и посетители по месяцам" %}
 <section class="grid-2">
   {{ chart_block(charts, 'site_trend', 'Визиты и посетители по месяцам') }}
   {{ chart_block(charts, 'leads_trend', 'Заявки и контакты по месяцам') }}
 </section>
+{% endguard %}
 {% if skipped %}<p class="note">На графиках нет месяцев, когда счётчик собирал данные не каждый день: {{ skipped|join(', ') }}.</p>{% endif %}
 <p class="note">Подробности — в разделах меню. Каждая сводка собрана по правилам из цифр раздела; формулы — в docs/metrics.md.</p>
 {% endblock %}

@@ -4,7 +4,9 @@
 {% block content %}
 <p class="note">Что сделать, чтобы росли трафик и заявки, — по данным выбранного месяца, от срочного к желательному.
   Каждая рекомендация опирается на цифры в разделах; правила и пороги — в docs/metrika-reports.md.</p>
+{% guard "Рекомендации" %}
 {{ rec_list(items, priorities) }}
+{% endguard %}
 <h2>Чего нет в API — смотреть в Метрике раз в месяц</h2>
 <div class="card">
   <ul class="plain-list">

@@ -18,6 +18,7 @@ import psycopg
 from analytics import insights as ins
 from analytics.config import Settings
 from analytics.dashboard import queries as q
+from analytics.dashboard.guard import safe
 from analytics.format import (
     MONTHS_SHORT,
     Tile,
@@ -283,6 +284,12 @@ def _slice_report(conn: psycopg.Connection, f: Filters, slice_: str, title: str,
 
 # ----- Разделы -----
 
+# Что подставить вместо раздела, который не построился (safe): ровно те ключи, что читают обзор, отчёт и рекомендации.
+NO_MAPS = {"cards": [], "findings": [], "summary": None}
+NO_SALES = {"stats": None, "primary": False, "tiles": [], "summary": None, "funnel": None, "summary_rows": None}
+NO_EMAIL = {"stats": {"campaigns": 0}, "tiles": [], "summary": None, "campaigns": [], "mail": None}
+
+
 def overview(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
     m, yoy_partial = _site_basics(conn, f)
     robots, robots_prev = _robots(conn, f)
@@ -290,20 +297,20 @@ def overview(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
     findings = ins.traffic_summary(m, robots, robots_prev, daily, f.prev, yoy_partial, f.audience)
     total, conv, bounce = m.get("visits") or 0, float(m.get("conversion_pct") or 0), float(m.get("bounce_rate") or 0)
     for slice_, title in (("source", "Каналы"), ("country", "Страны"), ("device", "Устройства")):
-        findings += _slice_report(conn, f, slice_, title, total, conv, bounce)[1]
-    search = search_page(conn, settings, f)
-    demand = demand_page(conn, settings, f)
-    maps = maps_page(conn, settings, f)
+        findings += safe(title, lambda s=slice_, t=title: _slice_report(conn, f, s, t, total, conv, bounce)[1], [])
+    search = safe("Поиск Яндекса", lambda: search_page(conn, settings, f), {})
+    demand = safe("Спрос (Вордстат)", lambda: demand_page(conn, settings, f))
+    maps = safe("Карты", lambda: maps_page(conn, settings, f), NO_MAPS)
     findings += search.get("findings", []) + (demand or {}).get("findings", []) + maps.get("findings", [])
-    pf = pf_page(conn, settings, f)  # итог — отдельной плашкой над сводкой
-    todo = recommendations(conn, settings, f, pf)
+    pf = safe("ПФ и риски", lambda: pf_page(conn, settings, f))  # итог — отдельной плашкой над сводкой
+    todo = safe("Рекомендации", lambda: recommendations(conn, settings, f, pf), [])
     tiles = [_traffic_tiles(f, m, yoy_partial)[0]] + _lead_tiles(f, m, yoy_partial)[:2]
     if search.get("tiles"):
         tiles += search["tiles"][:2]
     if demand:
         tiles.append(demand["tiles"][0])
     return {"tiles": tiles, "summary": ins.summarize(findings, limit=5),
-            "pf_alert": pf["verdict"] if pf["status"] != "ok" else None, "pf_status": pf["status"],
+            "pf_alert": pf["verdict"] if pf and pf["status"] != "ok" else None, "pf_status": pf and pf["status"],
             "todo": todo[:3], "todo_total": len(todo), "priorities": ins.PRIORITIES,
             "charts": {"site_trend": charts["site_trend"], "leads_trend": charts["leads_trend"]}, "skipped": skipped}
 
@@ -335,8 +342,8 @@ def traffic(conn: psycopg.Connection, settings: Settings, f: Filters, tab: str) 
         elif tab == "audience":
             findings += ins.loyalty_findings(rows["visit_number"])
         elif tab == "content":
-            context["pages"] = content_pages(conn, f, total)
-            findings = context["pages"]["findings"] + findings
+            context["pages"] = safe("Содержание сайта", lambda: content_pages(conn, f, total))
+            findings = (context["pages"] or {}).get("findings", []) + findings
     context["summary"] = ins.summarize(findings)
     context["site_conv"], context["site_bounce"] = conv, bounce
     return context
@@ -397,8 +404,8 @@ def leads(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
                                 key=lambda r: -(r["leads"] or 0))[:15]
         cross.append(report)
         findings += [x for x in more if "конверт" in x.text or "заяв" in x.text]
-    store = shop(conn, f, goals)
-    findings += store["findings"]
+    store = safe("Интернет-магазин", lambda: shop(conn, f, goals))
+    findings += (store or {}).get("findings", [])
     return {"tiles": _lead_tiles(f, m, yoy_partial), "goals": goals, "cross": cross, "shop": store,
             "charts": {"leads_trend": charts["leads_trend"]}, "summary": ins.summarize(findings)}
 
@@ -441,7 +448,7 @@ def search_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
     movers = q.position_movers(conn, host_id, f.month)
     problems = q.search_problems(conn, host_id)
     findings = ins.search_findings(sm, partial, movers, stale_days, problems, f.prev)
-    rabbit = rabbit_block(conn, f.site.get("site") or "")
+    rabbit = safe("Позиции RabbitSeo", lambda: rabbit_block(conn, f.site.get("site") or ""))
     if rabbit:
         findings += rabbit["findings"]
     alerts = []
@@ -600,8 +607,10 @@ def status_page(conn: psycopg.Connection, settings: Settings, f: Filters | None)
     status = [{**row, "name": SOURCE_NAMES.get(row["source"], row["source"])} for row in q.sync_status(conn)]
     robots = []
     if f:
-        robots = [r for r in q.robots_by_month(conn, f.counter_id).values() if r["month"] < f.today.replace(day=1)]
-    return {"status": status, "robots": robots, "imports": q.import_files(conn), "imports_dir": settings.imports_dir}
+        robots = safe("Роботы в трафике", lambda: [r for r in q.robots_by_month(conn, f.counter_id).values()
+                                                  if r["month"] < f.today.replace(day=1)], [])
+    return {"status": status, "robots": robots, "imports": safe("Файлы из папки imports", lambda: q.import_files(conn), []),
+            "imports_dir": settings.imports_dir}
 
 
 # ----- ПФ и риски -----
@@ -676,11 +685,11 @@ def report_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
     Собирается из тех же построителей, что разделы дашборда, — цифры и выводы совпадают с ними.
     """
     m, yoy_partial = _site_basics(conn, f)
-    main = overview(conn, settings, f)
-    search = search_page(conn, settings, f)
-    demand = demand_page(conn, settings, f)
-    maps = maps_page(conn, settings, f)
-    pf = pf_page(conn, settings, f)
+    main = safe("Главное за месяц", lambda: overview(conn, settings, f), {"summary": ins.Summary([]), "skipped": []})
+    search = safe("Поиск Яндекса", lambda: search_page(conn, settings, f), {})
+    demand = safe("Спрос (Вордстат)", lambda: demand_page(conn, settings, f))
+    maps = safe("Карты", lambda: maps_page(conn, settings, f), NO_MAPS)
+    pf = safe("ПФ и риски", lambda: pf_page(conn, settings, f))
 
     kpi = [("Сайт", _traffic_tiles(f, m, yoy_partial) + _lead_tiles(f, m, yoy_partial))]
     if search.get("tiles"):
@@ -690,18 +699,19 @@ def report_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
     for card in maps["cards"]:
         kpi.append((f"Карты: {card['name']}", card["tiles"]))
 
-    sections = [("Трафик", traffic(conn, settings, f, "summary")["summary"])]
+    sections = []
     for tab, (title, _) in TRAFFIC_TABS.items():
-        if tab != "summary":
-            sections.append((f"Трафик: {title.lower()}", traffic(conn, settings, f, tab)["summary"]))
-    sales = sales_page(conn, settings, f)
+        name = "Трафик" if tab == "summary" else f"Трафик: {title.lower()}"
+        sections.append((name, safe(name, lambda t=tab: traffic(conn, settings, f, t)["summary"])))
+    sales = safe("Продажи (Битрикс24 и 1С)", lambda: sales_page(conn, settings, f), NO_SALES)
     if sales["stats"]:
         kpi.insert(1, ("Продажи: новые клиенты (Битрикс24 и 1С)", sales["tiles"]))
-    email = email_page(conn, settings, f)
+    email = safe("E-mail", lambda: email_page(conn, settings, f), NO_EMAIL)
     if email["stats"]["campaigns"]:
         kpi.append(("E-mail (UniSender и Метрика)", email["tiles"]))
     sections += [("Продажи (Битрикс24 и 1С)", sales.get("summary")), ("E-mail", email.get("summary")),
-                 ("Заявки и цели", leads(conn, settings, f)["summary"]), ("Поиск Яндекса", search.get("summary")),
+                 ("Заявки и цели", safe("Заявки и цели", lambda: leads(conn, settings, f)["summary"])),
+                 ("Поиск Яндекса", search.get("summary")),
                  ("Спрос", demand and demand["summary"]), ("Карты", maps["summary"])]
     sections = [(title, s) for title, s in sections if s]
 
@@ -713,7 +723,7 @@ def report_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dic
         return out
 
     todo = collect("check")
-    recs = recommendations(conn, settings, f, pf)
+    recs = safe("Рекомендации", lambda: recommendations(conn, settings, f, pf), [])
     caveats = list(search.get("alerts", []))
     if f.month >= f.today.replace(day=1):
         caveats.insert(0, f"{month_name(f.month)} ещё не закончился: цифры за неполный месяц, сравнение с прошлым "
@@ -747,20 +757,22 @@ def recommendations(conn: psycopg.Connection, settings: Settings, f: Filters, pf
         return q.slice_rows(conn, f.counter_id, f.audience, slice_, f.month)
 
     goals = q.goals(conn, f.counter_id, f.audience, f.month)
-    content = content_pages(conn, f, total)
+    content = safe("Содержание сайта (404, поиск по сайту)", lambda: content_pages(conn, f, total), {})
     data = {
-        "total": total, "conv": conv, "leads": m.get("leads") or 0, "pf": pf or pf_page(conn, settings, f),
+        "total": total, "conv": conv, "leads": m.get("leads") or 0,
+        "pf": pf or safe("ПФ и риски", lambda: pf_page(conn, settings, f)),
         "domain": (f.site.get("site") or "").removeprefix("www."),
-        "nf": content["nf"], "not_found": content["not_found"], "not_found_from": content["not_found_from"],
-        "site_search": content["site_search"], "shop": shop(conn, f, goals),
+        "nf": content.get("nf"), "not_found": content.get("not_found", []),
+        "not_found_from": content.get("not_found_from", []), "site_search": content.get("site_search", []),
+        "shop": safe("Интернет-магазин", lambda: shop(conn, f, goals)),
         **{s: [r for r in rows(s) if not ins.is_undefined(r)] if s in SUBSOURCE else rows(s)
            for s in ("source", "direct_campaign", "direct_phrase", "landing_section", "device", "visit_number",
                      "country")},
     }
-    sales = sales_page(conn, settings, f)  # выгрузки CRM — по основному сайту
-    email = email_data(conn, settings, f)
+    sales = safe("Продажи (Битрикс24 и 1С)", lambda: sales_page(conn, settings, f), NO_SALES)  # по основному сайту
+    email = safe("E-mail", lambda: email_data(conn, settings, f), NO_EMAIL)
     recs = ins.recommend(data) + ins.crm_recommend(sales["stats"]) + ins.email_recommend(
-        email["stats"], email["campaigns"], email["mail"])
+        email["stats"], email.get("campaigns", []), email.get("mail"))
     return sorted(recs, key=lambda r: r.priority)
 
 
@@ -961,15 +973,17 @@ def email_data(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
     primary = not settings.metrika_counters or f.counter_id == settings.metrika_counters[0]
     base_info = q.email_base(conn) if primary else None
     coverage = q.orders_coverage(conn) if primary else None
-    mail = None
     delivery_ready = bool(coverage) and q.deliveries_loaded(conn, f.month)
-    if delivery_ready:
+
+    def mail_part():
         orders = q.mail_orders(conn, f.month)
         lift_rows = q.mail_lift(conn, f.month)
-        if orders or lift_rows:
-            ids = sorted({t["campaign_id"] for o in orders for t in o["touches"]} | {r["campaign_id"] for r in lift_rows})
-            mail = ins.mail_orders_stats(orders, q.mail_campaigns(conn, ids), lift_rows, coverage["first"],
-                                         coverage["last"])
+        if not orders and not lift_rows:
+            return None
+        ids = sorted({t["campaign_id"] for o in orders for t in o["touches"]} | {r["campaign_id"] for r in lift_rows})
+        return ins.mail_orders_stats(orders, q.mail_campaigns(conn, ids), lift_rows, coverage["first"], coverage["last"])
+
+    mail = safe("Рассылки по базе и заказы", mail_part) if delivery_ready else None
     return {"stats": s, "prev": prev, "campaigns": campaigns, "base_info": base_info, "mail": mail,
             "orders_coverage": coverage, "delivery_ready": delivery_ready, "window": q.WINDOW_DAYS}
 
@@ -977,7 +991,8 @@ def email_data(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
 def email_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
     d = email_data(conn, settings, f)
     s, prev = d["stats"], d["prev"]
-    trend, _ = trend_months([{**r, "days_with_data": 1, "days_in_month": 1} for r in q.email_trend(conn, f.counter_id, f.audience)],
+    trend_rows = safe("Рассылки по месяцам", lambda: q.email_trend(conn, f.counter_id, f.audience), [])
+    trend, _ = trend_months([{**r, "days_with_data": 1, "days_in_month": 1} for r in trend_rows],
                             f.today.replace(day=1), coverage=False)
     labels = [month_short(r["month"]) for r in trend]
     charts = {}
@@ -1005,5 +1020,5 @@ def email_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict
     ]
     findings = ins.email_findings(s, prev, d["campaigns"], d["mail"])
     return {**d, "tiles": tiles, "charts": charts, "summary": ins.summarize(findings), "findings": findings,
-            "utm": q.email_utm_month(conn, f.counter_id, f.audience, f.month),
+            "utm": safe("Рассылки по меткам Метрики", lambda: q.email_utm_month(conn, f.counter_id, f.audience, f.month), []),
             "configured": bool(settings.unisender_api_key) or bool(d["campaigns"])}

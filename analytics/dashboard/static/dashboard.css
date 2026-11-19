@@ -171,6 +171,8 @@ td.label { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-sp
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 tr.total td { font-weight: 600; border-top: 1px solid var(--text-muted); }
 td.import-message { white-space: pre-line; font-size: 13px; }
+.block-error { border-color: var(--bad); color: var(--text-secondary); }
+.block-error strong { color: var(--bad); }
 .bar-col { width: 30%; }
 .share-bar { display: block; height: 8px; border-radius: 4px; background: var(--series-1); min-width: 2px; }
 .error-text { font-size: 12px; max-width: 360px; }

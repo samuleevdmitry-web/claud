@@ -10,6 +10,11 @@
 <main class="main">
   <h1>Отчёт за {{ f.month|month|lower }} — {{ f.site.site or f.site.name }}</h1>
   <div class="subtitle">Сравнение с {{ f.prev|month_with }} · {{ audiences[f.audience]|lower }}</div>
+  {% if problems %}
+  <div class="alert" role="status"><span class="alert-icon" aria-hidden="true">!</span>
+    <span>Не всё удалось построить: {% for x in problems %}«{{ x.title }}» — {{ x.error }}{% if not loop.last %}; {% endif %}{% endfor %}.
+      Остальное на странице показано. Если повторяется — пришлите этот текст.</span></div>
+  {% endif %}
   {% include "report_body.html" %}
 </main>
 </body>

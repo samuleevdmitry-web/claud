@@ -62,11 +62,50 @@
 |---|---|
 | Посмотреть, как идёт сбор | `docker compose logs -f collector` |
 | Проверить доступы к Яндексу | `docker compose exec collector python -m analytics check` |
-| Обновить после изменений в коде | `git pull`, затем `docker compose up -d --build` |
+| Обновить после изменений в коде | `powershell -ExecutionPolicy Bypass -File .\update.ps1` (см. ниже) |
 | Резервная копия базы | `docker compose exec db pg_dump -U analytics analytics > backup.sql` |
 | Остановить | `docker compose down` (данные сохранятся) |
 
 Дашборд открывается только с этого ноутбука: пароля у него нет, поэтому наружу порт не открыт.
+
+**Если блок не построился.** Ошибка в одном блоке или разделе не роняет страницу. Вместо блока — карточка
+«… — не построен: причина», вверху страницы — список того, что не удалось построить, остальное показывается.
+Обзор, рекомендации и отчёт за месяц строятся и тогда, когда сломан один из разделов, из которых они собраны.
+Если раздел не построился целиком, вместо «Internal Server Error» видна причина, меню работает. Подробности
+ошибки — в `docker compose logs dashboard`.
+
+### Обновление без ZIP
+
+Папка проекта подключается к GitHub один раз, дальше новые версии подтягиваются сами.
+
+1. Установите Git и откройте PowerShell заново:
+   ```bash
+   winget install --id Git.Git -e
+   ```
+2. В папке проекта (там, где `docker-compose.yml`) — один раз. Если правили `wordstat.toml` вручную, сначала
+   сохраните его копию: команда ниже заменит файлы проекта версией из GitHub (`.env`, `imports`, `reports` и
+   база не затрагиваются). Если репозиторий закрытый, Git откроет окно входа в GitHub.
+   ```bash
+   git init
+   ```
+   ```bash
+   git remote add origin https://github.com/samuleevdmitry-web/claud.git
+   ```
+   ```bash
+   git fetch origin claude/sweet-bell-2une6f
+   ```
+   ```bash
+   git checkout -f -B claude/sweet-bell-2une6f --track origin/claude/sweet-bell-2une6f
+   ```
+3. Обновить сейчас — получает последнюю версию и пересобирает дашборд, только если версия новая:
+   ```bash
+   powershell -ExecutionPolicy Bypass -File .\update.ps1
+   ```
+4. Включить автообновление — проверка раз в 30 минут, пока вы в Windows и запущен Docker Desktop:
+   ```bash
+   powershell -ExecutionPolicy Bypass -File .\install-autoupdate.ps1
+   ```
+   Выключить: тот же скрипт с ключом `-Remove`. Что и когда обновлялось — в `update.log` в папке проекта.
 
 ## Доступ к Метрике и Вебмастеру
 

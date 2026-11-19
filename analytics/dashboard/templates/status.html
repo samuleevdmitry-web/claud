@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Данные{% endblock %}
 {% block content %}
+{% guard "Загрузка источников" %}
 <div class="card table-card">
   <div class="chart-title">Загрузка источников</div>
   <table>
@@ -22,7 +23,9 @@
     (если ноутбук был выключен — при первом включении после), Вордстат — 5-го числа, отчёт за месяц — 6-го.
     Загрузить сразу: <code>docker compose exec collector python -m analytics sync</code>.</p>
 </div>
+{% endguard %}
 
+{% guard "Файлы из папки imports" %}
 <div class="card table-card">
   <div class="chart-title">Файлы из папки imports</div>
   {% if imports %}
@@ -37,8 +40,10 @@
   <p class="note">Сборщик проверяет папку <code>{{ imports_dir }}</code> раз в 15 минут; уже разобранный файл повторно не читается.
     Загрузить сразу: <code>docker compose exec collector python -m analytics import-crm</code>.</p>
 </div>
+{% endguard %}
 
 {% if robots %}
+{% guard "Роботы в трафике" %}
 <div class="card table-card">
   <div class="chart-title">Роботы в трафике {{ f.site.site or f.site.name }}</div>
   <p class="note">Разница между «весь трафик» и «только люди»: визиты, которые Метрика отнесла к роботам.</p>
@@ -53,5 +58,6 @@
     </tbody>
   </table>
 </div>
+{% endguard %}
 {% endif %}
 {% endblock %}

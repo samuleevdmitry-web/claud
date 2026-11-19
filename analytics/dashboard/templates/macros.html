@@ -12,6 +12,7 @@
 {% endmacro %}
 
 {% macro chart_block(charts, id, title) %}
+  {% guard title %}
   {% if charts and charts.get(id) %}
   <figure class="card chart-card">
     <figcaption class="chart-title">{{ title }}</figcaption>
@@ -29,6 +30,7 @@
     </details>
   </figure>
   {% endif %}
+  {% endguard %}
 {% endmacro %}
 
 {% macro insights(summary, title="Аналитическая сводка") %}
@@ -49,6 +51,7 @@
 
 {% macro slice_table(report, f, limit=15, compact=False) %}
   {# compact — только визиты и результат: для узких блоков «Откуда приходят заявки» #}
+  {% guard report.title or "Таблица" %}
   <div class="card table-card">
     <div class="chart-title">{{ report.title }}</div>
     {% if report.hint and not compact %}<p class="hint">{{ report.hint }}</p>{% endif %}
@@ -91,6 +94,7 @@
     {% endif %}
     {% if report.note %}<p class="note">{{ report.note }}</p>{% endif %}
   </div>
+  {% endguard %}
 {% endmacro %}
 
 {% macro alerts(items) %}

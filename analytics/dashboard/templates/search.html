@@ -26,29 +26,46 @@
 {% if not host %}
   <div class="card muted">Сайт не подключён к Вебмастеру (настройка WEBMASTER_HOSTS).</div>
 {% else %}
+  {% guard "Предупреждения" %}
   {{ show_alerts(alerts) }}
+  {% endguard %}
   {% if tiles %}{{ show_tiles(tiles) }}{% else %}<div class="card muted">Нет данных Вебмастера за этот месяц.</div>{% endif %}
   {% if partial %}<p class="note">Неполный месяц: {{ partial }}.</p>{% endif %}
+  {% guard "Аналитическая сводка" %}
   {{ insights(summary) }}
+  {% endguard %}
+  {% guard "Показы по месяцам" %}
   <section class="grid-2">
     {{ chart_block(charts, 'search_shows', 'Показы по месяцам') }}
     {{ chart_block(charts, 'search_clicks', 'Клики по месяцам') }}
   </section>
+  {% endguard %}
   {% if skipped %}<p class="note">Нет месяцев, за которые Вебмастер отдал данные не за все дни: {{ skipped|join(', ') }}.</p>{% endif %}
 
+  {% guard "Движение позиций" %}
   <h2>Движение позиций <span class="h2-note">популярные запросы {{ f.month|month_short }} против {{ f.prev|month_short }}, от 20 показов</span></h2>
+  {% endguard %}
+  {% guard "Движение позиций" %}
   <div class="grid-2">
     {{ movers_table('Выросли', movers.up, movers_count.up, 'up') }}
     {{ movers_table('Упали', movers.down, movers_count.down, 'down') }}
     {{ movers_table('Пропали из выдачи', movers.lost, movers_count.lost, 'lost') }}
     {{ movers_table('Новые', movers.new, movers_count.new, 'new') }}
   </div>
+  {% endguard %}
   <p class="note">Позиция — средняя позиция показа за месяц, меньше — лучше. «Пропали» — были в популярных запросах прошлого месяца и исчезли в этом.</p>
 
   {% if rabbit %}
+  {% guard "Позиции RabbitSeo" %}
   <h2>Позиции RabbitSeo <span class="h2-note">съём {{ rabbit.now.strftime('%d.%m') }} против {{ rabbit.then.strftime('%d.%m') }}</span></h2>
+  {% endguard %}
+  {% guard "Показатели" %}
   {{ show_tiles(rabbit.tiles) }}
+  {% endguard %}
+  {% guard "Запросы в ТОП-3, ТОП-10 и найденные — по дням съёма" %}
   {{ chart_block(charts, 'rabbit_daily', 'Запросы в ТОП-3, ТОП-10 и найденные — по дням съёма') }}
+  {% endguard %}
+  {% guard "Позиции RabbitSeo" %}
   <div class="grid-2">
     {% for key, title in (('up', 'Выросли'), ('down', 'Просели'), ('lost', 'Выпали из выдачи'), ('new', 'Появились в выдаче')) %}
     <div class="card table-card">
@@ -68,7 +85,9 @@
     </div>
     {% endfor %}
   </div>
+  {% endguard %}
   {% if rabbit.lists.never %}
+  {% guard "Не найдены ни разу" %}
   <div class="card table-card">
     <div class="chart-title">Не найдены ни разу <span class="h2-note">{{ rabbit.counts.never }} запросов проекта — сайт не появлялся в выдаче ни в один съём</span></div>
     <table>
@@ -77,10 +96,12 @@
     </table>
     {% if rabbit.counts.never > rabbit.lists.never|length %}<p class="note">Показаны {{ rabbit.lists.never|length }} с самой высокой частотностью.</p>{% endif %}
   </div>
+  {% endguard %}
   {% endif %}
   <p class="note">Позиции — из проекта RabbitSeo по гостевой ссылке (регион проекта, глубина проверки — по настройкам RabbitSeo). «Не найден» — сайта нет в проверяемой части выдачи.</p>
   {% endif %}
 
+  {% guard "Популярные запросы" %}
   <div class="grid-2">
     <div class="card table-card">
       <div class="chart-title">Популярные запросы</div>
@@ -122,5 +143,6 @@
       {% endif %}
     </div>
   </div>
+  {% endguard %}
 {% endif %}
 {% endblock %}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Аналитика{% endblock %}
+{% block title %}{{ section_title or "Аналитика" }}{% endblock %}
 {% block content %}
 {% if error %}
   <div class="alert" role="status"><span class="alert-icon" aria-hidden="true">!</span>{{ error }}</div>

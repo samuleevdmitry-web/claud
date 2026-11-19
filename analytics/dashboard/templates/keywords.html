@@ -11,6 +11,7 @@
 {% if not host %}
   <div class="card muted">Сайт не подключён к Вебмастеру.</div>
 {% else %}
+{% guard "Фильтры" %}
 <form class="card kw-filters" method="get" action="/keywords">
   <input type="hidden" name="site" value="{{ f.counter_id }}">
   <label class="wide">Поиск по фразе <input type="search" name="search" value="{{ kf.search }}" placeholder="например, оксфорд"></label>
@@ -39,14 +40,18 @@
     <a href="/keywords.csv?{{ base | dictsort | list | urlencode_pairs }}">Скачать CSV</a>
   </div>
 </form>
+{% endguard %}
 
+{% guard "Пояснение" %}
 <p class="note">
   Показы, клики, CTR и средняя позиция — из аналитики запросов Вебмастера за {{ kf.d1.strftime('%d.%m.%Y') }}–{{ kf.d2.strftime('%d.%m.%Y') }}
   {% if days and days.first %}(в базе есть с {{ days.first.strftime('%d.%m.%Y') }} по {{ days.last.strftime('%d.%m.%Y') }}; Вебмастер хранит 14 дней, сборщик копит историю){% endif %}.
   Частотность и позиции Я / G — из таблицы семантики{% if sheet_dates.yandex %} (последний срез {{ sheet_dates.yandex[-1].strftime('%d.%m.%Y') }}){% endif %}.
   {% if coverage %}Из {{ coverage.keys_total|int }} ключей показы за период были у {{ coverage.keys_with_shows|int }}; запросов Вебмастера с показами — {{ coverage.queries|int }}, из них вне ключей {{ coverage.queries_outside|int }}.{% endif %}
 </p>
+{% endguard %}
 
+{% guard "Таблица ключей" %}
 <div class="card table-card">
   <div class="chart-title">Найдено {{ total|int }}{% if pages > 1 %} · страница {{ kf.page }} из {{ pages }}{% endif %}</div>
   <table class="kw-table">
@@ -79,6 +84,7 @@
   </div>
   {% endif %}
 </div>
+{% endguard %}
 <p class="note">Спрос — сколько раз запрос задавали в Яндексе за день по данным Вебмастера (в среднем за дни периода).
   Я / G — позиции из таблицы семантики; RabbitSeo — последний съём по запросам проекта. Фразы сравниваются без учёта
   регистра, «ё» и лишних пробелов.</p>

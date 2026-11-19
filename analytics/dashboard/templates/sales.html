@@ -20,33 +20,48 @@
 
 {% block content %}
 {% if not stats and not primary %}
+  {% guard "Пояснение" %}
   <div class="card muted">Выгрузки Битрикс24 и 1С относятся к основному сайту — {{ f.sites[0].site or f.sites[0].name }}.</div>
+  {% endguard %}
 {% elif not stats %}
+  {% guard "Выгрузки Битрикс24 и 1С" %}
   <div class="card">
     <div class="chart-title">Выгрузок из Битрикс24 и 1С за {{ f.month|month|lower }} нет</div>
     <p>Раз в месяц положите сводки в папку <code>{{ folder }}</code> рядом с <code>docker-compose.yml</code>:
       «лиды с сайта в Б24 против заказов в 1С» и «продажи с входящих звонков» (Excel). Сборщик загрузит их сам в течение
       15 минут, а отчёт за месяц пересоберётся. Имена, телефоны и почта в базу не попадают.</p>
   </div>
+  {% endguard %}
 {% else %}
+  {% guard "Показатели" %}
   {{ show_tiles(tiles) }}
+  {% endguard %}
+  {% guard "Аналитическая сводка" %}
   {{ insights(summary) }}
+  {% endguard %}
 
+  {% guard "Сводка продаж" %}
   {{ sales_summary(summary_rows, f.month) }}
+  {% endguard %}
+  {% guard "Воронка" %}
   {{ sales_funnel(funnel, stats) }}
+  {% endguard %}
   {% if not stats.forms_category_known %}<p class="note">В выгрузке «лиды с сайта» нет признака, заказывал ли клиент раньше, —
     все нашедшиеся в 1С считаются новыми. Добавьте колонку «Категория» («Новый клиент» / «Действующий клиент»), как в
     сводке по звонкам, и действующие исключатся сами.</p>{% endif %}
 
   {% if managers %}
   <h2>Входящие звонки</h2>
+  {% guard "Входящие звонки" %}
   <div class="grid-2">
     {{ calls_table('По ответственным', managers, 'Сколько звонков на каждом и сколько не разобрано: красным — когда без стадии половина и больше.', 'Ответственный') }}
     {{ calls_table('По линиям', lines, 'Номер или линия, куда звонили: где больше всего пропущенных.', 'Линия') }}
   </div>
+  {% endguard %}
   {% endif %}
 
   {% if orders %}
+  {% guard "Новые клиенты после звонков: заказы 1С" %}
   <div class="card table-card">
     <div class="chart-title">Новые клиенты после звонков: заказы 1С</div>
     <p class="hint">Клиенты без заказов до звонка. Действующие клиенты сюда не входят.</p>
@@ -59,8 +74,11 @@
       {% endfor %}</tbody>
     </table>
   </div>
+  {% endguard %}
   {% endif %}
+  {% guard "Пояснение" %}
   <p class="note">Источник: {% for x in files %}{{ x.file_name }} ({{ x.rows_loaded }} строк){% if not loop.last %}; {% endif %}{% endfor %}.
     Нецелевые, не разобранные и «в сделку» — по стадиям лидов Битрикс24.</p>
+  {% endguard %}
 {% endif %}
 {% endblock %}

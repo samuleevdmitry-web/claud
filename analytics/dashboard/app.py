@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 
 from analytics import db
 from analytics.config import load_settings
-from analytics.dashboard import pages
+from analytics.dashboard import guard, pages
 from analytics.format import fmt_change, fmt_dec, fmt_duration, fmt_int, fmt_pct, month_name, month_short, month_with, plural
 
 HERE = Path(__file__).parent
@@ -58,6 +58,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Аналитика", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
+templates.env.add_extension(guard.GuardExtension)  # {% guard %}: блок с ошибкой не роняет страницу
 def urlencode_pairs(pairs, **override) -> str:
     """Параметры адреса из пар (ключ, значение) с заменой части: для сортировки, листания и ссылок таблицы ключей."""
     params = dict(pairs) | override
@@ -81,7 +82,7 @@ def render(request: Request, page: str, build: Callable[..., dict], site: int | 
            aud: str | None, **kwargs) -> HTMLResponse:
     """Общая обвязка раздела: фильтры, меню, пустая база, нет связи с базой."""
     settings = load_settings()
-    context: dict = {"page": page, "nav": NAV, "audiences": pages.AUDIENCES}
+    context: dict = {"page": page, "nav": NAV, "audiences": pages.AUDIENCES, "problems": guard.start()}
     template = f"{page}.html"
     try:
         with db.connect(settings.database_url) as conn:
@@ -94,6 +95,12 @@ def render(request: Request, page: str, build: Callable[..., dict], site: int | 
                 context.update(build(conn, settings, f, **kwargs) or {})
     except psycopg.OperationalError as exc:
         context.update(error=f"Нет подключения к базе: {exc}")
+        template = "empty.html"
+    except Exception as exc:  # noqa: BLE001 — раздел не построился целиком: показать почему, меню остаётся рабочим
+        guard.log.exception("раздел %s не построен", page)
+        context.update(error=f"Раздел не построен: {guard.describe(exc)}. Другие разделы меню работают; если повторяется — "
+                             "пришлите этот текст.",
+                       section_title=next((title for key, _, title, _ in NAV if key == page), None))
         template = "empty.html"
     return templates.TemplateResponse(request, template, context)
 
@@ -169,9 +176,11 @@ def report_file(conn: psycopg.Connection, settings, counter_id: int, month: date
     f = pages.resolve_filters(conn, settings, counter_id, month.strftime("%Y-%m"), None, today)
     if f is None or f.month != month or f.counter_id != counter_id:
         return None
+    problems = guard.start()
     context = pages.report_page(conn, settings, f)
     css = (HERE / "static" / "dashboard.css").read_text(encoding="utf-8")
-    html = templates.env.get_template("report_file.html").render(f=f, css=css, audiences=pages.AUDIENCES, **context)
+    html = templates.env.get_template("report_file.html").render(f=f, css=css, audiences=pages.AUDIENCES,
+                                                                 problems=problems, **context)
     return f"{month:%Y-%m} {f.site.get('site') or counter_id}.html", html
 
 

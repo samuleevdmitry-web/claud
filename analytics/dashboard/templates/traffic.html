@@ -38,28 +38,42 @@
 {% endmacro %}
 
 {% block content %}
+{% guard "Вкладки" %}
 <nav class="tabs" aria-label="Отчёты">
   {% for key, title in tabs.items() %}
   <a href="/traffic{{ f.query(tab=key if key != 'summary' else None) }}" {% if key == tab %}aria-current="page"{% endif %}>{{ title }}</a>
   {% endfor %}
 </nav>
+{% endguard %}
 
 {% if tab == "summary" %}
+  {% guard "Показатели" %}
   {{ show_tiles(tiles) }}
+  {% endguard %}
+  {% guard "Аналитическая сводка" %}
   {{ insights(summary) }}
+  {% endguard %}
+  {% guard "Визиты и посетители по месяцам" %}
   <section class="grid-2">
     {{ chart_block(charts, 'site_trend', 'Визиты и посетители по месяцам') }}
     {{ chart_block(charts, 'site_daily', 'Визиты по дням, ' ~ (f.month|month|lower)) }}
   </section>
+  {% endguard %}
   {% if skipped %}<p class="note">На графиках по месяцам нет месяцев, когда счётчик собирал данные не каждый день: {{ skipped|join(', ') }}.</p>{% endif %}
   {% for report in reports %}{{ slice_table(report, f) }}{% endfor %}
 {% else %}
+  {% guard "Аналитическая сводка" %}
   {{ insights(summary) }}
+  {% endguard %}
   {% if pages %}{{ page_blocks(pages) }}{% endif %}
   {% for report in reports %}
     {% if report.chart %}{{ chart_block(charts, 'slice_' ~ report.slice, report.title ~ ': визиты') }}{% endif %}
+    {% guard "Таблица" %}
     {{ slice_table(report, f) }}
+    {% endguard %}
   {% endfor %}
 {% endif %}
+{% guard "Пояснение" %}
 <p class="note">Средние по сайту за месяц: конверсия {{ site_conv|pct(2) }}, отказы {{ site_bounce|pct }}. Доля — от всех визитов месяца; в «Интересах» визит может попасть в несколько строк.</p>
+{% endguard %}
 {% endblock %}
