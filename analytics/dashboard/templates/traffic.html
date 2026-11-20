@@ -38,6 +38,7 @@
 {% endmacro %}
 
 {% block content %}
+{% if robots_note %}<p class="note robots-note">{{ robots_note }}</p>{% endif %}
 {% guard "Вкладки" %}
 <nav class="tabs" aria-label="Отчёты">
   {% for key, title in tabs.items() %}

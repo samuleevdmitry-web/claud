@@ -73,6 +73,12 @@ def robots_by_month(conn: psycopg.Connection, counter_id: int) -> dict[date, dic
     return {r["month"]: r for r in rows}
 
 
+def robot_filter(conn: psycopg.Connection, counter_id: int) -> int | None:
+    """Настройка «Фильтрация роботов» счётчика: 0, 1, 2 или None — ещё не загружена."""
+    row = _one(conn, "SELECT filter_robots FROM metrika_counters WHERE counter_id = %s", (counter_id,))
+    return row["filter_robots"] if row else None
+
+
 def site_trend(conn: psycopg.Connection, counter_id: int, audience: str) -> list[dict]:
     return _all(conn, """
         SELECT k.period_start AS month, k.visits, k.users, k.leads, coalesce(c.contacts, 0) AS contacts,

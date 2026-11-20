@@ -52,7 +52,7 @@
     </button>
     <div class="titles">
       <h1>{{ self.title() }}</h1>
-      {% if f %}<div class="subtitle">{{ f.month|month }} · сравнение с {{ f.prev|month_with }} · {{ audiences[f.audience]|lower }}</div>{% endif %}
+      {% if f %}<div class="subtitle">{{ f.month|month }} · сравнение с {{ f.prev|month_with }}{% if audience_switch %} · {{ audiences[f.audience]|lower }}{% endif %}</div>{% endif %}
     </div>
   </header>
 
@@ -63,13 +63,15 @@
       <a href="{{ request.url.path }}{{ f.query(site=s.counter_id, **extra) }}" {% if s.counter_id == f.counter_id %}aria-current="page"{% endif %}>{{ s.site or s.name }}</a>
       {% endfor %}
     </nav>
+    {% if audience_switch %}
     <nav class="segmented" aria-label="Аудитория">
       {% for key, title in audiences.items() %}
       <a href="{{ request.url.path }}{{ f.query(aud=key, **extra) }}" {% if key == f.audience %}aria-current="page"{% endif %}>{{ title }}</a>
       {% endfor %}
     </nav>
+    {% endif %}
     <input type="hidden" name="site" value="{{ f.counter_id }}">
-    <input type="hidden" name="aud" value="{{ f.audience }}">
+    {% if audience_switch %}<input type="hidden" name="aud" value="{{ f.audience }}">{% endif %}
     {% if extra.tab %}<input type="hidden" name="tab" value="{{ extra.tab }}">{% endif %}
     <label class="select">
       <span class="visually-hidden">Месяц</span>

@@ -64,11 +64,13 @@ def upsert_counter(conn: psycopg.Connection, counter: dict, kind: str) -> None:
     site = (counter.get("site2") or {}).get("site") or counter.get("site")
     conn.execute(
         """
-        INSERT INTO metrika_counters (counter_id, name, site, kind, updated_at) VALUES (%s, %s, %s, %s, now())
+        INSERT INTO metrika_counters (counter_id, name, site, kind, filter_robots, updated_at)
+        VALUES (%s, %s, %s, %s, %s, now())
         ON CONFLICT (counter_id) DO UPDATE
-        SET name = EXCLUDED.name, site = EXCLUDED.site, kind = EXCLUDED.kind, updated_at = now()
+        SET name = EXCLUDED.name, site = EXCLUDED.site, kind = EXCLUDED.kind, filter_robots = EXCLUDED.filter_robots,
+            updated_at = now()
         """,
-        (counter["id"], counter.get("name") or "", site, kind),
+        (counter["id"], counter.get("name") or "", site, kind, counter.get("filter_robots")),
     )
 
 

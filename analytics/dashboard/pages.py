@@ -127,8 +127,8 @@ def resolve_filters(conn: psycopg.Connection, settings: Settings, site_id: int |
     last_full = shift_month(today.replace(day=1), -1)
     if audience not in AUDIENCES:
         # «Только люди» по умолчанию — если их история уже загружена; иначе весь трафик
-        humans = q.months(conn, site["counter_id"], "humans")
-        audience = "humans" if last_full in humans or (humans and not q.months(conn, site["counter_id"], "all")) else "all"
+        humans, everyone = q.months(conn, site["counter_id"], "humans"), q.months(conn, site["counter_id"], "all")
+        audience = "humans" if humans and (last_full in humans or not everyone or humans[0] >= everyone[0]) else "all"
     available = q.months(conn, site["counter_id"], audience)
     if not available:
         return None
@@ -318,11 +318,39 @@ def overview(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
             "charts": {"site_trend": charts["site_trend"], "leads_trend": charts["leads_trend"]}, "skipped": skipped}
 
 
+ROBOT_FILTER_2 = ("В настройках счётчика включена фильтрация роботов «по строгим правилам и по поведению»: Метрика сама "
+                  "убирает роботов из всех отчётов, поэтому «Весь трафик» и «Только люди» показывают одно и то же. Чтобы "
+                  "видеть роботов отдельно, в Метрике: Настройка → Фильтры → Фильтрация роботов → «Только по строгим "
+                  "правилам» (изменятся только новые данные).")
+
+
+def robots_note(conn: psycopg.Connection, f: Filters) -> str:
+    """Почему «Весь трафик» и «Только люди» отличаются или совпадают в выбранном месяце."""
+    row = q.robots_by_month(conn, f.counter_id).get(f.month)
+    setting = q.robot_filter(conn, f.counter_id)
+    month = month_name(f.month).lower()
+    if setting == 2:
+        return ROBOT_FILTER_2
+    if row is None:
+        return f"Данных «только люди» за {month} нет — показан весь трафик."
+    robots = (row["all_visits"] or 0) - (row["human_visits"] or 0)
+    if robots <= 0:
+        text = (f"За {month} Метрика не отметила ни одного визита робота, поэтому «Весь трафик» и «Только люди» "
+                "совпадают — так считает сама Метрика, это не ошибка дашборда.")
+        if setting is None:
+            text += (" Настройку фильтрации роботов в счётчике дашборд узнает при следующей загрузке Метрики; сразу "
+                     "её показывает команда check.")
+        return text
+    return (f"Роботы за {month}: {fmt_int(robots)} визитов из {fmt_int(row['all_visits'])} "
+            f"({fmt_pct(row['robots_pct'])}) — на столько «Весь трафик» больше, чем «Только люди».")
+
+
 def traffic(conn: psycopg.Connection, settings: Settings, f: Filters, tab: str) -> dict:
     tab = tab if tab in TRAFFIC_TABS else "summary"
     m, yoy_partial = _site_basics(conn, f)
     total, conv, bounce = m.get("visits") or 0, float(m.get("conversion_pct") or 0), float(m.get("bounce_rate") or 0)
-    context = {"tab": tab, "tabs": {k: v[0] for k, v in TRAFFIC_TABS.items()}, "reports": [], "charts": {}}
+    context = {"tab": tab, "tabs": {k: v[0] for k, v in TRAFFIC_TABS.items()}, "reports": [], "charts": {},
+               "robots_note": safe("Роботы в трафике", lambda: robots_note(conn, f), "")}
     if tab == "summary":
         robots, robots_prev = _robots(conn, f)
         charts, skipped, daily = _traffic_charts(conn, f)

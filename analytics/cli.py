@@ -41,6 +41,10 @@ MONTHLY_ON = {"wordstat": 5}
 REPORT_DAY = 6
 
 
+ROBOT_FILTERS = {0: "учитываются все", 1: "фильтр по строгим правилам",
+                 2: "фильтр по строгим правилам и по поведению — «весь трафик» = «только люди»"}
+
+
 def check_metrika(settings: Settings) -> None:
     client = MetrikaClient(settings.yandex_token)
     counters = client.counters()
@@ -51,7 +55,8 @@ def check_metrika(settings: Settings) -> None:
     for c in counters:
         site = (c.get("site2") or {}).get("site") or c.get("site", "")
         mark = "*" if c["id"] in configured else " "
-        print(f"  {mark} {c['id']}  {c.get('name', '')}  {site}")
+        robots = ROBOT_FILTERS.get(c.get("filter_robots"), "")
+        print(f"  {mark} {c['id']}  {c.get('name', '')}  {site}" + (f"  (роботы: {robots})" if robots else ""))
     if not settings.metrika_counters:
         raise MetrikaError("Укажите счётчики сайтов в METRIKA_COUNTERS")
 

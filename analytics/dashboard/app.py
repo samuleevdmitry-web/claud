@@ -43,6 +43,8 @@ NAV = [
     ("maps", "/maps", "Карты", "pin"),
     ("status", "/status", "Данные", "db"),
 ]
+# Разделы, где есть переключатель «Только люди / Весь трафик».
+AUDIENCE_PAGES = {"traffic"}
 # Группы меню: пункты подряд с одной группой показываются под общим заголовком.
 NAV_GROUPS = {"seo": "SEO", "search": "SEO", "keywords": "SEO", "pf": "SEO"}
 
@@ -93,11 +95,12 @@ def render(request: Request, page: str, build: Callable[..., dict], site: int | 
     """Общая обвязка раздела: фильтры, меню, пустая база, нет связи с базой."""
     settings = load_settings()
     context: dict = {"page": page, "nav": NAV, "nav_groups": NAV_GROUPS, "audiences": pages.AUDIENCES,
-                     "problems": guard.start()}
+                     "audience_switch": page in AUDIENCE_PAGES, "problems": guard.start()}
     template = f"{page}.html"
     try:
         with db.connect(settings.database_url, PAGE_TIMEOUT_MS) as conn:
-            f = pages.resolve_filters(conn, settings, site, month, aud, date.today())
+            # «Только люди / весь трафик» выбирается только в «Трафике»; остальные разделы — по умолчанию
+            f = pages.resolve_filters(conn, settings, site, month, aud if page in AUDIENCE_PAGES else None, date.today())
             context["f"] = f
             if f is None and page != "status":
                 context.update(pages.status_page(conn, settings, None), empty=True)

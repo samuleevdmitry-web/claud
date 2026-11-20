@@ -130,6 +130,20 @@ def test_every_section_renders(client):
     status = client.get("/status", params={"month": "2026-09"}).text
     assert "Роботы в трафике" in status and "20,0%" in status
 
+    # «Только люди / Весь трафик» — только в «Трафике»; другие разделы — «только люди», что бы ни было в адресе
+    overview = client.get("/", params={"month": "2026-09", "aud": "all"}).text
+    assert 'aria-label="Аудитория"' not in overview and "960" in overview
+    everything = client.get("/traffic", params={"month": "2026-09", "aud": "all"}).text
+    assert 'aria-label="Аудитория"' in everything and "1\xa0200" in everything
+    assert "Роботы за сентябрь 2026: 240 визитов из 1\xa0200 (20,0%)" in everything
+    sources = client.get("/traffic", params={"month": "2026-09", "aud": "humans", "tab": "sources"}).text
+    assert "Роботы за сентябрь" in sources
+    # счётчик сам вычищает роботов по поведению — объясняем, почему кнопки совпадают
+    with db.connect(TEST_DATABASE_URL) as conn:
+        conn.execute("UPDATE metrika_counters SET filter_robots = 2 WHERE counter_id = 42")
+    filtered = client.get("/traffic", params={"month": "2026-09"}).text
+    assert "фильтрация роботов «по строгим правилам и по поведению»" in filtered
+
 
 @needs_db
 def test_pf_section_flags_bot_traces(client):
