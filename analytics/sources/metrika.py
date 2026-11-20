@@ -505,9 +505,10 @@ def page_reports(not_found_title: str, search_param: str) -> dict[str, tuple[lis
 
 def fetch_pages(client: MetrikaClient, counter_id: int, month: date, month_end: date,
                 not_found_title: str = NOT_FOUND_TITLE, search_param: str = "q") -> list[PageRow]:
+    """Отчёты по страницам за месяц; слишком сложный для Метрики — по выборке просмотров (report_by_parts)."""
     rows: dict[tuple[str, str], list[int]] = {}
     for kind, (metrics, dim, flt, top) in page_reports(not_found_title, search_param).items():
-        report = client.report(counter_id, metrics, [dim], month, month_end, flt, top)
+        report = report_by_parts(client, counter_id, metrics, [dim], month, month_end, flt, top)
         for row in report.rows:
             key = "" if kind == "not_found_visits" else (row["dimensions"][0].get("name") or "")
             acc = rows.setdefault((kind, key), [0, 0])
@@ -522,7 +523,7 @@ PRODUCT_METRICS = ["ym:s:productBasketsPrice", "ym:s:productBasketsQuantity",
 
 def fetch_products(client: MetrikaClient, counter_id: int, month: date, month_end: date, top: int = 200) -> list[ProductRow]:
     """Товары электронной коммерции: добавления в корзину и покупки (сумма и количество) — топ по сумме в корзине."""
-    report = client.report(counter_id, PRODUCT_METRICS, ["ym:s:productName"], month, month_end, None, top)
+    report = report_by_parts(client, counter_id, PRODUCT_METRICS, ["ym:s:productName"], month, month_end, None, top)
     out: dict[str, list[float]] = {}
     for row in report.rows:
         acc = out.setdefault(row["dimensions"][0].get("name") or "", [0.0] * 4)

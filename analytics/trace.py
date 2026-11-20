@@ -79,7 +79,7 @@ def trace_email(conn: psycopg.Connection, email: str, month: date, log: Callable
     where = {no: key for c in (stats or {}).get("classes", []) for key in [c["key"]] for no in c.get("order_nos", [])}
     log(f"Заказы 1С с этим адресом: {len(orders)}, за {month:%m.%Y} — {len(month_orders)}")
     for no, day, amount, status, name, _client, by_hash in orders:
-        line = f"  {no} {day:%d.%m.%Y} {amount:,.0f} ₽ {status or ''} {name or ''}".replace(",", " ")
+        line = f"  {no} {day:%d.%m.%Y} {amount:,.0f} руб. {status or ''} {name or ''}".replace(",", " ")
         if not by_hash:
             line += " — адрес в заказе есть, но отпечаток другой: выгрузка 1С загружена с другой солью DATA_SALT"
         elif no in where:
@@ -123,7 +123,7 @@ def trace_client(conn: psycopg.Connection, name: str, month: date, log: Callable
     where = _order_classes(conn, month) if any(month <= o[1] < q._next_month(month) for o in orders) else {}
     log(f"Заказы 1С клиентов с «{name}» в названии: {len(orders)}")
     for no, day, amount, status, client, emails, phones in orders:
-        line = f"  {no} {day:%d.%m.%Y} {amount:,.0f} ₽ {status or ''} {client}".replace(",", " ")
+        line = f"  {no} {day:%d.%m.%Y} {amount:,.0f} руб. {status or ''} {client}".replace(",", " ")
         if no in where:
             line += f" — в таблице за {month:%m.%Y}: «{CLASS_TITLES.get(where[no], where[no])}»"
         log(line)

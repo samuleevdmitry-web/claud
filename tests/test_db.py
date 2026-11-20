@@ -9,6 +9,7 @@ from datetime import date
 import pytest
 
 from analytics import db
+from analytics.sources.metrika import PageRow
 from analytics.sync import sync_metrika, sync_webmaster
 from tests.fakes import FakeMetrikaClient, FakeWebmasterClient, dim
 
@@ -258,3 +259,21 @@ def test_backfill_only_new_reports(conn):
     conn.execute("DELETE FROM metrika_traffic WHERE slice = 'source' AND period_start = %s", (JUL,))
     conn.execute("UPDATE metrika_traffic SET period_start = '2026-10-01' WHERE slice = 'source'")
     assert missing_reports(conn, settings) == {COUNTER: {"source"}}
+
+
+def test_backfill_repeats_pages_broken_in_the_middle(conn):
+    """Догрузка страниц оборвалась (Метрика: «запрос слишком сложный»): месяцы до обрыва есть, свежий добавила
+    плановая загрузка — пропуск в середине значит, что догрузку надо повторить."""
+    from analytics.cli import BACKFILL_REPORTS, missing_reports
+    from analytics.config import Settings
+
+    settings = Settings("", (COUNTER,), frozenset({1}), "lastsign", (), (), "", "", "", "", "")
+    sync_metrika(conn, FakeMetrikaClient(GOALS, month_data()), COUNTER, frozenset({1}), "lastsign",
+                 since=JUL, until=date(2026, 8, 31), today=date(2026, 9, 3), log=lambda _: None)
+    db.mark_backfilled(conn, COUNTER, BACKFILL_REPORTS - {"pages"})
+    for month in (JUL, date(2026, 10, 1)):
+        db.replace_month_pages(conn, COUNTER, month, [PageRow(month, "page", "/", 10, 5)], [])
+    assert missing_reports(conn, settings) == {COUNTER: {"pages"}}
+    for month in (AUG, date(2026, 9, 1)):
+        db.replace_month_pages(conn, COUNTER, month, [PageRow(month, "page", "/", 10, 5)], [])
+    assert missing_reports(conn, settings) == {}

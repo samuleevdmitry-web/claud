@@ -301,14 +301,14 @@ def test_trace_email_follows_one_address(tmp_path, monkeypatch):
         result = trace_email(conn, "  RYBA-AIST@inbox.ru ", oct_, log=out.append)
         text = "\n".join(out)
         assert result["in_base"] and "статус active, списки: Оптовики" in text and "14.10 «Новинки» (Оптовики) — открыл" in text
-        assert "АТЦБ-026900 20.10.2026 15 000 ₽ Закрыт Карагод ИП — в таблице: «Открыли письмо за 14 дней до заказа" in text
+        assert "АТЦБ-026900 20.10.2026 15 000 руб. Закрыт Карагод ИП — в таблице: «Открыли письмо за 14 дней до заказа" in text
         assert "расхождений" in text and "всё сходится" in text
 
         # проверка по названию клиента: какие почта и телефон в 1С и есть ли они в базе
         out.clear()
         assert len(trace_client(conn, "карагод", oct_, log=out.append)) == 2
         text = "\n".join(out)
-        assert "АТЦБ-026900 20.10.2026 15 000 ₽ Закрыт Карагод ИП — в таблице за 10.2026: «Открыли письмо" in text
+        assert "АТЦБ-026900 20.10.2026 15 000 руб. Закрыт Карагод ИП — в таблице за 10.2026: «Открыли письмо" in text
         assert "почта ryba-aist@inbox.ru — есть в базе UniSender" in text and "почты в выгрузке нет" in text
         assert "телефон +79001112233 — в базе UniSender телефонов нет" in text
 

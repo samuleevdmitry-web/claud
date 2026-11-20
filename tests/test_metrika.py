@@ -12,6 +12,7 @@ from analytics.sources.metrika import (
     TrafficRow,
     dimensions_for,
     fetch_goals,
+    fetch_pages,
     grain_range,
     month_split_point,
     parse_goals,
@@ -216,6 +217,23 @@ def test_report_too_complex_even_sampled_is_an_error():
         report_by_parts(client, 1, ["ym:s:visits"], ["ym:s:startOfMonth"], date(2026, 10, 1), date(2026, 10, 31))
     assert exc.value.too_complex
     assert [c[2] for c in client.calls] == ["full", "0.1", "0.01"]
+
+
+def test_pages_report_too_complex_is_taken_by_sample():
+    class PagesClient:
+        def __init__(self):
+            self.calls = []
+
+        def report(self, counter_id, metrics, dimensions, date1, date2, filters=None, top=None, accuracy="full"):
+            self.calls.append(accuracy)
+            if accuracy == "full" and dimensions == ["ym:pv:referer"]:
+                raise MetrikaError("HTTP 400: Запрос слишком сложный", too_complex=True)
+            return Report([{"dimensions": [dim("x")], "metrics": [10, 3]}], sampled=False)
+
+    client = PagesClient()
+    rows = fetch_pages(client, 1, date(2026, 10, 1), date(2026, 10, 31))
+    assert {r.kind for r in rows} >= {"page", "not_found_from"}
+    assert "0.1" in client.calls
 
 
 def test_top_report_is_requested_per_month_sorted_by_visits():

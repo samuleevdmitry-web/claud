@@ -190,14 +190,31 @@ def missing_reports(conn: psycopg.Connection, settings: Settings) -> dict[int, s
         ).fetchall())
         if "total" not in first:
             continue  # истории ещё нет совсем — её загрузит полная загрузка
-        first["pages"] = conn.execute("SELECT min(month) FROM metrika_pages WHERE counter_id = %s",
-                                      (counter_id,)).fetchone()[0]
+        first["pages"], last_pages, pages_months = conn.execute(
+            "SELECT min(month), max(month), count(DISTINCT month) FROM metrika_pages WHERE counter_id = %s",
+            (counter_id,)).fetchone()
         done = {r for (r,) in conn.execute("SELECT report FROM report_backfills WHERE counter_id = %s", (counter_id,))}
         late = first["total"] + timedelta(days=31)
         missing = {r for r in BACKFILL_REPORTS - done if first.get(r) is None or first[r] > late}
+        # страницы сохраняются помесячно: оборвавшаяся догрузка оставляет месяцы до обрыва, а свежие месяцы
+        # добавляет плановая загрузка — в середине пропуск
+        if "pages" not in done and first["pages"] and pages_months < _months(first["pages"], last_pages) + 1:
+            missing.add("pages")
         if missing:
             out[counter_id] = missing
     return out
+
+
+def _months(first: date, last: date) -> int:
+    return (last.year - first.year) * 12 + last.month - first.month
+
+
+def close_backfill(settings: Settings, today: date) -> None:
+    """Догрузка когда-то оборвалась, но недостающих отчётов больше нет (их загрузила полная загрузка или повтор):
+    отметить это, чтобы на странице «Данные» не висела устаревшая ошибка."""
+    with db.connect(settings.database_url) as conn:
+        db.finish_run(conn, db.start_run(conn, "metrika_backfill", HISTORY_START, today), rows_loaded=0)
+    print(f"{datetime.now(TZ):%d.%m %H:%M} догрузка отчётов: недостающих отчётов нет")
 
 
 def run_backfill(settings: Settings, missing: dict[int, set[str]], today: date) -> None:
@@ -409,15 +426,16 @@ def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
                 sync(source, since)
             # новые отчёты Метрики, появившиеся после загрузки истории, — догрузить их историю отдельно
             last = runs.get("metrika_backfill", {})
-            backfill_failed_recently = (
-                last.get("last_attempt") is not None and now - last["last_attempt"] < RETRY_AFTER
-                and (last.get("last_ok") is None or last["last_ok"] < last["last_attempt"])
-            )
+            backfill_failed = last.get("last_attempt") is not None and (
+                last.get("last_ok") is None or last["last_ok"] < last["last_attempt"])
+            backfill_failed_recently = backfill_failed and now - last["last_attempt"] < RETRY_AFTER
             if backfill and "metrika" in sources and not backfill_failed_recently:
                 try:
                     run_backfill(settings, backfill, now.date())
                 except Exception as exc:
                     print(f"{datetime.now(TZ):%d.%m %H:%M} ошибка (догрузка отчётов): {exc}", file=sys.stderr)
+            elif backfill_failed and not backfill and "metrika" in sources and "metrika" not in incomplete:
+                close_backfill(settings, now.date())
             # отчёт — после загрузок; если конец прошлого месяца ещё не забран (сбор раз в неделю), сначала он
             if settings.metrika_counters and due_sources(now, runs, ["report"], {"report": 0},
                                                          monthly_on={"report": REPORT_DAY}):
