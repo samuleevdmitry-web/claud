@@ -389,6 +389,7 @@ def save_crm_file(conn: psycopg.Connection, sha: str, file_name: str, parsed, ve
         cur.execute(
             "INSERT INTO crm_imports (sha256, file_name, kind, month, rows_loaded, parser_version, contacts)"
             " VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (sha256) DO UPDATE SET imported_at = now(),"
+            " file_name = EXCLUDED.file_name, kind = EXCLUDED.kind, month = EXCLUDED.month,"
             " rows_loaded = EXCLUDED.rows_loaded, parser_version = EXCLUDED.parser_version, contacts = EXCLUDED.contacts",
             (sha, file_name, kind, month, parsed.rows, version, keep_contacts),
         )

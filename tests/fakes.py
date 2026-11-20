@@ -62,7 +62,7 @@ class FakeMetrikaClient:
     def goals(self, counter_id: int) -> list[dict]:
         return self._goals
 
-    def report(self, counter_id, metrics, dimensions, date1, date2, filters=None, top=None) -> Report:
+    def report(self, counter_id, metrics, dimensions, date1, date2, filters=None, top=None, accuracy="full") -> Report:
         self.reports.append((metrics, dimensions, date1, date2, filters))
         if dimensions[0] not in GRAINS.values() or "ym:pv:" in (filters or ""):  # страницы и товары: {группировка: [(имя, [метрики])]}
             rows = [{"dimensions": [dim(name)], "metrics": values}

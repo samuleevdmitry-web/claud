@@ -258,6 +258,34 @@ def test_orders_import_and_retry_of_unknown_files(tmp_path):
         assert messages["other.xlsx"].startswith("не загружен") and "Что-то, Ещё, Другое" in messages["other.xlsx"]
 
 
+@pytest.mark.parametrize(
+    ("header", "kind"),
+    [
+        ("номенклатура из рассылки", "item"),
+        ("товар из рассылки", "item"),
+        ("рассылка", "mailing"),
+        ("дата рассылки", "mailing_date"),
+        ("партнер", "client"),
+        ("партнеры (поставщики и перевозчики) - в разработке", None),
+        ("контрагент", "client"),
+    ],
+)
+def test_column_kind_by_meaning(header, kind):
+    assert crm_files._column_kind(header) == kind
+
+
+@needs_db
+def test_reparsed_file_gets_its_new_kind(tmp_path):
+    """Файл, который прежняя версия разбора не узнала, после разбора — уже не «не распознан» на странице «Данные»."""
+    with db.connect(TEST_DATABASE_URL) as conn:
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        db.apply_schema(conn)
+        sheet_file(tmp_path / "LEAD.xlsx", [["Номер", "Дата", "Сумма", "Email"], ["А-1", datetime(2026, 10, 5), 100, "a@b.ru"]])
+        db.skip_crm_file(conn, crm_files.sha256(tmp_path / "LEAD.xlsx"), "LEAD.xlsx", version=3)
+        import_crm_folder(conn, tmp_path, log=lambda _: None)
+        assert conn.execute("SELECT kind, month FROM crm_imports").fetchall() == [("orders", date(2026, 10, 1))]
+
+
 def test_xls_cells_are_converted():
     import xlrd
 

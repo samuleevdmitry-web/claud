@@ -206,8 +206,10 @@ class MetrikaClient:
         date2: date,
         filters: str | None = None,
         top: int | None = None,
+        accuracy: str = "full",
     ) -> Report:
-        """Отчёт целиком, со всеми страницами; с top — только первые top строк по первой метрике."""
+        """Отчёт целиком, со всеми страницами; с top — только первые top строк по первой метрике.
+        accuracy — доля визитов для расчёта: full — все, «0.1» — выборка (когда полный отчёт слишком сложный)."""
         rows: list[dict] = []
         sampled = False
         while True:
@@ -219,7 +221,7 @@ class MetrikaClient:
                 "date2": date2.isoformat(),
                 "limit": top or PAGE_SIZE,
                 "offset": len(rows) + 1,  # строки в API нумеруются с единицы
-                "accuracy": "full",
+                "accuracy": accuracy,
                 "include_undefined": "true",
                 "lang": "ru",
             }
@@ -421,19 +423,37 @@ def report_by_parts(
     filters: str | None = None,
     top: int | None = None,
 ) -> Report:
-    """Отчёт за период; если Метрика считает запрос слишком сложным, период делится пополам.
+    """Отчёт за период; если Метрика считает запрос слишком сложным — по частям.
 
-    Деление идёт по границе месяца, чтобы месячная строка не собиралась из двух частей.
+    Сначала период делится по границе месяца, чтобы месячная строка не собиралась из двух частей. Если и месяц
+    слишком сложный: отчёт по дням делится дальше по дням (строки и так дневные — ничего не теряется), а месячный
+    берётся с выборкой визитов, как предлагает сама Метрика («уменьшите интервал дат или семплирование»), — такой
+    отчёт помечается как выборка.
     """
     try:
         return client.report(counter_id, metrics, dimensions, date1, date2, filters, top)
     except MetrikaError as exc:
-        split = month_split_point(date1, date2)
-        if not exc.too_complex or split is None:
+        if not exc.too_complex:
             raise
-    left = report_by_parts(client, counter_id, metrics, dimensions, date1, split - timedelta(days=1), filters, top)
-    right = report_by_parts(client, counter_id, metrics, dimensions, split, date2, filters, top)
-    return Report(left.rows + right.rows, left.sampled or right.sampled)
+        split = month_split_point(date1, date2)
+        if split is None and GRAINS["day"] in dimensions and date2 > date1:
+            split = date1 + timedelta(days=(date2 - date1).days // 2 + 1)
+    if split is not None:
+        left = report_by_parts(client, counter_id, metrics, dimensions, date1, split - timedelta(days=1), filters, top)
+        right = report_by_parts(client, counter_id, metrics, dimensions, split, date2, filters, top)
+        return Report(left.rows + right.rows, left.sampled or right.sampled)
+    for accuracy in SAMPLED_ACCURACY:
+        try:
+            report = client.report(counter_id, metrics, dimensions, date1, date2, filters, top, accuracy=accuracy)
+            return Report(report.rows, True)
+        except MetrikaError as exc:
+            if not exc.too_complex:
+                raise
+    raise MetrikaError(f"Отчёт {', '.join(dimensions)} за {date1:%d.%m.%Y}–{date2:%d.%m.%Y} слишком сложный для Метрики "
+                       "даже по выборке", too_complex=True)
+
+
+SAMPLED_ACCURACY = ("0.1", "0.01")  # доля визитов, по которой Метрика строит отчёт, если полный слишком сложный
 
 
 def month_split_point(date1: date, date2: date) -> date | None:

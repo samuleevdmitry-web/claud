@@ -386,3 +386,11 @@ def test_company_directory_links_clients(tmp_path):
         assert classes() == {"АТЦБ-1": "open_other", "АТЦБ-2": "unopened", "АТЦБ-3": "outside"}
         listed = q.clients_of_orders(conn, ["АТЦБ-3"])
         assert listed["with_email"] == 1 and listed["rows"][0]["emails"] == ["new@x.ru"]
+
+        # справочник и заказы положены вместе: справочник (по имени файла) разбирается раньше заказов, но итог
+        # «скольких клиентов нашёл» на странице «Данные» считается по всем заказам, а не по уже разобранным
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        db.apply_schema(conn)
+        import_crm_folder(conn, tmp_path, log=lambda _: None, keep_contacts=True)
+        messages = {x["file_name"]: x["message"] for x in q.import_files(conn)}
+        assert "найденные в справочнике: 3 из 3 (по названию или ИНН — 2" in messages["COMPANY_20261120.xls"]

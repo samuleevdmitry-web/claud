@@ -37,7 +37,8 @@ KIND_NAMES = {"forms": "лиды с сайта (формы)", "calls": "вход
 # 6 — колонки узнаются по смыслу («Заказ 1С», «Номенклатура 1С»…), все листы книги, позиции заказов и рассылок.
 # 7 — список сотрудников («Сотрудник», «E-Mail»): нераспознанный раньше файл пользователей читается заново.
 # 8 — справочник компаний Б24 (HTML-«xls», CSV); у заказов — ключ названия компании и ИНН для сверки с ним.
-PARSER_VERSION = 8
+# 9 — «Номенклатура из рассылки» — товар, а не рассылка; позиции заказа — с листа с суммой позиции.
+PARSER_VERSION = 9
 
 
 class CrmFileError(Exception):
@@ -335,6 +336,8 @@ def _column_kind(h: str) -> str | None:
         return "email"
     if "телефон" in h:
         return "phone"
+    if "рассыл" in h and h.startswith(("номенклатур", "товар", "позици", "наименование")):
+        return "item"  # «Номенклатура из рассылки» — товар, а не название рассылки
     if "рассыл" in h:
         if "дата" in h:
             return "mailing_date"
@@ -359,7 +362,7 @@ def _column_kind(h: str) -> str | None:
         return "item"
     if h.startswith(("заказ ", "номер заказа", "№ заказа", "номер документа")) and not h.startswith("заказов"):
         return "order_no"
-    if h.startswith(("клиент", "контрагент", "покупатель", "партнер", "заказчик")):
+    if h.startswith(("клиент", "контрагент", "покупатель", "заказчик")):  # «Партнер» — только точным названием
         return "client"
     if "статус" in h or "состояни" in h:
         return "status"
@@ -656,13 +659,15 @@ def _parse_orders_workbook(sheets: dict[str, list[tuple]]) -> CrmFile | None:
                                was.inn_hash or o.inn_hash)
     lines: list[OrderLine] = []
     by_order: dict[str, list[OrderLine]] = {}
+    rank: dict[str, tuple[int, bool]] = {}
     for part in parts:
         mine: dict[str, list[OrderLine]] = {}
         for x in part["lines"]:
             mine.setdefault(x.order_no, []).append(x)
+        priced = "line_amount" in part["cols"]  # при равном числе строк — лист с суммой позиции, а не заказа
         for no, xs in mine.items():
-            if len(xs) > len(by_order.get(no, [])):
-                by_order[no] = xs
+            if (len(xs), priced) > rank.get(no, (0, False)):
+                by_order[no], rank[no] = xs, (len(xs), priced)
     for xs in by_order.values():
         lines += xs
     order_list = list(orders.values())

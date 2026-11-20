@@ -1,4 +1,5 @@
 from datetime import date
+from itertools import pairwise
 
 import pytest
 
@@ -150,7 +151,7 @@ class SplittingClient:
         self.error_too_complex = error_too_complex
         self.calls = []
 
-    def report(self, counter_id, metrics, dimensions, date1, date2, filters=None, top=None):
+    def report(self, counter_id, metrics, dimensions, date1, date2, filters=None, top=None, accuracy="full"):
         self.calls.append((date1, date2))
         if (date2.year - date1.year) * 12 + date2.month - date1.month >= 2:
             raise MetrikaError("HTTP 400", too_complex=self.error_too_complex)
@@ -174,6 +175,47 @@ def test_report_by_parts_does_not_split_other_errors():
     with pytest.raises(MetrikaError):
         report_by_parts(client, 1, ["ym:s:visits"], ["ym:s:date"], date(2026, 1, 1), date(2026, 6, 30))
     assert len(client.calls) == 1
+
+
+class HeavyClient:
+    """Метрика, которой даже месяц слишком сложен: полный отчёт — не длиннее max_days дней, выборка — если разрешена."""
+
+    def __init__(self, max_days=7, sampled_ok=("0.1",)):
+        self.max_days = max_days
+        self.sampled_ok = sampled_ok
+        self.calls = []
+
+    def report(self, counter_id, metrics, dimensions, date1, date2, filters=None, top=None, accuracy="full"):
+        self.calls.append((date1, date2, accuracy))
+        if accuracy == "full" and (date2 - date1).days + 1 <= self.max_days or accuracy in self.sampled_ok:
+            return Report([{"period": (date1, date2), "accuracy": accuracy}], sampled=False)
+        raise MetrikaError("HTTP 400: Запрос слишком сложный", too_complex=True)
+
+
+def test_daily_report_too_complex_for_a_month_is_split_by_days():
+    client = HeavyClient(max_days=8)
+    report = report_by_parts(client, 1, ["ym:s:visits"], ["ym:s:date"], date(2026, 10, 1), date(2026, 10, 31))
+    periods = [row["period"] for row in report.rows]
+    assert periods[0][0] == date(2026, 10, 1) and periods[-1][1] == date(2026, 10, 31)
+    assert all((b - a).days + 1 <= 8 for a, b in periods)
+    assert all((b2 - a1).days == 1 for (_, a1), (b2, _) in pairwise(periods))  # без пропусков и повторов
+    assert {row["accuracy"] for row in report.rows} == {"full"}
+    assert report.sampled is False
+
+
+def test_monthly_report_too_complex_falls_back_to_sampling():
+    client = HeavyClient(max_days=7)
+    report = report_by_parts(client, 1, ["ym:s:visits"], ["ym:s:startOfMonth"], date(2026, 10, 1), date(2026, 10, 31))
+    assert [row["accuracy"] for row in report.rows] == ["0.1"]
+    assert report.sampled is True
+
+
+def test_report_too_complex_even_sampled_is_an_error():
+    client = HeavyClient(max_days=7, sampled_ok=())
+    with pytest.raises(MetrikaError) as exc:
+        report_by_parts(client, 1, ["ym:s:visits"], ["ym:s:startOfMonth"], date(2026, 10, 1), date(2026, 10, 31))
+    assert exc.value.too_complex
+    assert [c[2] for c in client.calls] == ["full", "0.1", "0.01"]
 
 
 def test_top_report_is_requested_per_month_sorted_by_visits():

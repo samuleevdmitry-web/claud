@@ -291,6 +291,39 @@ def import_crm_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str
 IMPORT_LOCK = 4207732
 
 
+FOUND_PREFIX = "клиенты из заказов 1С, найденные в справочнике:"
+
+
+def refresh_company_summaries(conn: psycopg.Connection) -> None:
+    """Справочники компаний разбираются вперемешку с заказами (по имени файла), поэтому «скольких клиентов 1С нашёл
+    справочник» пересчитывается, когда разобраны все файлы."""
+    for sha, message in conn.execute("SELECT sha256, message FROM crm_imports WHERE kind = 'companies'").fetchall():
+        line = FOUND_PREFIX + " " + _found_text(conn, sha)
+        lines = [line if x.startswith(FOUND_PREFIX) else x for x in (message or "").split("\n")]
+        db.set_import_message(conn, sha, "\n".join(lines))
+
+
+def _found_text(conn: psycopg.Connection, sha: str) -> str:
+    total, by_name, by_contact, either = conn.execute("""
+        WITH mine AS (SELECT company_id, company_key, inn_hash FROM companies WHERE source = %(sha)s),
+        clients AS (SELECT DISTINCT coalesce(company_key, client_hash, order_no) AS client, company_key, inn_hash,
+                           email_hashes, phone_hashes FROM orders_1c),
+        by_name AS (SELECT DISTINCT k.client FROM clients k JOIN mine m ON m.company_key = k.company_key
+                    UNION SELECT DISTINCT k.client FROM clients k JOIN mine m ON m.inn_hash = k.inn_hash),
+        by_contact AS (
+            SELECT DISTINCT k.client FROM clients k CROSS JOIN LATERAL unnest(k.email_hashes) h
+            JOIN company_contacts cc ON cc.email_hash = h JOIN mine m USING (company_id)
+            UNION
+            SELECT DISTINCT k.client FROM clients k CROSS JOIN LATERAL unnest(k.phone_hashes) h
+            JOIN company_contacts cc ON cc.phone_hash = h JOIN mine m USING (company_id)
+        )
+        SELECT (SELECT count(DISTINCT client) FROM clients), (SELECT count(*) FROM by_name),
+               (SELECT count(*) FROM by_contact), (SELECT count(*) FROM (SELECT client FROM by_name UNION
+                                                                          SELECT client FROM by_contact) z)
+    """, {"sha": sha}).fetchone()
+    return (f"{either} из {total} (по названию или ИНН — {by_name}, по общей почте или телефону — {by_contact})")
+
+
 def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], None], keep_contacts: bool = False) -> list:
     # заказы и сотрудники, разобранные без имён и контактов, перечитываются, когда списки включили;
     # списки выключили — имена и контакты стираются (отпечатки остаются)
@@ -339,6 +372,8 @@ def _import_folder(conn: psycopg.Connection, folder: Path, log: Callable[[str], 
             text = f"{crm_files.KIND_NAMES[parsed.kind]} за {parsed.month:%m.%Y}, {rows} строк"
         _report(conn, sha, path.name, text, log)
         out.append(parsed)
+    if any(p.kind in ("orders", "companies") for p in out if hasattr(p, "kind")):
+        refresh_company_summaries(conn)
     return out
 
 
@@ -352,28 +387,9 @@ def companies_summary(conn: psycopg.Connection, sha: str, parsed, keep_contacts:
     """Что дал справочник компаний: сколько компаний и контактов и скольких клиентов из заказов 1С он нашёл —
     по названию (без формы собственности), ИНН или общей почте и телефону."""
     c = parsed.companies
-    found = conn.execute("""
-        WITH mine AS (SELECT company_id, company_key, inn_hash FROM companies WHERE source = %(sha)s),
-        clients AS (SELECT DISTINCT coalesce(company_key, client_hash, order_no) AS client, company_key, inn_hash,
-                           email_hashes, phone_hashes FROM orders_1c),
-        by_name AS (SELECT DISTINCT k.client FROM clients k JOIN mine m ON m.company_key = k.company_key
-                    UNION SELECT DISTINCT k.client FROM clients k JOIN mine m ON m.inn_hash = k.inn_hash),
-        by_contact AS (
-            SELECT DISTINCT k.client FROM clients k CROSS JOIN LATERAL unnest(k.email_hashes) h
-            JOIN company_contacts cc ON cc.email_hash = h JOIN mine m USING (company_id)
-            UNION
-            SELECT DISTINCT k.client FROM clients k CROSS JOIN LATERAL unnest(k.phone_hashes) h
-            JOIN company_contacts cc ON cc.phone_hash = h JOIN mine m USING (company_id)
-        )
-        SELECT (SELECT count(DISTINCT client) FROM clients), (SELECT count(*) FROM by_name),
-               (SELECT count(*) FROM by_contact), (SELECT count(*) FROM (SELECT client FROM by_name UNION
-                                                                          SELECT client FROM by_contact) z)
-    """, {"sha": sha}).fetchone()
-    total, by_name, by_contact, either = found
     lines = [(f"справочник компаний Б24 — {len(c)} (с почтой {sum(1 for x in c if x.email_hashes)}, "
               f"с телефоном {sum(1 for x in c if x.phone_hashes)})"),
-             (f"клиенты из заказов 1С, найденные в справочнике: {either} из {total} (по названию или ИНН — {by_name}, "
-              f"по общей почте или телефону — {by_contact})"),
+             f"{FOUND_PREFIX} {_found_text(conn, sha)}",
              "названия и контакты сохранены для списков" if keep_contacts
              else "сохранены только отпечатки; названия и контакты — при EMAIL_LISTS=on в .env"]
     return "\n".join(lines + parsed.sheets_info)
