@@ -12,7 +12,7 @@ from pathlib import Path
 
 import psycopg
 
-from analytics import db
+from analytics import db, seo
 from analytics.config import Settings, load_settings
 from analytics.schedule import HISTORY_START, RETRY_AFTER, TZ, due_sources, month_close_sources
 from analytics.sources.metrika import SLICES, MetrikaClient, MetrikaError, dimensions_for
@@ -215,6 +215,24 @@ def close_backfill(settings: Settings, today: date) -> None:
     with db.connect(settings.database_url) as conn:
         db.finish_run(conn, db.start_run(conn, "metrika_backfill", HISTORY_START, today), rows_loaded=0)
     print(f"{datetime.now(TZ):%d.%m %H:%M} догрузка отчётов: недостающих отчётов нет")
+
+
+def seo_reports(settings: Settings, force: bool = False) -> int:
+    """Отчёты ассистента SEO: по каждому сайту Вебмастера, если с прошлого отчёта пришли новые данные (или force)."""
+    done = 0
+    with db.connect(settings.database_url) as conn:
+        primary = seo.primary_host(conn, settings.metrika_counters)
+        hosts = [h for (h,) in conn.execute("SELECT DISTINCT host_id FROM webmaster_query_daily ORDER BY 1")]
+        for host in hosts:
+            if not force and not seo.due(conn, host):
+                continue
+            words = seo.brand_words(settings.wordstat_keywords_path, seo.project_of(host))
+            seo.run(conn, host, words, primary is None or host == primary,
+                    "пересчёт командой" if force else "после загрузки Вебмастера")
+            opened = conn.execute("SELECT count(*) FROM seo_recs WHERE host_id = %s AND status = 'open'", (host,)).fetchone()[0]
+            print(f"=== ассистент SEO: {seo.project_of(host)} — рекомендаций в работе {opened}")
+            done += 1
+    return done
 
 
 def run_backfill(settings: Settings, missing: dict[int, set[str]], today: date) -> None:
@@ -436,6 +454,10 @@ def cmd_schedule(settings: Settings, check_every: int = 15 * 60) -> None:
                     print(f"{datetime.now(TZ):%d.%m %H:%M} ошибка (догрузка отчётов): {exc}", file=sys.stderr)
             elif backfill_failed and not backfill and "metrika" in sources and "metrika" not in incomplete:
                 close_backfill(settings, now.date())
+            try:  # ассистент SEO — после свежих данных Вебмастера
+                seo_reports(settings)
+            except Exception as exc:
+                print(f"{datetime.now(TZ):%d.%m %H:%M} ошибка (ассистент SEO): {exc}", file=sys.stderr)
             # отчёт — после загрузок; если конец прошлого месяца ещё не забран (сбор раз в неделю), сначала он
             if settings.metrika_counters and due_sources(now, runs, ["report"], {"report": 0},
                                                          monthly_on={"report": REPORT_DAY}):
@@ -467,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
     tr = sub.add_parser("trace-email", help="проверить один адрес: база UniSender, письма, заказы 1С, строка таблицы")
     tr.add_argument("email", help="адрес почты клиента")
     tr.add_argument("--month", help="месяц ГГГГ-ММ (по умолчанию — прошлый)")
+    sub.add_parser("seo-assistant", help="пересчитать отчёт ассистента SEO по последним данным")
     rep = sub.add_parser("report", help="сохранить отчёт за месяц в папку отчётов (по умолчанию — за прошлый месяц)")
     rep.add_argument("--month", help="месяц ГГГГ-ММ")
     for name, help_ in (
@@ -506,6 +529,12 @@ def main(argv: list[str] | None = None) -> int:
                     conn.execute("DELETE FROM crm_imports")
             parsed = import_crm(settings, date.today())
             print(f"Загружено файлов: {len(parsed)}" if parsed else f"Новых файлов в {settings.imports_dir} нет")
+            return 0
+        if args.command == "seo-assistant":
+            with db.connect(settings.database_url) as conn:
+                db.apply_schema(conn)
+            n = seo_reports(settings, force=True)
+            print(f"Отчётов построено: {n}" if n else "Данных аналитики запросов Вебмастера ещё нет")
             return 0
         if args.command == "report":
             month = date.fromisoformat(args.month + "-01") if args.month else previous_month(date.today())

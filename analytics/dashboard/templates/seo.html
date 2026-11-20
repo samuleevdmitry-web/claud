@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}Ассистент SEO{% endblock %}
+
+{% macro metrics(k) %}
+  {% if k %}позиция {{ k.position|dec if k.position is not none else 'нет в выдаче' }}{% if k.imp %} · показы {{ k.imp|int }} · клики {{ k.clicks|int }} · CTR {{ k.ctr|pct }}{% endif %}{% if k.demand[0] %} · спрос ≈ {{ k.demand[0]|int }}/мес ({{ k.demand[1] }}){% endif %}{% endif %}
+{% endmacro %}
+
+{% macro impact_cell(i) %}
+  {% if i %}
+    <span class="verdict-badge tone-{{ i.tone }}">{{ i.verdict }}</span>
+    <div class="muted small">{{ i.text }}</div>
+  {% else %}<span class="muted">данных нет</span>{% endif %}
+{% endmacro %}
+
+{% macro rec_card(r, prefix="rec") %}
+  <details class="rec" id="{{ prefix }}-{{ r.rec_id }}">
+    <summary>
+      <span class="badge">{{ r.lane_title }}</span>
+      <span class="badge badge-muted">{{ r.track_title }}</span>
+      {% if r.focus %}<span class="badge badge-focus" title="план продвигаемого ключа">продвигаем</span>{% endif %}
+      <span class="rec-title">{{ r.title }}</span>
+      <span class="muted small">с {{ r.created_at|local }}{% if r.seen_at and r.seen_at.date() != r.created_at.date() %}, подтверждена {{ r.seen_at|local }}{% endif %}</span>
+    </summary>
+    <div class="rec-body">
+      <p><strong>Что видно в данных.</strong> {{ r.observed }}</p>
+      <p><strong>Вывод (гипотеза).</strong> {{ r.inferred }}</p>
+      <p><strong>Что сделать:</strong></p>
+      <ol>{% for a in r.actions %}<li>{{ a }}</li>{% endfor %}</ol>
+      <p><strong>Как поймём, что сработало:</strong> {{ r.acceptance }}</p>
+      {% if r.page %}<p class="muted small">Страница: <a href="{{ r.page }}" target="_blank" rel="noopener">{{ r.page_path }}</a>{% if r.phrase %} · <a href="/keywords/detail{{ f.query(k=r.phrase) }}">динамика запроса</a>{% endif %}</p>{% endif %}
+      {% if r.status == 'open' %}
+      <div class="rec-forms">
+        <form method="post" action="/seo/action" class="inline-form">
+          <input type="hidden" name="site" value="{{ f.counter_id }}"><input type="hidden" name="rec" value="{{ r.rec_id }}">
+          <input type="hidden" name="action" value="rec_done">
+          <label>Внедрено <input type="date" name="done_on" value="{{ today.isoformat() }}" max="{{ today.isoformat() }}"></label>
+          <label class="wide">Что сделали <input type="text" name="note" maxlength="1000" placeholder="например, переписали title и H1, добавили 3 ссылки"></label>
+          <button type="submit">Отметить внедрённым</button>
+        </form>
+        <form method="post" action="/seo/action" class="inline-form">
+          <input type="hidden" name="site" value="{{ f.counter_id }}"><input type="hidden" name="rec" value="{{ r.rec_id }}">
+          <input type="hidden" name="action" value="rec_dismiss">
+          <label class="wide">Почему откладываем <input type="text" name="note" maxlength="1000" placeholder="решение владельца: не наш товар, не сейчас…"></label>
+          <button type="submit" class="secondary">Отложить</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+{% endmacro %}
+
+{% block content %}
+{% if not host %}
+  <div class="card muted">Сайт не подключён к Вебмастеру — ассистенту не на чем строить анализ.</div>
+{% else %}
+
+{% if message %}<div class="alert alert-ok" role="status"><span class="alert-icon" aria-hidden="true">✓</span><span>{{ message }}</span></div>{% endif %}
+
+{% guard "Ситуация" %}
+<section class="card" id="report">
+  <div class="report-head">
+    <div>
+      <div class="chart-title">Ситуация по ключам</div>
+      {% if report %}
+      <div class="muted small">Отчёт от {{ report.created_at|local }}{% if report.summary.reason %} ({{ report.summary.reason }}){% endif %} ·
+        данные Вебмастера {{ report.period_from.strftime('%d.%m') }}–{{ report.period_to.strftime('%d.%m.%Y') }} ·
+        RabbitSeo — {{ report.sources.rabbit.strftime('%d.%m.%Y') if report.sources.rabbit else 'нет' }} ·
+        позиции из таблицы семантики — {{ report.sources.semantics.strftime('%d.%m.%Y') if report.sources.semantics else 'нет' }}</div>
+      {% else %}<div class="muted small">Отчётов ещё нет: нужны данные аналитики запросов Вебмастера.</div>{% endif %}
+    </div>
+    <form method="post" action="/seo/action">
+      <input type="hidden" name="site" value="{{ f.counter_id }}"><input type="hidden" name="action" value="run">
+      <button type="submit" class="secondary">Пересчитать сейчас</button>
+    </form>
+  </div>
+  {% if report %}
+  {% set s = report.summary %}
+  <div class="tiles">
+    <div class="tile"><div class="tile-label">Запросов с показами</div><div class="tile-value">{{ s.queries|int }}</div>
+      <div class="tile-note">за 28 дней</div></div>
+    <div class="tile"><div class="tile-label">ТОП-3 / 4–10 / 11–20</div>
+      <div class="tile-value">{{ s.bands.top3|int }} / {{ s.bands.top10|int }} / {{ s.bands.top20|int }}</div>
+      <div class="tile-note">ниже 20 — {{ s.bands.deeper|int }}</div></div>
+    <div class="tile"><div class="tile-label">Показы</div><div class="tile-value">{{ s.imp|int }}</div>
+      {% if s.imp_prev %}<div class="tile-delta {{ 'good' if s.imp >= s.imp_prev else 'bad' }}">{{ s.imp|change(s.imp_prev) }}</div>{% endif %}
+      <div class="tile-note">к 28 дням до этого</div></div>
+    <div class="tile"><div class="tile-label">Клики</div><div class="tile-value">{{ s.clicks|int }}</div>
+      {% if s.clicks_prev %}<div class="tile-delta {{ 'good' if s.clicks >= s.clicks_prev else 'bad' }}">{{ s.clicks|change(s.clicks_prev) }}</div>{% endif %}
+      <div class="tile-note">к 28 дням до этого</div></div>
+    <div class="tile"><div class="tile-label">Рекомендаций в работе</div><div class="tile-value">{{ open_count|int }}</div>
+      <div class="tile-note">внедрено — {{ done|length }}</div></div>
+  </div>
+  <ul class="findings">{% for t in s.findings %}<li>{{ t }}</li>{% endfor %}</ul>
+  <details class="list">
+    <summary>Ограничения данных и как работает ассистент</summary>
+    <ul>{% for t in s.limitations %}<li>{{ t }}</li>{% endfor %}</ul>
+    <p class="note">Методика — seo-research: две дорожки (ближняя — защита, почти в ТОПе, сниппет, каннибализация, пробелы;
+      лидерство — самые востребованные запросы с целью ТОП-3 и сверхцелью 1-е место), очередь «сейчас / следом / позже»,
+      «отложить» — только решение владельца. В каждой рекомендации отдельно — что видно в данных (с датами) и вывод-гипотеза.
+      Одного «балла ключа» нет: спрос, показы, позиция и страница — отдельными полями. Позиции не обещаются: цель и вехи — то,
+      что измеряем. Пересчёт — после каждой загрузки Вебмастера (по понедельникам), после выбора ключей и кнопкой.
+      Внедрённое оценивается так: 28 дней до внедрения против 28 дней после недели на переиндексацию, в сравнении с остальными
+      запросами сайта за те же дни — чтобы апдейт Яндекса или сезон не выдать за результат правки.</p>
+  </details>
+  {% endif %}
+</section>
+{% endguard %}
+
+<h2 id="focus">Продвигаемые ключи <span class="h2-note">выбираются внизу страницы, в «Выбрать ключи»</span></h2>
+{% guard "Продвигаемые ключи" %}
+{% if focus %}
+  {% for x in focus %}
+  <details class="card plan" {% if loop.first %}open{% endif %}>
+    <summary>
+      <strong>«{{ x.phrase }}»</strong> <span class="badge">цель ТОП-{{ x.target }}</span>
+      <span class="muted small">продвигаем с {{ x.added_at|local }}</span>
+      <div class="small">{{ metrics(x.key) }}{% if x.key and x.key.rabbit_pos is not none %} · RabbitSeo {{ x.key.rabbit_pos }} ({{ x.key.rabbit_date.strftime('%d.%m') }}){% endif %}</div>
+    </summary>
+    <div class="plan-body">
+      <p><strong>С начала продвижения:</strong> {{ impact_cell(x.progress) }}</p>
+      {% if x.key and x.key.page %}<p class="muted small">Страница в выдаче: <a href="{{ x.key.page }}" target="_blank" rel="noopener">{{ x.key.page }}</a></p>{% endif %}
+      {% if x.plan %}
+        <p><strong>План:</strong></p>
+        {% for r in x.plan %}{{ rec_card(r, "plan") }}{% endfor %}
+      {% else %}<p class="muted">План появится после пересчёта отчёта.</p>{% endif %}
+      <form method="post" action="/seo/action" class="inline-form">
+        <input type="hidden" name="site" value="{{ f.counter_id }}"><input type="hidden" name="action" value="focus_remove">
+        <input type="hidden" name="k" value="{{ x.phrase }}">
+        <button type="submit" class="secondary">Снять с продвижения</button>
+      </form>
+    </div>
+  </details>
+  {% endfor %}
+{% else %}
+  <div class="card muted">Пока ничего не выбрано. Отметьте ключи в таблице «Выбрать ключи для продвижения» — ассистент составит по ним план.</div>
+{% endif %}
+{% endguard %}
+
+<h2 id="recs">Рекомендации <span class="h2-note">датированы; внедрённые и отложенные не удаляются</span></h2>
+{% guard "Рекомендации" %}
+{% for key, title, items in groups %}
+  <div class="card">
+    <div class="chart-title">{{ title }} <span class="muted">— {{ items|length }}</span></div>
+    {% if items %}{% for r in items %}{{ rec_card(r) }}{% endfor %}
+    {% else %}<p class="muted">Нет.</p>{% endif %}
+  </div>
+{% endfor %}
+{% endguard %}
+
+<h2 id="results">Результаты внедрённого <span class="h2-note">влияние действия на позицию и клики — сверх общего движения сайта</span></h2>
+{% guard "Результаты внедрённого" %}
+<div class="card table-card">
+  {% if done %}
+  <table>
+    <thead><tr><th>Рекомендация</th><th>Внедрено</th><th class="num">Позиция до → после</th><th class="num">Показы до → после</th>
+      <th class="num">Клики до → после</th><th>Итог</th></tr></thead>
+    <tbody>{% for r in done %}{% set i = r.impact %}
+      <tr>
+        <td><span class="badge">{{ r.lane_title }}</span> {{ r.title }}{% if r.note %}<div class="muted small">{{ r.note }}</div>{% endif %}</td>
+        <td>{{ r.done_on.strftime('%d.%m.%Y') if r.done_on else '' }}</td>
+        <td class="num">{% if i %}{{ i.before.pos|dec if i.before.pos is not none else '—' }} → {{ i.after.pos|dec if i.after.pos is not none else '—' }}{% endif %}</td>
+        <td class="num">{% if i %}{{ i.before.imp|int }} → {{ i.after.imp|int }}{% endif %}</td>
+        <td class="num">{% if i %}{{ i.before.clicks|int }} → {{ i.after.clicks|int }}{% endif %}</td>
+        <td>{{ impact_cell(i) }}</td>
+      </tr>{% endfor %}
+    </tbody>
+  </table>
+  <p class="note">До — 28 дней до внедрения; после — с 8-го дня после внедрения (неделя на переобход), до 28 дней.
+    «Сверх общего движения» — разница с остальными запросами сайта за те же дни. Это сравнение, а не доказательство:
+    одновременные правки и апдейты Яндекса тоже влияют.</p>
+  {% else %}<p class="muted">Внедрённых рекомендаций пока нет: откройте рекомендацию и нажмите «Отметить внедрённым» с датой.</p>{% endif %}
+</div>
+{% endguard %}
+
+<h2 id="pick">Выбрать ключи для продвижения</h2>
+{% guard "Выбор ключей" %}
+<form class="card kw-filters" method="get" action="/seo#pick">
+  <input type="hidden" name="site" value="{{ f.counter_id }}">
+  <label class="wide">Поиск по фразе <input type="search" name="q" value="{{ pick.q }}" placeholder="например, оксфорд"></label>
+  <label>Какие ключи
+    <select name="src">
+      <option value="tracked" {% if pick.src == 'tracked' %}selected{% endif %}>семантика, RabbitSeo и запросы с 30+ показами</option>
+      <option value="all" {% if pick.src == 'all' %}selected{% endif %}>все запросы Вебмастера</option>
+    </select></label>
+  <label>Что видно
+    <select name="lane">
+      <option value="">всё</option>
+      {% for key, title in lane_names.items() %}<option value="{{ key }}" {% if pick.lane == key %}selected{% endif %}>{{ title }}</option>{% endfor %}
+    </select></label>
+  <label>Сортировка
+    <select name="sort">{% for key, title in sorts.items() %}<option value="{{ key }}" {% if pick.sort == key %}selected{% endif %}>{{ title }}</option>{% endfor %}</select></label>
+  <div class="kw-actions"><button type="submit">Показать</button><a href="/seo?site={{ f.counter_id }}#pick">Сбросить</a></div>
+</form>
+<form class="card table-card" method="post" action="/seo/action">
+  <input type="hidden" name="site" value="{{ f.counter_id }}"><input type="hidden" name="action" value="focus_add">
+  {% for name in ('q', 'lane', 'src', 'sort') %}{% if pick[name] %}<input type="hidden" name="{{ name }}" value="{{ pick[name] }}">{% endif %}{% endfor %}
+  <input type="hidden" name="p" value="{{ pick.page }}">
+  <div class="pick-head">
+    <div class="chart-title">Найдено {{ pick.total|int }}{% if pick.pages > 1 %} · страница {{ pick.page }} из {{ pick.pages }}{% endif %}</div>
+    <label>Цель <select name="target"><option value="3" selected>ТОП-3</option><option value="1">1-е место</option><option value="5">ТОП-5</option><option value="10">ТОП-10</option></select></label>
+    <button type="submit">Продвигать выбранные</button>
+  </div>
+  {% if pick.rows %}
+  <table class="kw-table">
+    <thead><tr><th></th><th>Фраза</th><th class="num">Спрос/мес</th><th class="num">Показы</th><th class="num">Клики</th><th class="num">CTR</th>
+      <th class="num">Позиция</th><th class="num">RabbitSeo</th><th>Страница в выдаче</th><th>Что видно</th></tr></thead>
+    <tbody>{% for r in pick.rows %}
+      <tr>
+        <td>{% if r.focus %}<span class="badge badge-focus" title="уже продвигаем">✓</span>{% else %}<input type="checkbox" name="k" value="{{ r.phrase }}" aria-label="{{ r.phrase }}">{% endif %}</td>
+        <td><a href="/keywords/detail{{ f.query(k=r.phrase) }}">{{ r.phrase }}</a></td>
+        <td class="num">{% if r.demand %}{{ r.demand|int }} <span class="muted small">{{ r.source }}</span>{% endif %}</td>
+        <td class="num">{{ r.imp|int }}</td><td class="num">{{ r.clicks|int }}</td>
+        <td class="num">{{ r.ctr|pct if r.ctr is not none else '' }}</td>
+        <td class="num">{{ r.pos|dec if r.pos is not none else '' }}</td>
+        <td class="num">{{ r.rabbit if r.rabbit is not none else '' }}</td>
+        <td class="label" title="{{ r.page or '' }}">{{ r.path }}</td>
+        <td>{% for l in r.lanes %}<span class="badge badge-muted">{{ l }}</span> {% endfor %}</td>
+      </tr>{% endfor %}
+    </tbody>
+  </table>
+  {% if pick.pages > 1 %}
+  <nav class="pager">{% for n in range(1, pick.pages + 1) %}
+    {% if n == pick.page %}<span>{{ n }}</span>{% else %}<a href="/seo{{ f.query(q=pick.q or None, lane=pick.lane or None, src=pick.src, sort=pick.sort, p=n) }}#pick">{{ n }}</a>{% endif %}
+  {% endfor %}</nav>
+  {% endif %}
+  {% else %}<p class="muted">Ничего не найдено.</p>{% endif %}
+</form>
+{% endguard %}
+
+<h2 id="archive">Архив</h2>
+{% guard "Архив" %}
+<div class="card">
+  <details class="list">
+    <summary>Неактуальные и отложенные рекомендации — {{ archive|length }}</summary>
+    {% if archive %}
+    <table>
+      <thead><tr><th>Рекомендация</th><th>Впервые</th><th>Статус</th><th>Комментарий</th><th></th></tr></thead>
+      <tbody>{% for r in archive %}
+        <tr><td><span class="badge">{{ r.lane_title }}</span> {{ r.title }}</td><td>{{ r.created_at|local }}</td>
+          <td>{{ r.status_title }} с {{ r.status_at|local }}</td><td class="muted small">{{ r.note or '' }}</td>
+          <td><form method="post" action="/seo/action"><input type="hidden" name="site" value="{{ f.counter_id }}">
+            <input type="hidden" name="rec" value="{{ r.rec_id }}"><input type="hidden" name="action" value="rec_reopen">
+            <button type="submit" class="link-button">вернуть в работу</button></form></td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% else %}<p class="muted">Пусто.</p>{% endif %}
+  </details>
+  <details class="list">
+    <summary>Ключи, снятые с продвижения — {{ removed|length }}</summary>
+    {% if removed %}<ul>{% for x in removed %}<li>«{{ x.phrase }}» — с {{ x.added_at|local }} по {{ x.removed_at|local }}</li>{% endfor %}</ul>
+    {% else %}<p class="muted">Нет.</p>{% endif %}
+  </details>
+  <details class="list">
+    <summary>Отчёты ассистента — {{ history|length }}</summary>
+    <table>
+      <thead><tr><th>Построен</th><th>Данные</th><th>Почему</th><th>Выводы</th></tr></thead>
+      <tbody>{% for h in history %}
+        <tr><td>{{ h.created_at|local }}</td><td>{{ h.period_from.strftime('%d.%m') }}–{{ h.period_to.strftime('%d.%m.%Y') }}</td>
+          <td class="muted small">{{ h.summary.reason or '' }}</td>
+          <td class="small">{{ h.summary.findings|join(' ') }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </details>
+</div>
+{% endguard %}
+
+{% endif %}
+{% endblock %}

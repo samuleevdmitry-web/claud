@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 
 from analytics import insights as ins
+from analytics import seo
 from analytics.config import Settings
 from analytics.dashboard import queries as q
 from analytics.dashboard.guard import safe
@@ -619,12 +620,7 @@ def status_page(conn: psycopg.Connection, settings: Settings, f: Filters | None)
 
 def _brand_words(settings: Settings, domain: str) -> set[str]:
     """Слова бренда: имя домена и первые слова брендовых фраз Вордстата («олдос», «oldos»)."""
-    words = {domain.split(".")[0].lower()} if domain else set()
-    try:
-        config = load_keywords(settings.wordstat_keywords_path)
-    except (FileNotFoundError, tomllib.TOMLDecodeError):
-        return words
-    return words | {k.phrase.split()[0].lower() for k in config.keywords if k.kind == "brand"}
+    return seo.brand_words(settings.wordstat_keywords_path, domain)
 
 
 def pf_page(conn: psycopg.Connection, settings: Settings, f: Filters, benefit_days: int = 21) -> dict:
@@ -958,6 +954,147 @@ def keyword_detail(conn: psycopg.Connection, settings: Settings, f: Filters, par
     return {"norm": norm, "kf": kf, "daily": daily, "charts": charts,
             "positions": q.keyword_positions(conn, norm, project), "days": days,
             "back": {k: v for k, v in params.items() if k != "k"}}
+
+
+# ----- Ассистент SEO -----
+
+SEO_ROWS = 100
+SEO_SORTS = {"demand": "Спрос", "imp": "Показы", "pos": "Позиция", "phrase": "Фраза"}
+SEO_MESSAGES = {
+    "added": "Взято в продвижение: {n}. План по ним — в «Продвигаемые ключи» и в рекомендациях «Сейчас».",
+    "removed": "Снято с продвижения: {n}. История по ключу сохранена.",
+    "done": "Отмечено как внедрённое. Результат ассистент оценит через 3 недели (неделя на переиндексацию + 2 недели данных).",
+    "dismissed": "Рекомендация отложена — решение владельца. Она в архиве с датой.",
+    "reopened": "Рекомендация снова в работе.",
+    "busy": "Такая рекомендация уже открыта новым отчётом.",
+    "run": "Отчёт пересчитан по последним данным.",
+    "nothing": "Ничего не выбрано.",
+}
+
+
+def _seo_primary(settings: Settings, f: Filters) -> bool:
+    """Таблица семантики — общая, она про основной сайт (первый счётчик в настройках)."""
+    return not settings.metrika_counters or f.counter_id == settings.metrika_counters[0]
+
+
+def seo_run(conn: psycopg.Connection, settings: Settings, f: Filters, host_id: str, reason: str) -> int:
+    return seo.run(conn, host_id, _brand_words(settings, seo.project_of(host_id)), _seo_primary(settings, f), reason)
+
+
+def seo_page(conn: psycopg.Connection, settings: Settings, f: Filters, params: dict | None = None) -> dict:
+    """Ассистент SEO: ситуация, продвигаемые ключи с планом, рекомендации (датированные), результаты внедрённого,
+    выбор ключей и архив. По последним данным, независимо от выбранного месяца."""
+    params = params or {}
+    host_id = q.host_for_site(conn, f.counter_id)
+    if not host_id:
+        return {"host": None}
+    project = seo.project_of(host_id)
+    words = _brand_words(settings, project)
+    if not seo.reports(conn, host_id, 1) and q.query_days(conn, host_id).get("last"):
+        safe("Первый отчёт ассистента", lambda: seo_run(conn, settings, f, host_id, "первое открытие раздела"))
+    snap = safe("Данные по ключам", lambda: seo.collect(conn, host_id, _seo_primary(settings, f)))
+    live = safe("Разбор ключей", lambda: seo.analyze(snap, words)[0], []) if snap else []
+    lanes: dict[str, list[str]] = defaultdict(list)
+    for r in live:
+        if seo.LANES[r.lane] not in lanes[r.norm]:
+            lanes[r.norm].append(seo.LANES[r.lane])
+    history = seo.reports(conn, host_id)
+    open_recs = seo.recs(conn, host_id, ("open",))
+    done = seo.recs(conn, host_id, ("done",))
+    for r in done:
+        r["impact"] = safe(f"Результат: {r['title']}", lambda r=r: seo.impact(
+            conn, host_id, r["norm"], r["page"], r["done_on"] or r["status_at"].date(), project))
+    focus = []
+    for x in seo.focus_keys(conn, host_id):
+        k = snap.keys.get(x["norm"]) if snap else None
+        focus.append({**x, "key": k, "lanes": lanes.get(x["norm"], []),
+                      "plan": [r for r in open_recs if r["norm"] == x["norm"]],
+                      "progress": safe(f"Продвижение «{x['phrase']}»", lambda x=x: seo.progress(
+                          conn, host_id, x["norm"], x["added_at"], project))})
+    groups = [(key, title, [r for r in open_recs if r["priority"] == key]) for key, title in seo.PRIORITIES.items()]
+    pick = _seo_candidates(snap, lanes, params) if snap else {"rows": [], "total": 0, "pages": 0}
+    message = SEO_MESSAGES.get(params.get("msg") or "", "")
+    return {
+        "host": host_id, "project": project, "snap": snap, "report": history[0] if history else None,
+        "history": history, "groups": groups, "open_count": len(open_recs), "done": done, "focus": focus,
+        "archive": seo.recs(conn, host_id, ("stale", "dismissed")), "pick": pick, "lane_names": seo.LANES,
+        "tracks": seo.TRACKS, "sorts": SEO_SORTS, "today": f.today,
+        "removed": [x for x in seo.focus_keys(conn, host_id, with_removed=True) if x["removed_at"]],
+        "message": message.format(n=params.get("n") or "") if message else "",
+    }
+
+
+def _seo_candidates(snap: seo.Snapshot, lanes: dict[str, list[str]], params: dict) -> dict:
+    """Ключи для выбора: запросы Вебмастера с показами, семантика, RabbitSeo — с фильтрами и листанием."""
+    search = seo.normalize(params.get("q") or "")
+    lane = params.get("lane") or ""
+    src = params.get("src") or "tracked"
+    sort = params.get("sort") if params.get("sort") in SEO_SORTS else "demand"
+    rows = []
+    for k in snap.keys.values():
+        if k.imp == 0 and k.imp_prev == 0 and not k.tracked:
+            continue
+        if src == "tracked" and not (k.tracked or k.imp >= seo.MIN_IMP):
+            continue
+        if search and search not in k.norm:
+            continue
+        mine = lanes.get(k.norm, [])
+        if lane and seo.LANES.get(lane) not in mine:
+            continue
+        demand, source = k.demand
+        rows.append({"phrase": k.phrase, "norm": k.norm, "demand": demand, "source": source, "imp": k.imp,
+                     "clicks": k.clicks, "ctr": k.ctr, "pos": k.pos, "rabbit": k.rabbit_pos, "page": k.page,
+                     "path": seo._path(k.page) if k.page else "", "lanes": mine, "focus": k.focus,
+                     "position": k.position})
+    keyfunc = {"demand": lambda r: (-(r["demand"] or 0), -r["imp"]), "imp": lambda r: (-r["imp"], r["phrase"]),
+               "pos": lambda r: (r["position"] if r["position"] is not None else 999, r["phrase"]),
+               "phrase": lambda r: r["phrase"]}[sort]
+    rows.sort(key=keyfunc)
+    try:
+        page = max(int(params.get("p") or 1), 1)
+    except ValueError:
+        page = 1
+    total = len(rows)
+    return {"rows": rows[(page - 1) * SEO_ROWS: page * SEO_ROWS], "total": total, "page": page,
+            "pages": (total + SEO_ROWS - 1) // SEO_ROWS, "q": params.get("q") or "", "lane": lane, "src": src,
+            "sort": sort}
+
+
+def seo_action(conn: psycopg.Connection, settings: Settings, f: Filters, form: dict[str, list[str]]) -> tuple[str, int, str]:
+    """Кнопки страницы ассистента. Возвращает код сообщения, число и якорь, куда вернуться."""
+    host_id = q.host_for_site(conn, f.counter_id)
+    if not host_id:
+        return "nothing", 0, ""
+
+    def first(name: str) -> str:
+        return (form.get(name) or [""])[0].strip()
+
+    action = first("action")
+    if action in ("focus_add", "focus_remove"):
+        phrases = [x for x in form.get("k", []) if x.strip()]
+        if not phrases:
+            return "nothing", 0, "pick"
+        target = int(first("target")) if first("target") in ("1", "3", "5", "10") else 3
+        n = seo.set_focus(conn, host_id, phrases, action == "focus_add", target)
+        seo_run(conn, settings, f, host_id, "выбор продвигаемых ключей")  # план по новым ключам — сразу
+        return ("added" if action == "focus_add" else "removed"), n, "focus"
+    if action in ("rec_done", "rec_dismiss", "rec_reopen"):
+        try:
+            rec_id = int(first("rec"))
+        except ValueError:
+            return "nothing", 0, "recs"
+        try:
+            done_on = date.fromisoformat(first("done_on")) if first("done_on") else f.today
+        except ValueError:
+            done_on = f.today
+        status = {"rec_done": "done", "rec_dismiss": "dismissed", "rec_reopen": "open"}[action]
+        ok = seo.set_status(conn, host_id, rec_id, status, min(done_on, f.today), first("note"))
+        code = {"done": "done", "dismissed": "dismissed", "open": "reopened"}[status] if ok else "busy"
+        return code, 1, "results" if status == "done" else "recs"
+    if action == "run":
+        seo_run(conn, settings, f, host_id, "пересчёт вручную")
+        return "run", 0, "report"
+    return "nothing", 0, ""
 
 
 # ----- E-mail -----

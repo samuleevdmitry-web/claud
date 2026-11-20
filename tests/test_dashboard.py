@@ -117,7 +117,7 @@ def test_every_section_renders(client):
         sync_metrika(conn, FakeMetrikaClient(goals, data, humans_share=0.8), 42, frozenset({1}), "lastsign",
                      since=aug, until=date(2026, 9, 30), today=date(2026, 10, 2), log=lambda _: None)
     for path in ("/", "/traffic", "/traffic?tab=geo", "/traffic?tab=time", "/traffic?tab=sources", "/leads",
-                 "/search", "/pf", "/recs", "/report", "/sales", "/email", "/keywords",
+                 "/search", "/pf", "/recs", "/report", "/sales", "/email", "/keywords", "/seo",
                  "/keywords/detail?k=ткань", "/demand", "/maps", "/status", "/traffic?tab=content",
                  "/traffic?tab=audience", "/traffic?tab=tech"):
         page = client.get(path, params={"month": "2026-09"})
@@ -162,6 +162,52 @@ def test_pf_section_flags_bot_traces(client):
     assert "ткань для тюбингов example.ru" in page
     overview = client.get("/", params={"month": "2026-10", "aud": "all"}).text
     assert "ПФ: Похоже на санкции" in overview
+
+
+@needs_db
+def test_seo_assistant_page_and_buttons(client):
+    sep, oct_ = date(2026, 9, 1), date(2026, 10, 1)
+    data = {("month", "total"): [(sep, [], [1000, 800, 2500, 20.0, 2.5, 150.0], {}),
+                                 (oct_, [], [900, 700, 2200, 20.0, 2.5, 150.0], {})]}
+    host, last = "https:example.ru:443", date(2026, 11, 15)
+    days = [last - timedelta(days=i) for i in range(56)]
+    with db.connect(TEST_DATABASE_URL) as conn:
+        sync_metrika(conn, FakeMetrikaClient([], data), 42, frozenset(), "lastsign",
+                     since=sep, until=date(2026, 10, 31), today=date(2026, 11, 2), log=lambda _: None)
+        conn.execute("INSERT INTO webmaster_summary (host_id, snapshot_date) VALUES (%s, %s)", (host, last))
+        rows = [(host, d, q, f"https://example.ru/{page}", 20, clicks, pos)
+                for d in days for q, page, clicks, pos in (("оксфорд 600d", "oxford", 1, 8.0), ("кордура", "cordura", 2, 2.0),
+                                                           ("ткань для палаток", "tents", 0, 35.0))]
+        conn.cursor().executemany("INSERT INTO webmaster_query_daily (host_id, date, query, top_url, impressions, clicks, "
+                                  "position) VALUES (%s, %s, %s, %s, %s, %s, %s)", rows)
+        conn.execute("INSERT INTO semantic_keywords (norm, phrase, frequency) VALUES ('ткань для чехлов', 'ткань для чехлов', 1200)")
+    page = client.get("/seo", params={"month": "2026-10"})
+    assert page.status_code == 200
+    text = page.text
+    assert "Ситуация по ключам" in text and "не построен" not in text and "Не всё удалось построить" not in text
+    assert "«оксфорд 600d»" in text and "Почти в ТОПе" in text and "Выбрать ключи для продвижения" in text
+    assert 'class="nav-group"' in text and ">SEO<" in text  # раздел SEO в меню
+
+    moved = client.post("/seo/action", data={"site": "42", "action": "focus_add", "k": ["оксфорд 600d", "ткань для чехлов"],
+                                             "target": "3"}, follow_redirects=False)
+    assert moved.status_code == 303 and "msg=added" in moved.headers["location"] and moved.headers["location"].endswith("#focus")
+    text = client.get(moved.headers["location"].split("#")[0]).text
+    assert "Взято в продвижение: 2" in text and "цель ТОП-3" in text and "продвигаем с" in text
+
+    with db.connect(TEST_DATABASE_URL) as conn:
+        rec_id = conn.execute("SELECT rec_id FROM seo_recs WHERE status = 'open' AND norm = 'оксфорд 600d' LIMIT 1").fetchone()[0]
+    done = client.post("/seo/action", data={"site": "42", "action": "rec_done", "rec": str(rec_id),
+                                            "done_on": "2026-11-10", "note": "переписали title"}, follow_redirects=False)
+    assert done.status_code == 303
+    text = client.get(done.headers["location"].split("#")[0]).text
+    assert "Отмечено как внедрённое" in text and "переписали title" in text and "рано судить" in text
+
+    # кнопки принимаются только со страниц самого дашборда
+    foreign = client.post("/seo/action", data={"site": "42", "action": "run"}, headers={"Origin": "https://evil.example"},
+                          follow_redirects=False)
+    assert foreign.status_code == 403
+    with db.connect(TEST_DATABASE_URL) as conn:
+        assert conn.execute("SELECT count(*) FROM seo_recs WHERE status = 'done'").fetchone()[0] == 1
 
 
 @needs_db

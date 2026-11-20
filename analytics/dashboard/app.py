@@ -9,12 +9,12 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 import psycopg
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -34,6 +34,7 @@ NAV = [
     ("leads", "/leads", "Заявки и цели", "target"),
     ("sales", "/sales", "Продажи", "cart"),
     ("email", "/email", "E-mail", "mail"),
+    ("seo", "/seo", "Ассистент SEO", "spark"),
     ("search", "/search", "Поиск Яндекса", "search"),
     ("keywords", "/keywords", "Ключи", "key"),
     ("pf", "/pf", "ПФ и риски", "shield"),
@@ -42,6 +43,8 @@ NAV = [
     ("maps", "/maps", "Карты", "pin"),
     ("status", "/status", "Данные", "db"),
 ]
+# Группы меню: пункты подряд с одной группой показываются под общим заголовком.
+NAV_GROUPS = {"seo": "SEO", "search": "SEO", "keywords": "SEO", "pf": "SEO"}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -89,7 +92,8 @@ def render(request: Request, page: str, build: Callable[..., dict], site: int | 
            aud: str | None, **kwargs) -> HTMLResponse:
     """Общая обвязка раздела: фильтры, меню, пустая база, нет связи с базой."""
     settings = load_settings()
-    context: dict = {"page": page, "nav": NAV, "audiences": pages.AUDIENCES, "problems": guard.start()}
+    context: dict = {"page": page, "nav": NAV, "nav_groups": NAV_GROUPS, "audiences": pages.AUDIENCES,
+                     "problems": guard.start()}
     template = f"{page}.html"
     try:
         with db.connect(settings.database_url, PAGE_TIMEOUT_MS) as conn:
@@ -173,6 +177,39 @@ def email_contacts_csv(site: int | None = None, month: str | None = None, kind: 
 @app.get("/email", response_class=HTMLResponse)
 def email(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
     return render(request, "email", pages.email_page, site, month, aud)
+
+
+@app.get("/seo", response_class=HTMLResponse)
+def seo_assistant(request: Request, site: int | None = None, month: str | None = None, aud: str | None = None):
+    return render(request, "seo", pages.seo_page, site, month, aud, params=dict(request.query_params))
+
+
+def same_origin(request: Request) -> bool:
+    """Кнопки ассистента меняют данные: принимаем их только со страниц самого дашборда, не с чужого сайта,
+    открытого в том же браузере."""
+    if request.headers.get("sec-fetch-site") == "cross-site":
+        return False
+    origin = request.headers.get("origin")
+    if origin and origin != "null":
+        return urlsplit(origin).netloc == request.headers.get("host")
+    return True
+
+
+@app.post("/seo/action")
+async def seo_action(request: Request) -> Response:
+    if not same_origin(request):
+        return PlainTextResponse("Запрос с другого сайта отклонён", status_code=403)
+    form = parse_qs((await request.body()).decode("utf-8", "replace"), keep_blank_values=True)
+    site = (form.get("site") or [""])[0]
+    settings = load_settings()
+    with db.connect(settings.database_url, PAGE_TIMEOUT_MS) as conn:
+        f = pages.resolve_filters(conn, settings, int(site) if site.isdigit() else None, None, None, date.today())
+        if f is None:
+            return RedirectResponse("/seo", status_code=303)
+        code, n, anchor = pages.seo_action(conn, settings, f, form)
+    back = {k: (form.get(k) or [""])[0] for k in ("q", "lane", "src", "sort", "p") if (form.get(k) or [""])[0]}
+    return RedirectResponse(f"/seo{f.query(msg=code, n=n or None, **back)}" + (f"#{anchor}" if anchor else ""),
+                            status_code=303)
 
 
 @app.get("/search", response_class=HTMLResponse)
