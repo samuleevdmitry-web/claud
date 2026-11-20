@@ -21,6 +21,15 @@ def month_name(d: date) -> str:
     return f"{MONTHS[d.month - 1].capitalize()} {d.year}"
 
 
+MONTHS_FROM = ["января", "февраля", "марта", "апреля", "мая", "июня",
+               "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+
+
+def month_from(d: date) -> str:
+    """«с августа 2026»."""
+    return f"{MONTHS_FROM[d.month - 1]} {d.year}"
+
+
 def month_with(d: date) -> str:
     return f"{MONTHS_WITH[d.month - 1]} {d.year}"
 

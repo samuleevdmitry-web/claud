@@ -47,6 +47,7 @@
 <div class="card table-card">
   <div class="chart-title">Роботы в трафике {{ f.site.site or f.site.name }}</div>
   <p class="note">Разница между «весь трафик» и «только люди»: визиты, которые Метрика отнесла к роботам.</p>
+  {% if robots_warning %}<div class="alert" role="status"><span class="alert-icon" aria-hidden="true">!</span><span>{{ robots_warning }}</span></div>{% endif %}
   <table>
     <thead><tr><th>Месяц</th><th class="num">Весь трафик</th><th class="num">Только люди</th><th class="num">Роботы</th><th class="bar-col"></th></tr></thead>
     <tbody>

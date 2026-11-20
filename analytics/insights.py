@@ -14,7 +14,7 @@ from math import log10
 from statistics import median
 
 from analytics import topics
-from analytics.format import fmt_dec, fmt_int, fmt_pct, month_short, plural
+from analytics.format import fmt_dec, fmt_int, fmt_pct, month_from, month_short, plural
 
 KINDS = {"plus": "Плюсы", "minus": "Минусы", "question": "Вопросы", "check": "Что проверить"}
 
@@ -78,8 +78,48 @@ def _name(row: dict) -> str:
 
 # ----- Сводка трафика -----
 
+ROBOT_BREAK_BEFORE = 20.0   # до разрыва роботов было хотя бы 20% визитов
+ROBOT_BREAK_AFTER = 1.0     # после — меньше 1%
+ROBOT_BREAK_TOTAL = 0.7     # а всего визитов осталось хотя бы 70% от прежнего
+
+
+def robot_break(rows: list[dict]) -> dict | None:
+    """Метрика перестала отделять роботов: последние месяцы роботов меньше 1%, до этого было 20%+, а весь трафик
+    почти не уменьшился. Если бы роботы правда ушли, весь трафик упал бы на их долю; раз не упал — роботы, скорее
+    всего, теперь считаются людьми (или их больше не отличить), и «только люди» до и после разрыва несравнимы.
+    rows — robots_by_month по возрастанию месяцев."""
+    rows = [r for r in rows if r.get("all_visits")]
+    after = []
+    for r in reversed(rows):
+        if float(r["robots_pct"] or 0) >= ROBOT_BREAK_AFTER:
+            break
+        after.append(r)
+    before = rows[: len(rows) - len(after)][-3:]
+    if not after or not before:
+        return None
+    share = sum(float(r["robots_pct"] or 0) for r in before) / len(before)
+    all_before = sum(r["all_visits"] for r in before) / len(before)
+    all_after = sum(r["all_visits"] for r in after) / len(after)
+    if share < ROBOT_BREAK_BEFORE or all_after < ROBOT_BREAK_TOTAL * all_before:
+        return None
+    return {"since": after[-1]["month"], "share_before": share, "all_before": all_before, "all_after": all_after,
+            "humans_before": sum(r["human_visits"] for r in before) / len(before),
+            "humans_after": sum(r["human_visits"] for r in after) / len(after), "months_before": len(before)}
+
+
+def robot_break_text(b: dict) -> str:
+    return (f"С {month_from(b['since'])} Метрика не отмечает роботов, хотя до этого их было {fmt_dec(b['share_before'], 0)}% "
+            f"визитов, а всего визитов почти столько же ({fmt_int(round(b['all_after']))} в месяц против "
+            f"{fmt_int(round(b['all_before']))}). Если бы роботы ушли, весь трафик упал бы на их долю; раз не упал — "
+            "роботы, скорее всего, теперь считаются людьми: «только люди» выросли с "
+            f"{fmt_int(round(b['humans_before']))} до {fmt_int(round(b['humans_after']))} в месяц. Сравнивать «только "
+            "людей» до и после этого месяца нельзя; сверяйте с заявками и кликами Вебмастера. Настройку фильтрации "
+            "роботов в счётчике показывает команда check.")
+
+
 def traffic_summary(m: dict, robots_share: float | None, robots_share_prev: float | None,
-                    daily: list[dict], prev: date, yoy_partial: bool, audience: str) -> list[Finding]:
+                    daily: list[dict], prev: date, yoy_partial: bool, audience: str,
+                    robots_break: dict | None = None) -> list[Finding]:
     out: list[Finding] = []
     prev_label = month_short(prev)
     visits = _pct_change(m.get("visits"), m.get("visits_prev"))
@@ -103,15 +143,18 @@ def traffic_summary(m: dict, robots_share: float | None, robots_share_prev: floa
                                         "и какие страницы входа дают отказы выше среднего."))
         elif diff <= -3:
             out.append(Finding("plus", f"Отказы снизились до {fmt_pct(bounce)} ({_signed(diff, unit=' п.п.')})."))
-    if robots_share is not None:
+    if robots_break:
+        out.append(Finding("question", robot_break_text(robots_break)))
+    elif robots_share is not None:
         if robots_share >= 10:
             out.append(Finding("minus", f"Роботы — {fmt_dec(robots_share, 0)}% визитов за месяц: весь трафик "
                                         "заметно завышен."))
-            out.append(Finding("check", "Откуда роботы: включить в настройках счётчика фильтрацию роботов "
-                                        "«по строгим правилам и поведению» и сравнить каналы в двух вариантах."))
+            out.append(Finding("check", "Откуда роботы: сравните каналы во вкладке «Источники» в двух вариантах — "
+                                        "«Только люди» и «Весь трафик»."))
         elif robots_share_prev is not None and robots_share_prev >= 10 and robots_share < 2:
-            out.append(Finding("plus", f"Роботов в данных почти нет (было {fmt_dec(robots_share_prev, 0)}% "
-                                       f"в {prev_label}) — весь трафик и «только люди» теперь совпадают."))
+            out.append(Finding("question", f"Роботов в данных почти нет (было {fmt_dec(robots_share_prev, 0)}% "
+                                           f"в {prev_label}). Если весь трафик при этом не упал, роботы не ушли, а "
+                                           "перестали отделяться — проверьте настройку фильтрации роботов (check)."))
     if audience == "all":
         out.append(Finding("check", "Сейчас показан весь трафик, вместе с роботами. Для сравнения месяцев "
                                     "надёжнее вариант «Только люди»."))

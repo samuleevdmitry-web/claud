@@ -324,11 +324,22 @@ ROBOT_FILTER_2 = ("В настройках счётчика включена ф�
                   "правилам» (изменятся только новые данные).")
 
 
+def robots_break(conn: psycopg.Connection, f: Filters) -> dict | None:
+    """Разрыв: Метрика перестала отделять роботов, а весь трафик не упал (insights.robot_break) — если выбранный
+    месяц после него."""
+    rows = sorted(q.robots_by_month(conn, f.counter_id).values(), key=lambda r: r["month"])
+    b = ins.robot_break([r for r in rows if r["month"] < f.today.replace(day=1)])  # текущий месяц ещё неполный
+    return b if b and f.month >= b["since"] else None
+
+
 def robots_note(conn: psycopg.Connection, f: Filters) -> str:
     """Почему «Весь трафик» и «Только люди» отличаются или совпадают в выбранном месяце."""
     row = q.robots_by_month(conn, f.counter_id).get(f.month)
     setting = q.robot_filter(conn, f.counter_id)
     month = month_name(f.month).lower()
+    broken = robots_break(conn, f)
+    if broken:
+        return ins.robot_break_text(broken) + (" " + ROBOT_FILTER_2 if setting == 2 else "")
     if setting == 2:
         return ROBOT_FILTER_2
     if row is None:
@@ -354,7 +365,8 @@ def traffic(conn: psycopg.Connection, settings: Settings, f: Filters, tab: str) 
     if tab == "summary":
         robots, robots_prev = _robots(conn, f)
         charts, skipped, daily = _traffic_charts(conn, f)
-        findings = ins.traffic_summary(m, robots, robots_prev, daily, f.prev, yoy_partial, f.audience)
+        findings = ins.traffic_summary(m, robots, robots_prev, daily, f.prev, yoy_partial, f.audience,
+                                       safe("Роботы в трафике", lambda: robots_break(conn, f)))
         report, more = _slice_report(conn, f, "source", "Каналы", total, conv, bounce)
         context.update(tiles=_traffic_tiles(f, m, yoy_partial), skipped=skipped, reports=[report],
                        charts={k: charts[k] for k in ("site_trend", "site_daily")})
@@ -636,12 +648,17 @@ def maps_page(conn: psycopg.Connection, settings: Settings, f: Filters) -> dict:
 
 def status_page(conn: psycopg.Connection, settings: Settings, f: Filters | None) -> dict:
     status = [{**row, "name": SOURCE_NAMES.get(row["source"], row["source"])} for row in q.sync_status(conn)]
-    robots = []
+    robots, robots_warning = [], None
     if f:
         robots = safe("Роботы в трафике", lambda: [r for r in q.robots_by_month(conn, f.counter_id).values()
                                                   if r["month"] < f.today.replace(day=1)], [])
-    return {"status": status, "robots": robots, "imports": safe("Файлы из папки imports", lambda: q.import_files(conn), []),
-            "imports_dir": settings.imports_dir}
+        broken = ins.robot_break(sorted(robots, key=lambda r: r["month"])) if robots else None
+        if broken:
+            robots_warning = ins.robot_break_text(broken)
+            if q.robot_filter(conn, f.counter_id) == 2:
+                robots_warning += " " + ROBOT_FILTER_2
+    return {"status": status, "robots": robots, "robots_warning": robots_warning,
+            "imports": safe("Файлы из папки imports", lambda: q.import_files(conn), []), "imports_dir": settings.imports_dir}
 
 
 # ----- ПФ и риски -----

@@ -25,6 +25,25 @@ def test_formatting():
     assert delta(100, 100, "pct").text == "без изменений"
 
 
+def test_robot_break_is_not_good_news():
+    """Как у oldos.ru: роботов было 50–78%, с августа — ровно 0%, а всего визитов столько же. Это не «роботы ушли»,
+    а «роботов перестали отделять» — «только люди» с августа несравнимы с прошлыми месяцами."""
+    from analytics import insights as ins
+
+    rows = [{"month": date(2026, m, 1), "all_visits": a, "human_visits": h, "robots_pct": round(100 * (a - h) / a, 1)}
+            for m, a, h in ((4, 17024, 8243), (5, 23042, 9486), (6, 26370, 10705), (7, 17175, 12784),
+                            (8, 23061, 23061), (9, 17593, 17593), (10, 23037, 23037))]
+    b = ins.robot_break(rows)
+    assert b["since"] == date(2026, 8, 1) and b["share_before"] > 40
+    text = ins.robot_break_text(b)
+    assert text.startswith("С августа 2026 Метрика не отмечает роботов") and "«только люди» выросли" in text
+    findings = ins.traffic_summary({}, 0.0, 0.0, [], date(2026, 9, 1), False, "humans", b)
+    assert [x.kind for x in findings] == ["question"]
+    # роботы правда ушли — весь трафик упал на их долю: это не разрыв
+    gone = rows[:4] + [{**r, "all_visits": 6000, "human_visits": 6000} for r in rows[4:]]
+    assert ins.robot_break(gone) is None
+
+
 def test_trend_months_keeps_gaps_and_drops_current():
     rows = [
         {"month": date(2026, 7, 1), "days_with_data": 31, "days_in_month": 31, "visits": 10},
