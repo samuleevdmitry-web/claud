@@ -161,7 +161,7 @@ def test_every_section_renders(client):
     with db.connect(TEST_DATABASE_URL) as conn:
         conn.execute("UPDATE metrika_counters SET filter_robots = 2 WHERE counter_id = 42")
     filtered = client.get("/traffic", params={"month": "2026-09"}).text
-    assert "фильтрация роботов «по строгим правилам и по поведению»" in filtered
+    assert "включено «Фильтровать роботов по поведению»" in filtered
 
 
 @needs_db
