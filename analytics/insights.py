@@ -14,7 +14,15 @@ from math import log10
 from statistics import median
 
 from analytics import topics
-from analytics.format import fmt_dec, fmt_int, fmt_pct, month_from, month_short, plural
+from analytics.format import (
+    fmt_dec,
+    fmt_int,
+    fmt_pct,
+    month_from,
+    month_name,
+    month_short,
+    plural,
+)
 
 KINDS = {"plus": "Плюсы", "minus": "Минусы", "question": "Вопросы", "check": "Что проверить"}
 
@@ -83,38 +91,59 @@ ROBOT_BREAK_AFTER = 1.0     # после — меньше 1%
 ROBOT_BREAK_TOTAL = 0.7     # а всего визитов осталось хотя бы 70% от прежнего
 
 
-def robot_break(rows: list[dict]) -> dict | None:
-    """Метрика перестала отделять роботов: последние месяцы роботов меньше 1%, до этого было 20%+, а весь трафик
-    почти не уменьшился. Если бы роботы правда ушли, весь трафик упал бы на их долю; раз не упал — роботы, скорее
-    всего, теперь считаются людьми (или их больше не отличить), и «только люди» до и после разрыва несравнимы.
-    rows — robots_by_month по возрастанию месяцев."""
+def robot_breaks(rows: list[dict]) -> list[dict]:
+    """Отрезки месяцев, когда Метрика не отделяла роботов: роботов меньше 1%, а в 3 месяцах до этого — 20%+, и весь
+    трафик почти не уменьшился. Если бы роботы правда ушли, весь трафик упал бы на их долю; раз не упал — роботов
+    либо удаляла сама Метрика («Фильтровать роботов по поведению»), либо она их не распознавала. «Только люди» этих
+    месяцев несравнимы с соседними. Отрезок помечается навсегда, даже когда роботы снова видны.
+    rows — robots_by_month по возрастанию месяцев, без текущего неполного."""
     rows = [r for r in rows if r.get("all_visits")]
-    after = []
-    for r in reversed(rows):
-        if float(r["robots_pct"] or 0) >= ROBOT_BREAK_AFTER:
-            break
-        after.append(r)
-    before = rows[: len(rows) - len(after)][-3:]
-    if not after or not before:
-        return None
-    share = sum(float(r["robots_pct"] or 0) for r in before) / len(before)
-    all_before = sum(r["all_visits"] for r in before) / len(before)
-    all_after = sum(r["all_visits"] for r in after) / len(after)
-    if share < ROBOT_BREAK_BEFORE or all_after < ROBOT_BREAK_TOTAL * all_before:
-        return None
-    return {"since": after[-1]["month"], "share_before": share, "all_before": all_before, "all_after": all_after,
-            "humans_before": sum(r["human_visits"] for r in before) / len(before),
-            "humans_after": sum(r["human_visits"] for r in after) / len(after), "months_before": len(before)}
+    out, i = [], 0
+
+    def low(r: dict) -> bool:
+        return float(r["robots_pct"] or 0) < ROBOT_BREAK_AFTER
+
+    while i < len(rows):
+        if not low(rows[i]):
+            i += 1
+            continue
+        j = i
+        while j < len(rows) and low(rows[j]):
+            j += 1
+        run, before = rows[i:j], rows[max(0, i - 3):i]
+        if before:
+            share = sum(float(r["robots_pct"] or 0) for r in before) / len(before)
+            all_before = sum(r["all_visits"] for r in before) / len(before)
+            all_after = sum(r["all_visits"] for r in run) / len(run)
+            if share >= ROBOT_BREAK_BEFORE and all_after >= ROBOT_BREAK_TOTAL * all_before:
+                out.append({"since": run[0]["month"], "until": run[-1]["month"], "ongoing": j == len(rows),
+                            "share_before": share, "all_before": all_before, "all_after": all_after,
+                            "humans_before": sum(r["human_visits"] for r in before) / len(before),
+                            "humans_after": sum(r["human_visits"] for r in run) / len(run)})
+        i = j
+    return out
+
+
+def robot_break(rows: list[dict]) -> dict | None:
+    """Разрыв, который длится до последнего месяца (Метрика всё ещё не отделяет роботов)."""
+    breaks = robot_breaks(rows)
+    return breaks[-1] if breaks and breaks[-1]["ongoing"] else None
 
 
 def robot_break_text(b: dict) -> str:
-    return (f"С {month_from(b['since'])} Метрика не отмечает роботов, хотя до этого их было {fmt_dec(b['share_before'], 0)}% "
-            f"визитов, а всего визитов почти столько же ({fmt_int(round(b['all_after']))} в месяц против "
-            f"{fmt_int(round(b['all_before']))}). Если бы роботы ушли, весь трафик упал бы на их долю; раз не упал — "
-            "роботы, скорее всего, теперь считаются людьми: «только люди» выросли с "
-            f"{fmt_int(round(b['humans_before']))} до {fmt_int(round(b['humans_after']))} в месяц. Сравнивать «только "
-            "людей» до и после этого месяца нельзя; сверяйте с заявками и кликами Вебмастера. Настройку фильтрации "
-            "роботов в счётчике показывает команда check.")
+    numbers = (f"до этого их было {fmt_dec(b['share_before'], 0)}% визитов, а всего визитов почти столько же "
+               f"({fmt_int(round(b['all_after']))} в месяц против {fmt_int(round(b['all_before']))}). Если бы роботы ушли, "
+               "весь трафик упал бы на их долю; раз не упал — роботов удаляла сама Метрика (настройка «Фильтровать "
+               "роботов по поведению») или не распознавала их: «только люди» выросли с "
+               f"{fmt_int(round(b['humans_before']))} до {fmt_int(round(b['humans_after']))} в месяц.")
+    if b.get("ongoing", True):
+        return (f"С {month_from(b['since'])} Метрика не отмечает роботов, хотя {numbers} Сравнивать «только людей» до и "
+                "после этого месяца нельзя; сверяйте с заявками и кликами Вебмастера. Настройку фильтрации роботов в "
+                "счётчике показывает команда check.")
+    period = (f"За {month_name(b['since']).lower()}" if b["since"] == b["until"]
+              else f"С {month_from(b['since'])} по {month_name(b['until']).lower()}")
+    return (f"{period} Метрика не отмечала роботов, хотя {numbers} Эти месяцы нельзя сравнивать с соседними — "
+            "ни «только людей», ни весь трафик; после них роботы снова считаются отдельно.")
 
 
 def traffic_summary(m: dict, robots_share: float | None, robots_share_prev: float | None,

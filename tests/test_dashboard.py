@@ -41,7 +41,13 @@ def test_robot_break_is_not_good_news():
     assert [x.kind for x in findings] == ["question"]
     # роботы правда ушли — весь трафик упал на их долю: это не разрыв
     gone = rows[:4] + [{**r, "all_visits": 6000, "human_visits": 6000} for r in rows[4:]]
-    assert ins.robot_break(gone) is None
+    assert ins.robot_break(gone) is None and ins.robot_breaks(gone) == []
+    # фильтр в счётчике выключили — с ноября роботы снова видны; август–октябрь остаются помеченными
+    later = rows + [{"month": date(2026, 11, 1), "all_visits": 40000, "human_visits": 22000, "robots_pct": 45.0}]
+    assert ins.robot_break(later) is None
+    (closed,) = ins.robot_breaks(later)
+    assert closed["until"] == date(2026, 10, 1) and not closed["ongoing"]
+    assert ins.robot_break_text(closed).startswith("С августа 2026 по октябрь 2026 Метрика не отмечала роботов")
 
 
 def test_trend_months_keeps_gaps_and_drops_current():

@@ -326,11 +326,12 @@ ROBOT_FILTER_2 = ("В счётчике включено «Фильтровать
 
 
 def robots_break(conn: psycopg.Connection, f: Filters) -> dict | None:
-    """Разрыв: Метрика перестала отделять роботов, а весь трафик не упал (insights.robot_break) — если выбранный
-    месяц после него."""
+    """Отрезок, когда Метрика не отделяла роботов (insights.robot_breaks), — если выбранный месяц в нём."""
     rows = sorted(q.robots_by_month(conn, f.counter_id).values(), key=lambda r: r["month"])
-    b = ins.robot_break([r for r in rows if r["month"] < f.today.replace(day=1)])  # текущий месяц ещё неполный
-    return b if b and f.month >= b["since"] else None
+    for b in ins.robot_breaks([r for r in rows if r["month"] < f.today.replace(day=1)]):  # текущий месяц неполный
+        if b["since"] <= f.month and (f.month <= b["until"] or b["ongoing"]):
+            return b
+    return None
 
 
 def robots_note(conn: psycopg.Connection, f: Filters) -> str:
@@ -340,7 +341,7 @@ def robots_note(conn: psycopg.Connection, f: Filters) -> str:
     month = month_name(f.month).lower()
     broken = robots_break(conn, f)
     if broken:
-        return ins.robot_break_text(broken) + (" " + ROBOT_FILTER_2 if setting == 2 else "")
+        return ins.robot_break_text(broken) + (" " + ROBOT_FILTER_2 if setting == 2 and broken["ongoing"] else "")
     if setting == 2:
         return ROBOT_FILTER_2
     if row is None:
@@ -653,10 +654,10 @@ def status_page(conn: psycopg.Connection, settings: Settings, f: Filters | None)
     if f:
         robots = safe("Роботы в трафике", lambda: [r for r in q.robots_by_month(conn, f.counter_id).values()
                                                   if r["month"] < f.today.replace(day=1)], [])
-        broken = ins.robot_break(sorted(robots, key=lambda r: r["month"])) if robots else None
-        if broken:
-            robots_warning = ins.robot_break_text(broken)
-            if q.robot_filter(conn, f.counter_id) == 2:
+        breaks = ins.robot_breaks(sorted(robots, key=lambda r: r["month"])) if robots else []
+        if breaks:
+            robots_warning = " ".join(ins.robot_break_text(b) for b in breaks)
+            if breaks[-1]["ongoing"] and q.robot_filter(conn, f.counter_id) == 2:
                 robots_warning += " " + ROBOT_FILTER_2
     return {"status": status, "robots": robots, "robots_warning": robots_warning,
             "imports": safe("Файлы из папки imports", lambda: q.import_files(conn), []), "imports_dir": settings.imports_dir}
