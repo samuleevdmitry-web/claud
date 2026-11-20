@@ -820,15 +820,20 @@ def mail_orders(conn: psycopg.Connection, month: date, window: int = WINDOW_DAYS
             LEFT JOIN unisender_lists l ON l.list_id = c.list_id
             WHERE c.start_time::date <= o.order_date AND c.start_time::date > o.order_date - %(w)s AND {MAILING}
             GROUP BY 1, 2
+        ),
+        inb AS MATERIALIZED (  -- заказы, клиент которых есть в базе рассылок или получал письма
+            SELECT k.order_no FROM contacts k JOIN email_base b USING (email_hash)
+            UNION
+            SELECT k.order_no FROM contacts k WHERE EXISTS (
+                SELECT 1 FROM unisender_delivery d WHERE d.email_hash = k.email_hash)
+            UNION
+            SELECT o.order_no FROM o CROSS JOIN LATERAL unnest(o.phone_hashes) p JOIN email_base b ON b.phone_hash = p
         )
         SELECT o.order_no, o.order_date, o.amount, o.items, o.groups,
                (o.order_no IN (SELECT unnest(order_nos) FROM crm_form_leads
                                WHERE in_1c AND category IS DISTINCT FROM 'existing')
                 OR o.order_no IN (SELECT order_no FROM crm_call_orders WHERE category = 'new')) AS new_lead,
-               (EXISTS (SELECT 1 FROM contacts k JOIN email_base b USING (email_hash) WHERE k.order_no = o.order_no)
-                OR EXISTS (SELECT 1 FROM contacts k JOIN unisender_delivery d USING (email_hash)
-                           WHERE k.order_no = o.order_no)
-                OR EXISTS (SELECT 1 FROM unnest(o.phone_hashes) p JOIN email_base b ON b.phone_hash = p)) AS in_base,
+               o.order_no IN (SELECT order_no FROM inb) AS in_base,
                coalesce(json_agg(json_build_object('campaign_id', t.campaign_id, 'level', t.level))
                         FILTER (WHERE t.campaign_id IS NOT NULL), '[]') AS touches
         FROM o LEFT JOIN t USING (order_no)
@@ -865,12 +870,15 @@ def mail_lift(conn: psycopg.Connection, month: date, window: int = WINDOW_DAYS) 
               AND EXISTS (SELECT 1 FROM unisender_recipients_runs r WHERE r.campaign_id = c.campaign_id)
         ),
         {_ORDER_CONTACTS},
-        oc AS MATERIALIZED (SELECT k.email_hash, o.order_date FROM contacts k JOIN o USING (order_no)),
+        oc AS MATERIALIZED (SELECT DISTINCT k.email_hash, o.order_date FROM contacts k JOIN o USING (order_no)),
+        hits AS MATERIALIZED (  -- адреса, по которым был заказ в окне после письма этой рассылки
+            SELECT DISTINCT c.campaign_id, oc.email_hash FROM c
+            JOIN oc ON oc.order_date >= c.day AND oc.order_date < c.day + %(w)s
+        ),
         r AS (
-            SELECT d.campaign_id, d.level, EXISTS (
-                SELECT 1 FROM oc WHERE oc.email_hash = d.email_hash
-                  AND oc.order_date >= c.day AND oc.order_date < c.day + %(w)s) AS ordered
+            SELECT d.campaign_id, d.level, h.email_hash IS NOT NULL AS ordered
             FROM unisender_delivery d JOIN c USING (campaign_id)
+            LEFT JOIN hits h ON h.campaign_id = d.campaign_id AND h.email_hash = d.email_hash
             WHERE d.level >= 1
         )
         SELECT c.campaign_id, c.start_time, c.subject, (c.day + %(w)s) AS window_end,
@@ -956,13 +964,17 @@ def mail_item_orders(conn: psycopg.Connection, mailings: list[tuple[str, date]],
             FROM ml JOIN contacts oc USING (order_no) JOIN map USING (mailing, day)
             JOIN unisender_delivery d ON d.campaign_id = map.campaign_id AND d.email_hash = oc.email_hash
             GROUP BY 1, 2, 3
+        ),
+        ce AS MATERIALIZED (
+            SELECT k.order_no, array_agg(k.email_hash ORDER BY k.email_hash) AS emails,
+                   bool_or(b.email_hash IS NOT NULL) AS in_base
+            FROM contacts k LEFT JOIN (SELECT DISTINCT email_hash FROM email_base) b USING (email_hash)
+            GROUP BY 1
         )
         SELECT ml.mailing, ml.day, ml.order_no, ml.order_date, ml.amount, ml.items, ml.client_hash,
-               (ml.order_date - ml.day) AS days, recv.level,
-               EXISTS (SELECT 1 FROM contacts oc JOIN email_base b USING (email_hash) WHERE oc.order_no = ml.order_no)
-                   AS in_base,
-               array(SELECT email_hash FROM contacts oc WHERE oc.order_no = ml.order_no ORDER BY 1) AS emails
-        FROM ml LEFT JOIN recv USING (mailing, day, order_no)
+               (ml.order_date - ml.day) AS days, recv.level, coalesce(ce.in_base, false) AS in_base,
+               coalesce(ce.emails, '{}') AS emails
+        FROM ml LEFT JOIN recv USING (mailing, day, order_no) LEFT JOIN ce USING (order_no)
         ORDER BY ml.day, ml.mailing, ml.order_date, ml.order_no
     """
     return _all(conn, query, tuple(m_args + map_args + [window]))

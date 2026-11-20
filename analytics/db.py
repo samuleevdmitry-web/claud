@@ -16,20 +16,26 @@ from analytics.sources.webmaster import Problem
 from analytics.sources.wordstat import MonthCount
 
 
-def connect(url: str) -> psycopg.Connection:
+def connect(url: str, statement_timeout_ms: int | None = None) -> psycopg.Connection:
     # autocommit: каждая запись идёт в явном блоке conn.transaction() и фиксируется по его завершении.
     # prepare_threshold=None: без серверных подготовленных запросов. Иначе после 5 одинаковых запросов
     # в соединении PostgreSQL берёт общий план, и выборки из представлений Метрики идут минуты вместо долей секунды.
-    return psycopg.connect(url, autocommit=True, prepare_threshold=None)
+    # statement_timeout_ms — предел для одного запроса (страницы дашборда): долгий запрос прерывается, блок страницы
+    # пишет об этом, а не висит.
+    options = f"-c statement_timeout={statement_timeout_ms}" if statement_timeout_ms else ""
+    return psycopg.connect(url, autocommit=True, prepare_threshold=None, options=options)
 
 
-def apply_schema(conn: psycopg.Connection) -> list[str]:
-    """Применяет analytics/sql/*.sql по порядку; скрипты идемпотентны."""
+def apply_schema(conn: psycopg.Connection, lock_timeout: str | None = None) -> list[str]:
+    """Применяет analytics/sql/*.sql по порядку; скрипты идемпотентны. lock_timeout — сколько ждать, если таблицы
+    заняты долгими запросами сборщика (иначе ждать без предела)."""
     files = sorted(
         (f for f in resources.files("analytics").joinpath("sql").iterdir() if f.name.endswith(".sql")),
         key=lambda f: f.name,
     )
     with conn.transaction():
+        if lock_timeout:
+            conn.execute(sql.SQL("SET LOCAL lock_timeout = {}").format(sql.Literal(lock_timeout)))
         # схему применяют и сборщик, и дашборд при запуске — по очереди, а не одновременно
         conn.execute("SELECT pg_advisory_xact_lock(4207731)")
         for f in files:

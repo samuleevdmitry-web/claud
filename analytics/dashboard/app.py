@@ -49,10 +49,17 @@ async def lifespan(_: FastAPI):
     не дожидаясь сборщика. Если базы ещё нет, страницы сами объяснят это."""
     try:
         with db.connect(load_settings().database_url) as conn:
-            db.apply_schema(conn)
+            # сборщик может держать таблицы долгой загрузкой: дашборд не ждёт его дольше 15 секунд — схему
+            # сборщик обновит сам, а страницы откроются сразу
+            db.apply_schema(conn, lock_timeout="15s")
+    except psycopg.errors.LockNotAvailable:
+        guard.log.warning("схема не обновлена при запуске: таблицы заняты сборщиком, он обновит её сам")
     except psycopg.OperationalError:
         pass
     yield
+
+
+PAGE_TIMEOUT_MS = 60_000  # один запрос страницы — не дольше минуты
 
 
 app = FastAPI(title="Аналитика", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -85,7 +92,7 @@ def render(request: Request, page: str, build: Callable[..., dict], site: int | 
     context: dict = {"page": page, "nav": NAV, "audiences": pages.AUDIENCES, "problems": guard.start()}
     template = f"{page}.html"
     try:
-        with db.connect(settings.database_url) as conn:
+        with db.connect(settings.database_url, PAGE_TIMEOUT_MS) as conn:
             f = pages.resolve_filters(conn, settings, site, month, aud, date.today())
             context["f"] = f
             if f is None and page != "status":
@@ -93,6 +100,12 @@ def render(request: Request, page: str, build: Callable[..., dict], site: int | 
                 template = "empty.html"
             else:
                 context.update(build(conn, settings, f, **kwargs) or {})
+    except psycopg.errors.QueryCanceled:
+        guard.log.exception("раздел %s: запрос дольше минуты", page)
+        context.update(error="Раздел не построен: запрос к базе выполнялся дольше минуты. Обычно так бывает, пока сборщик "
+                             "загружает большие файлы, — обновите страницу через пару минут; если повторяется — сообщите.",
+                       section_title=next((title for key, _, title, _ in NAV if key == page), None))
+        template = "empty.html"
     except psycopg.OperationalError as exc:
         context.update(error=f"Нет подключения к базе: {exc}")
         template = "empty.html"
@@ -139,7 +152,7 @@ def keyword(request: Request, site: int | None = None, month: str | None = None,
 @app.get("/keywords.csv")
 def keywords_csv(request: Request, site: int | None = None) -> Response:
     settings = load_settings()
-    with db.connect(settings.database_url) as conn:
+    with db.connect(settings.database_url, PAGE_TIMEOUT_MS) as conn:
         f = pages.resolve_filters(conn, settings, site, None, None, date.today())
         body = pages.keywords_csv(conn, settings, f, dict(request.query_params)) if f else "\ufeff"
     return Response(body, media_type="text/csv; charset=utf-8",
@@ -149,7 +162,7 @@ def keywords_csv(request: Request, site: int | None = None) -> Response:
 @app.get("/email/contacts.csv")
 def email_contacts_csv(site: int | None = None, month: str | None = None, kind: str = "active") -> Response:
     settings = load_settings()
-    with db.connect(settings.database_url) as conn:
+    with db.connect(settings.database_url, PAGE_TIMEOUT_MS) as conn:
         f = pages.resolve_filters(conn, settings, site, month, None, date.today())
         body = pages.contacts_csv(conn, settings, f, kind) if f else "\ufeff"
     name = f"email-{kind}-{f.month:%Y-%m}.csv" if f else "email.csv"

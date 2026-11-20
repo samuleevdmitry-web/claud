@@ -44,6 +44,8 @@ def start() -> list[Problem]:
 
 def describe(exc: BaseException) -> str:
     """Ошибка одной строкой: тип и первая строка текста."""
+    if isinstance(exc, psycopg.errors.QueryCanceled):
+        return "запрос к базе выполнялся дольше минуты (обновите страницу через пару минут; если повторяется — сообщите)"
     text = (str(exc).strip().splitlines() or [""])[0][:300]
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
@@ -62,6 +64,9 @@ def safe(title: str, build: Callable[[], T], default: T = None) -> T:
     блока, а всей страницы: такое исключение пропускается дальше."""
     try:
         return build()
+    except psycopg.errors.QueryCanceled as exc:  # долгий запрос — беда этого блока, а не связи с базой
+        _note(title, exc)
+        return default
     except psycopg.OperationalError:
         raise
     except Exception as exc:  # noqa: BLE001 — любой сбой блока остаётся в блоке

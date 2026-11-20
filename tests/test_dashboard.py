@@ -457,3 +457,21 @@ def test_staff_file_is_recognised(tmp_path):
     f = parse_file(tmp_path / "u.xlsx")
     assert f.kind == "staff" and f.staff[0].name == "Иванов Иван"
     assert f.staff[0].email_hash == privacy.email_hash("ivanov@oldos.ru") and f.staff[0].phone_hash
+
+
+@needs_db
+def test_slow_query_and_busy_schema_do_not_hang():
+    """Долгий запрос страницы прерывается и становится пометкой блока; занятая сборщиком схема не держит запуск."""
+    import psycopg
+
+    from analytics.dashboard import guard
+
+    problems = guard.start()
+    with db.connect(TEST_DATABASE_URL, statement_timeout_ms=100) as conn:
+        assert guard.safe("Тяжёлый блок", lambda: conn.execute("SELECT pg_sleep(1)").fetchone(), default="—") == "—"
+        assert conn.execute("SELECT 1").fetchone() == (1,)  # соединение после прерванного запроса работает
+    assert problems and "дольше минуты" in problems[0].error
+    with db.connect(TEST_DATABASE_URL) as holder, db.connect(TEST_DATABASE_URL) as conn, holder.transaction():
+        holder.execute("SELECT pg_advisory_xact_lock(4207731)")  # сборщик обновляет схему
+        with pytest.raises(psycopg.errors.LockNotAvailable):
+            db.apply_schema(conn, lock_timeout="200ms")
